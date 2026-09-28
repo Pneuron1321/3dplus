@@ -73,7 +73,7 @@ window.renderView = function (spec) {
   scene.updateMatrixWorld();
   (spec.anchors || []).forEach(([name, part, loc]) => {
     const v = new T.Vector3(...loc); model.parts[part].g.localToWorld(v); v.project(cam);
-    anchors[name] = [Math.round((v.x + 1) / 2 * w), Math.round((1 - v.y) / 2 * h)];
+    anchors[name] = [+((v.x + 1) / 2 * w).toFixed(2), +((1 - v.y) / 2 * h).toFixed(2)];
   });
   const out = document.createElement('canvas'); out.width = w; out.height = h;
   const g2 = out.getContext('2d'); g2.imageSmoothingEnabled = true; g2.imageSmoothingQuality = 'high';

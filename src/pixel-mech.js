@@ -1,15 +1,16 @@
 /* ============================================================================
-   PIXEL MECH v3 — модульная коллекционная фигурка из кирпичиков.
+   PIXEL MECH v5 — модульная коллекционная фигурка из кирпичиков.
    Генератор модели для three.js r128 (глобальный THREE).
-   Задание и целевые замеры: docs/PROMPT-v3.md; сверка с листом: tools/qa.py.
+   Задание и целевые замеры: docs/PROMPT-v3.md (голова), docs/PROMPT-v5.md (тело);
+   сверка: tools/qa.py (лист 1), tools/qa_body.py (тело по листу 2).
 
    Как устроено:
    • Каждая деталь — воксельная сетка со своим шагом клетки (обычный кирпич —
-     0.8 × h × 0.8, «макро»-блоки кулаков и груди — крупнее).
+     0.8 × h × 0.8, «макро»-блоки наручей и груди — крупнее).
    • Видимые клетки «кирпичатся»: соседние клетки одного класса сливаются в
      1×2…1×6 с перевязкой рядов, у каждого кирпича фаска и свой оттенок.
-   • Клетка может быть «скосом»: коробка, отсечённая плоскостями (срезанные
-     углы кулаков, скруглённая кромка ступней, скосы на шапке и плечах).
+   • Клетка может быть «скосом»: коробка, отсечённая плоскостями (рёбра груди,
+     наплечники и наручи, носок и задник кроссовок, скосы на шапке).
    • За каждым кирпичом стоит тёмная «подложка» — сквозь швы видна глубина.
    • Затенение в углах (AO) запекается в цвета вершин по заполненности
      соседних клеток — только внутри детали, чтобы разлёт оставался чистым.
@@ -18,7 +19,7 @@
    Всё одной детали сливается в одну сетку с цветами вершин.
 
    Координаты: x — вправо (от зрителя), y — вверх, z — к зрителю (лицо).
-   Единица: шаг шипа 0.8. Пол — y = 0. Высота до шипов рожек — 28.
+   Единица: шаг шипа 0.8. Пол — y = 0. Высота до шипов рожек — 31.1 (v5: голова выше на 3.5).
    ========================================================================== */
 (function (global) {
   'use strict';
@@ -29,8 +30,10 @@
     DG: '#565759', DG2: '#444547', GM: '#0f1012', BK: '#121214', SV: '#9ea3a8',
     YE: '#f6cd10', YE2: '#efc20c', YE3: '#f9d52c',
     O1: '#d06400', O2: '#f27400', O3: '#ee9010', O4: '#f39a12', O5: '#bf5a00', O6: '#ea7c06',
-    OT1: '#e06c00', OT2: '#cc5e00', OT3: '#ec7a04',
-    PU: '#8656ec', PU2: '#7444dc', PU3: '#9464f0'
+    PU: '#8656ec', PU2: '#7444dc', PU3: '#9464f0',
+    /* v5 — тело по листу 2 */
+    MG3: '#74787e', MG4: '#65696f', DG3: '#343432', BR: '#6a5d55', FG: '#646466',
+    SO1: '#f07928', SO2: '#e66e1c', SO3: '#f48a36', SY1: '#fdb635', SY2: '#f5aa2a', SY3: '#e0931e'
   };
 
   /* смеси: класс клетки → из чего выбирается цвет каждого кирпича */
@@ -42,18 +45,31 @@
     yellow: [['YE', 0.72], ['YE2', 0.16], ['YE3', 0.12]],
     purple: [['PU', 0.8], ['PU2', 0.12], ['PU3', 0.08]],
     dark: [['DG', 0.72], ['DG2', 0.28]],
-    darkMid: [['DG', 0.55], ['MG', 0.2], ['DG2', 0.25]],
-    beltMid: [['MG', 0.75], ['DG', 0.25]],
-    light: [['LG', 0.68], ['WH', 0.16], ['LG2', 0.16]],
-    topBand: [['LG2', 0.45], ['MG', 0.4], ['LG', 0.15]],
-    fist: [['WH', 0.5], ['WH2', 0.38], ['LG', 0.12]],
-    shin: [['MG2', 0.55], ['MG', 0.2], ['DG', 0.25]],
     ear: [['O1', 0.5], ['O5', 0.5]],
-    footBase: [['O4', 0.6], ['O3', 0.4]],
-    footMid: [['O1', 0.62], ['O6', 0.2], ['O5', 0.18]],
-    footTop: [['OT1', 0.45], ['OT3', 0.3], ['OT2', 0.25]],
-    bracket: [['O2', 0.5], ['O1', 0.3], ['O6', 0.2]],
-    techDG: [['DG', 1]]
+    techDG: [['DG', 1]],
+    /* тело v5 */
+    chest: [['WH', 0.55], ['WH2', 0.3], ['LG', 0.15]],
+    fist: [['WH', 0.5], ['WH2', 0.38], ['LG', 0.12]],
+    band: [['MG3', 0.7], ['MG', 0.3]],
+    abdSide: [['DG3', 0.6], ['DG2', 0.4]],
+    abdMid: [['MG3', 0.6], ['MG', 0.4]],
+    darkBand: [['DG2', 0.7], ['DG3', 0.3]],
+    pelvis: [['MG2', 0.4], ['DG', 0.4], ['MG3', 0.2]],
+    crotch: [['BR', 0.8], ['DG2', 0.2]],
+    knee: [['BK', 0.7], ['GM', 0.3]],
+    paulDark: [['DG2', 0.7], ['DG3', 0.3]],
+    gauntDark: [['MG3', 0.6], ['MG4', 0.4]],
+    gauntTop: [['MG', 0.6], ['MG3', 0.4]],
+    orangePlate: [['O2', 0.6], ['O6', 0.4]],
+    orangeBright: [['O4', 0.6], ['O3', 0.4]],
+    thigh: [['MG3', 0.6], ['MG4', 0.4]],
+    thighTop: [['LG2', 0.6], ['MG', 0.4]],
+    shin: [['MG', 0.5], ['MG3', 0.3], ['MG2', 0.2]],
+    upper: [['SO1', 0.55], ['SO2', 0.25], ['SO3', 0.2]],
+    sole: [['SY1', 0.7], ['SY2', 0.3]],
+    tread: [['SY3', 0.7], ['O4', 0.3]],
+    stripe: [['DG', 0.7], ['DG2', 0.3]],
+    bracket: [['O2', 0.6], ['O6', 0.4]]
   };
 
   function create(T, opts) {
@@ -556,16 +572,17 @@
     const root = new T.Group(); root.name = 'PixelMech';
 
     /* ============================================================
-       ГОЛОВА — узел у верха шеи (0, 17.0, 0). Замеры — сетка по листу (docs/PROMPT-v4.md).
+       ГОЛОВА — узел у верха шеи (0, 20.5, 0). Замеры — сетка по листу 1 (docs/PROMPT-v3.md, раздел 12).
        lico (блок с лицевой панелью), bokL/bokR (боковые плиты),
        shapka (череп-шапка с пришельцем), ochki (очки).
        ============================================================ */
-    const HEAD_Y = 17.0;
-    const W = y => y - HEAD_Y;                               // мировая высота → координаты головы
+    const LIFT = 3.5;                                        // v5: тело длиннее (лист 2) — голова выше на 3.5
+    const HEAD_Y = 17.0 + LIFT;
+    const W = y => y - 17.0;                                 // высоты головы — в координатах v4 (низ головы 17.0)
     const head = new T.Group(); head.name = 'golova'; head.position.set(0, HEAD_Y, 0); root.add(head);
     head.rotation.x = opts.headTilt == null ? 0 : +opts.headTilt;     // наклон головы вперёд (поза)
     const FACE_ROW = 0.512, FACE_ROWS = 13, FACE_Y0 = 0.2;
-    const CAP_Y = FACE_Y0 + FACE_ROWS * FACE_ROW;            // низ шапки: 23.86 в мире
+    const CAP_Y = FACE_Y0 + FACE_ROWS * FACE_ROW;            // низ шапки: 6.86 над низом головы
 
     /* ---- лицевой блок: 12 × 13 рядов по 0.512 × 12; спереди 2 клетки жёлтые;
             нижний ряд утоплен (подбородок ±3.6); под линзой — длинные кирпичи ---- */
@@ -804,9 +821,9 @@
     parts.ochki = { g: ochki, name: 'ochki' };
 
     /* ============================================================
-       ШЕЯ-ШТЫРЬ: воронёный ПВХ, воротник с винтами
+       ШЕЯ-ШТЫРЬ: воронёный ПВХ, воротник с винтами; входит в гнездо на верху груди
        ============================================================ */
-    const sheya = part('sheya', [0, 16.3, 0]);
+    const sheya = part('sheya', [0, 16.3 + LIFT, 0]);
     {
       const pb = sheya.bufs.plastic, mb = sheya.bufs.metal, gm = new T.Color('#0f1012').convertSRGBToLinear(), dk = LIN.BK;
       axial(pb, CYL_FINE, 0, -1.62, 0.1, [0, 1, 0], 0.86, 0.22, gm, true);    // нижний поясок
@@ -823,201 +840,336 @@
     sheya.finish(); root.add(sheya.g); parts.sheya = sheya;
 
     /* ============================================================
-       КОРПУС (замеры с листа): таз ±4.1 (8.35…10.3) с гнёздами бёдер и выступом
-       промежности, тёмный пояс (10.3…11.3), грудь 6 × 2 макро-блока ±4.74 (11.3…14.8):
-       4 крупных шипа спереди, белая середина 2 × 2, крайние столбцы со скосом
-       и шипами на скосе; верхний ряд (14.8…15.4) и верх с шипами (15.4…16.2);
-       тёмные плечевые блоки с чёрными штырями, светлая ось к руке.
+       КОРПУС v5 (лист 2, «атлетичный»): грудь ±4.75 × 15.1…19.5 × ±3.0 — белая кладка
+       со скошенными передними рёбрами, наклонными «шевронами» и швом, тёмные верхние углы;
+       серый пояс 14.0…15.1, тёмный 13.2…14.0; живот сужается до ±3.35 (12.3…13.2).
        ============================================================ */
     const korpus = part('korpus');
     {
       const P = korpus.bufs.plastic;
-      /* таз: ±3.7, y 8.3…10.4, спереди круглые гнёзда бёдер, по углам чёрные штифты; промежность ниже, до 7.6 */
-      new Vox({ cell: [0.925, 0.683, 0.8], at: [-3.7, 8.3, -2.8], maxLen: 3, merge: 0.5, salt: 31,
-        clip: c => (c.y === 0 && (c.x === 0 || c.x === 7) && (c.z === 0 || c.z === 6) ? CUT.corner(c.x ? 1 : -1, -1, c.z ? 1 : -1, 1.4) : null)
-      }).box(0, 8, 0, 3, 0, 7, (x, y, z) => (z === 6 && (x === 3 || x === 4) ? 'darkMid' : 'dark')).build(P);
-      new Vox({ cell: [0.75, 0.7, 0.8], at: [-1.5, 7.6, -2.0], maxLen: 4, salt: 32 })
-        .box(0, 4, 0, 1, 0, 5, 'darkMid').build(P);
-      [-1, 1].forEach(s => {
-        socket(korpus, s * 3.0, 9.6, 2.811, [0, 0, 1], LIN.DG2, 0.5);                           // гнёзда бёдер
-        axial(P, CYL, s * 3.45, 10.35, 2.4, [0, 1, 0], 0.17, 0.3, LIN.BK, true);                // чёрные штифты по углам
-        magnet(korpus, s * 3.3, 8.3, 0, [0, -1, 0]);
-      });
-      /* пояс под грудью: тёмный ряд 10.35…10.9 на всю ширину груди */
-      new Vox({ cell: [S, 0.55, S], at: [-4.8, 10.35, -3.2], maxLen: 4, merge: 0.5, salt: 33 })
-        .box(0, 12, 0, 1, 0, 8, 'darkMid').build(P);
-      /* грудь: 6 × 2 × 4 макро-блоков 1.58 × 1.8 × 1.55 (10.9…14.5) */
-      const CX = [1.58, 1.8, 1.55], CA = [-4.74, 10.9, -3.1];
+      /* грудь: 10 × 5 × 6 клеток 0.95 × 0.88 × 1.0 */
+      const GX = [0.95, 0.88, 1.0], GA = [-4.75, 15.1, -3.0];
+      const edge = c => Math.min(c.x, 9 - c.x);                // 0 — крайний столбец
       new Vox({
-        cell: CX, at: CA, maxLen: 1, gap: 0.03, bev: 0.06, salt: 35,
+        cell: GX, at: GA, maxLen: 3, merge: 0.4, salt: 35, bev: 0.045,
+        studTone: c => (c.cls === 'DG' ? 'DG2' : null),
         studs: (c, f) => {
-          if (c.cls === 'WH') return false;
-          if (f === 4) return (c.x === 1 || c.x === 4) ? 0.52 : false;
-          if (f === 0 || f === 1) return (c.z === 1 || c.z === 2) ? 0.44 : false;
-          if (f === 5) return (c.x === 1 || c.x === 4) ? 0.48 : false;
+          if (f === 4) return (c.y === 3 && edge(c) >= 1 && edge(c) <= 2) || (c.y === 1 && edge(c) === 1) ? 0.3 : false;
+          if (f === 2) return c.cls === 'DG' ? (c.z === 3 || c.z === 4 ? 0.3 : false) : (c.z >= 1 && c.z <= 4 && (edge(c) === 1 || edge(c) === 3) ? 0.28 : false);
+          if (f === 5) return (c.y === 1 || c.y === 3) && edge(c) >= 1 && (c.x & 1) === 0 ? 0.3 : false;
           return false;
         },
-        clip: c => ((c.x === 0 || c.x === 5) && c.z === 3 ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, 0, 1], 0.55) : null)
-      }).box(0, 6, 0, 2, 0, 4, (x, y, z) => (z === 3 && (x === 2 || x === 3) ? 'WH' : 'light')).build(P);
-      [0, 5].forEach(xi => [0, 1].forEach(yi => {                                             // шипы на скошенных углах
-        const sx = xi ? 1 : -1, hx = CX[0] / 2 - 0.015, hz = CX[2] / 2 - 0.015, u = 0.275;
-        const cx = CA[0] + (xi + 0.5) * CX[0], cy = CA[1] + (yi + 0.5) * CX[1], cz = CA[2] + 3.5 * CX[2];
-        studOn(P, cx + sx * u * hx, cy, cz + u * hz, [sx / hx, 0, 1 / hz], 0.44, tone('LG'));
-      }));
-      /* верхний ряд груди 14.5…15.1: спереди белые кирпичи */
-      new Vox({
-        cell: [S, 0.6, S], at: [-4.8, 14.5, -3.2], maxLen: 2, merge: 0.3, salt: 36,
-        clip: c => ((c.x === 0 || c.x === 11) && (c.z === 0 || c.z === 7) ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, 0, c.z ? 1 : -1], 0.7) : null)
-      }).box(0, 12, 0, 1, 0, 8, (x, y, z) => (z === 7 && x >= 2 && x <= 9 ? 'WH' : 'light')).build(P);
-      /* верх 15.1…15.7: шипы по периметру, передняя кромка скошена */
-      new Vox({
-        cell: [S, 0.6, S], at: [-4.8, 15.1, -3.2], maxLen: 4, merge: 0.45, salt: 37,
-        studs: (c, f) => {
-          if (f !== 2) return false;
-          const x = -4.8 + (c.x + 0.5) * S, z = -3.2 + (c.z + 0.5) * S;
-          return c.z < 7 && Math.hypot(x, z - 0.1) > 1.9;
-        },
-        clip: c => {
-          const sx = c.x === 0 ? -1 : (c.x === 11 ? 1 : 0);
-          if (sx && (c.z === 0 || c.z === 7)) return CUT.corner(sx, 1, c.z ? 1 : -1, 1.45);
-          if (c.z === 7) return CUT.edge([0, 0, 1], [0, 1, 0], 1.1);
-          if (sx) return CUT.edge([sx, 0, 0], [0, 1, 0], 1.2);
+        clip: c => {                                     // плечи груди: верхние углы уходят внутрь (как на листе)
+          const sx = c.x === 0 ? -1 : (c.x === 9 ? 1 : 0), s1 = c.x === 1 ? -1 : (c.x === 8 ? 1 : 0);
+          if (s1 && c.y === 4) return c.z === 5 ? CUT.corner(s1, 1, 1, 1.3) : CUT.edge([s1, 0, 0], [0, 1, 0], 1.0);
+          if (sx && c.z === 5) return CUT.edge([sx, 0, 0], [0, 0, 1], 0.62);
+          if (c.y === 4 && c.z === 5) return CUT.edge([0, 1, 0], [0, 0, 1], 1.25);
+          if (sx && c.z === 0) return CUT.edge([sx, 0, 0], [0, 0, -1], 1.0);
           return null;
         }
-      }).box(0, 12, 0, 1, 0, 8, (x, y, z) => (z === 0 ? 'headBack' : 'topBand')).build(P);
-      new Vox({ cell: [S, 0.32, S], at: [-1.6, 15.7, -1.5], maxLen: 4, salt: 39,                 // гнездо шеи
+      }).box(0, 10, 0, 5, 0, 6, (x, y, z) => {
+        if (z === 5 && x >= 3 && x <= 6) return 'WH';
+        if (z === 0) return 'headBack';
+        return 'chest';
+      }).del(c => c.y >= 3 && (c.x === 0 || c.x === 9)).build(P);
+      /* тёмные угловые «кнопки» на плечах груди с сизыми шипами */
+      [-1, 1].forEach(sx => new Vox({ cell: [0.6, 0.45, 0.8], at: [sx < 0 ? -4.55 : 3.95, 17.74, -0.8], maxLen: 1, salt: 30 + sx,
+        studTone: () => 'DG2', studs: (c, f) => f === 2 ? 0.26 : false
+      }).box(0, 1, 0, 1, 0, 2, 'DG').build(P));
+      /* шипы на скошенных рёбрах груди (рядом с краем, как на листе: ±4.3) */
+      [-1, 1].forEach(sx => [1].forEach(yi => {
+        const hx = GX[0] / 2 - 0.011, hz = GX[2] / 2 - 0.011, u = 0.31;
+        const cx = sx * (4.75 - GX[0] / 2), cy = GA[1] + (yi + 0.5) * GX[1], cz = GA[2] + 5.5 * GX[2];
+        studOn(P, cx + sx * u * hx, cy, cz + u * hz, [sx / hx, 0, 1 / hz], 0.3, tone('WH'));
+      }));
+      /* «шевроны»: наклонные светло-серые пластины от края к середине, на каждой два шипа */
+      [-1, 1].forEach(s => {
+        const x0 = s * 4.1, y0 = 17.85, x1 = s * 2.0, y1 = 16.05;
+        const L = Math.hypot(x1 - x0, y1 - y0), ang = Math.atan2(y1 - y0, x1 - x0);
+        const q = new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 0, 1), ang);
+        const mm = new T.Matrix4().compose(new T.Vector3((x0 + x1) / 2, (y0 + y1) / 2, 3.07), q, new T.Vector3(1, 1, 1));
+        bevelBox(P, 0, 0, 0, L / 2, 0.3, 0.09, 0.05, tone('LG', 0.02), 63 - 32, mm);
+        P.occ.addBox(Math.min(x0, x1), y1 - 0.3, 2.98, Math.max(x0, x1), y0 + 0.3, 3.16);
+        [0.32, 0.8].forEach(t => studOn(P, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, 3.16, [0, 0, 1], 0.27, tone('LG', 0.02)));
+      });
+      bevelBox(P, 0, 17.02, 3.0, 2.15, 0.045, 0.02, 0.012, LIN.BK.clone(), 63 - 32, null, true);    // шов поперёк груди
+      /* серый пояс 14.0…15.1: тёмные шипы по краям */
+      new Vox({ cell: [0.92, 1.1, 0.725], at: [-4.6, 14.0, -2.9], maxLen: 3, merge: 0.45, salt: 33,
+        studTone: () => 'DG',
+        studs: (c, f) => (f === 4 && (c.x === 0 || c.x === 9)) ? 0.3 : (f === 5 && (c.x & 1) ? 0.3 : false)
+      }).box(0, 10, 0, 1, 0, 8, 'band').build(P);
+      /* тёмный пояс 13.2…14.0: светлые шипы-точки по краям */
+      new Vox({ cell: [0.86, 0.8, 0.7], at: [-4.3, 13.2, -2.8], maxLen: 3, merge: 0.45, salt: 34,
+        studTone: () => 'LG2',
+        studs: (c, f) => (f === 4 && (c.x === 0 || c.x === 9)) ? 0.19 : false
+      }).box(0, 10, 0, 1, 0, 8, 'darkBand').build(P);
+      /* живот ±3.35 (12.3…13.2): бока тёмные, середина средне-серая, низ скруглён к тазу */
+      new Vox({ cell: [0.67, 0.45, 0.8], at: [-3.35, 12.3, -2.4], maxLen: 3, merge: 0.4, salt: 38,
+        clip: c => (c.y === 0 && (c.x === 0 || c.x === 9) ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, -1, 0], 0.8) : null)
+      }).box(0, 10, 0, 2, 0, 6, x => (x >= 3 && x <= 6 ? 'abdMid' : 'abdSide')).build(P);
+      /* гнездо шеи наверху груди */
+      new Vox({ cell: [S, 0.3, S], at: [-1.6, 19.5, -1.5], maxLen: 4, salt: 39,
         studs: (c, f) => f === 2 && (c.x === 0 || c.x === 3) && (c.z === 0 || c.z === 3) })
         .box(0, 4, 0, 1, 0, 4, 'dark').build(P);
-      /* плечевые блоки: x 5.3…8.3, y 12.3…15.3, с чёрными штырями сверху */
       [-1, 1].forEach(s => {
-        new Vox({
-          cell: [0.75, 0.75, 0.8], at: [s < 0 ? -8.3 : 5.3, 12.3, -1.6], maxLen: 3, merge: 0.45, salt: 41 + s,
-          clip: c => (c.y === 3 && (s < 0 ? c.x === 0 : c.x === 3) ? CUT.edge([s, 0, 0], [0, 1, 0], 0.9) : null)
-        }).box(0, 4, 0, 4, 0, 4, (x, y) => (y === 3 ? 'darkMid' : 'dark')).build(P);
-        axial(P, CYL, s * 6.0, 15.3, 0, [0, 1, 0], 0.32, 0.45, LIN.BK.clone().multiplyScalar(1.3), true);
-        axial(P, CYL, s * 6.0, 15.73, 0, [0, 1, 0], 0.2, 0.08, LIN.BK, true);
-        axial(P, CYL, s * 7.95, 15.0, 0, [s * 0.5, 0.87, 0], 0.26, 0.42, LIN.BK.clone().multiplyScalar(1.3), true);
-        socket(korpus, s * 7.55, 13.4, 1.611, [0, 0, 1], LIN.DG2, 0.34);
-        socket(korpus, s * 6.1, 14.5, 1.611, [0, 0, 1], LIN.DG2, 0.26);
-        rod(korpus, s * 4.74, 14.3, 0.6, [s, 0, 0], 0.6);                                      // светлая ось к плечу
-        magnet(korpus, s * 5.3, 14.0, -0.8, [s, 0, 0]);
+        axial(P, CYL, s * 4.75, 18.2, 0, [s, 0, 0], 0.5, 0.3, LIN.BK.clone().multiplyScalar(1.4), true);   // плечевой шарнир
+        magnet(korpus, s * 4.75, 17.2, -1.0, [s, 0, 0]);
+        magnet(korpus, s * 1.2, 12.3, 0, [0, -1, 0]);
       });
     }
     korpus.finish(); root.add(korpus.g); parts.korpus = korpus;
 
     /* ============================================================
-       РУКИ: кулак-блок 3 × 5 × 3 макро-клеток 1.4 (4.2 × 7.0 × 4.2),
-       на каждой наружной клетке один крупный шип, нижний ряд — тёмные костяшки;
-       поза подобрана по силуэту листа (крепится под плечевым блоком)
+       ТАЗ (отдельный модуль, как в разлёте листа 2): блок ±2.0 (11.3…12.3),
+       промежность ±1.0 до 9.9, тёмные узлы бёдер по бокам
        ============================================================ */
-    const ARM_POSE = opts.armPose || { pos: [2.6, -1.8, 0.35], rot: [0.4, 0.05, 0.45], tilt: 0 };
+    const taz = part('taz');
+    {
+      const P = taz.bufs.plastic;
+      new Vox({ cell: [0.8, 0.5, 0.8], at: [-2.0, 11.3, -2.0], maxLen: 3, merge: 0.5, salt: 45,
+        clip: c => (c.y === 0 && (c.x === 0 || c.x === 4) && (c.z === 0 || c.z === 4) ? CUT.corner(c.x ? 1 : -1, -1, c.z ? 1 : -1, 1.4) : null)
+      }).box(0, 5, 0, 2, 0, 5, (x, y, z) => (z === 4 && x === 2 ? 'abdMid' : 'pelvis')).build(P);
+      new Vox({ cell: [0.667, 0.467, 0.8], at: [-1.0, 9.9, -1.2], maxLen: 3, salt: 46,
+        clip: c => {
+          if (c.y !== 0) return null;
+          if (c.x === 0 || c.x === 2) return CUT.edge([c.x ? 1 : -1, 0, 0], [0, -1, 0], 0.9);
+          if (c.z === 2) return CUT.edge([0, 0, 1], [0, -1, 0], 1.0);
+          return null;
+        }
+      }).box(0, 3, 0, 3, 0, 3, 'crotch').build(P);
+      [-1, 1].forEach(s => {
+        axial(P, CYL, s * 2.1, 11.1, 0, [s, 0, 0], 0.42, 0.12, LIN.BK.clone().multiplyScalar(1.5), true);
+        magnet(taz, s * 2.12, 11.1, 0, [s, 0, 0]);
+      });
+      magnet(taz, 0, 12.3, 0.8, [0, 1, 0]);
+    }
+    taz.finish(); root.add(taz.g); parts.taz = taz;
+
+    /* ============================================================
+       РУКИ v5: наплечник (тёмная внутренняя половина с крупными шипами, белая наружная,
+       оранжевая кромка сзади), тёмный локоть, наруч 4.6 × 4.4 × 4.0 со столбцами серых
+       шипов спереди, оранжевой вставкой и тёмным узлом снаружи; кулак — три тёмных пальца.
+       Узел плеча (±5.3, 18.2); наруч — подгруппа у локтя (поза).
+       ============================================================ */
+    const ARM = Object.assign({ swing: 0.0, pad: 0.15, elbow: 0.0, fwd: 0.08 }, opts.armPose || {});
     function arm(s) {
       const name = s < 0 ? 'rukaL' : 'rukaR';
-      const p = part(name, [s * 6.8, 12.3, 0]);
-      const fist = subPart(p.g, name + '_kulak', [s * ARM_POSE.pos[0], ARM_POSE.pos[1], ARM_POSE.pos[2]],
-        [ARM_POSE.rot[0], s * ARM_POSE.rot[1], s * ARM_POSE.rot[2]]);
-      const outF = s < 0 ? 1 : 0, inF = s < 0 ? 0 : 1;
-      const FR = +(opts.fistRows || 5), FC = +(opts.fistCell || 1.4), FH = FR * FC / 2;
-      const E = c => (c.x === 0 || c.x === 2) + (c.y === 0 || c.y === FR - 1) + (c.z === 0 || c.z === 2);
+      const p = part(name, [s * 5.3, 18.2, 0]);
+      const P = p.bufs.plastic, out = s < 0 ? 1 : 0;
+      /* наплечник: 6 × 5 × 4 клеток 0.667 × 0.7 × 0.95 (x 5.2…9.2, y 16.1…19.6), наружу чуть опущен (ARM.pad) */
+      const PX = 4.0 / 6, oxP = c => (s < 0 ? 5 - c.x : c.x);
       new Vox({
-        cell: [FC, FC, FC], at: [-1.5 * FC, -FH, -1.5 * FC], maxLen: 1, gap: 0.036, bev: 0.08, salt: 55 + s,
-        bevFor: c => (E(c) >= 2 ? 0.16 : 0),
+        cell: [PX, 0.7, 0.95], at: [s < 0 ? -3.9 : -0.1, -2.1, -1.9], maxLen: 2, merge: 0.4, salt: 51 + s, bev: 0.05,
+        studs: (c, f) => {
+          const o = oxP(c);
+          if (f === 4) return (o === 1 && (c.y === 2 || c.y === 3)) ? 0.4 : (o === 4 && (c.y === 1 || c.y === 3) ? 0.3 : false);
+          if (f === out) return c.y >= 1 && c.y <= 3 && (c.z === 1 || c.z === 2) ? 0.3 : false;
+          if (f === 2) return (o === 0 || o === 2) && (c.z === 1 || c.z === 2) ? 0.3 : (o === 4 && (c.z === 1 || c.z === 2) ? 0.28 : false);
+          return false;
+        },
+        clip: c => {                                   // белая половина сверху скруглена ниже тёмной
+          const o = oxP(c);
+          if (o === 4 && c.y === 4) return CUT.edge([s, 0, 0], [0, 1, 0], 1.0);
+          if (o === 5 && c.y === 3) return (c.z === 0 || c.z === 3) ? CUT.corner(s, 1, c.z ? 1 : -1, 1.5) : CUT.edge([s, 0, 0], [0, 1, 0], 1.0);
+          if (o === 5 && c.y === 0) return CUT.edge([s, 0, 0], [0, -1, 0], 1.0);
+          if (o === 4 && c.y === 3 && c.z === 3) return CUT.edge([0, 1, 0], [0, 0, 1], 1.15);
+          return null;
+        }
+      }).box(0, 6, 0, 5, 0, 4, (x, y, z) => {
+        const o = s < 0 ? 5 - x : x;
+        if (o === 5 && z === 0 && y >= 1 && y <= 3) return 'orangePlate';
+        if (y === 0 && o >= 3) return 'LG';
+        return o <= 2 ? 'paulDark' : 'fist';
+      }).del(c => c.y === 4 && oxP(c) === 5).build(P);
+      /* локоть: тёмный блок с осью под наплечником */
+      new Vox({ cell: [0.6, 0.5, 0.7], at: [s < 0 ? -2.9 : 1.7, -2.6, -0.7], maxLen: 2, salt: 53 + s })
+        .box(0, 2, 0, 2, 0, 2, 'knee').build(P);
+      axial(p.bufs.metal, CYL, s * 1.65, -2.1, 0, [s, 0, 0], 0.2, 1.35, LIN.SV);
+      /* наруч — подгруппа у локтя (наклон наплечника компенсирован — наруч висит прямо) */
+      const naruch = subPart(p.g, name + '_naruch', [s * 2.3, -2.1, 0], [-ARM.fwd, 0, s * (ARM.pad + ARM.elbow)]);
+      const NP = naruch.bufs.plastic, oxG = c => (s < 0 ? 4 - c.x : c.x);
+      const GW = 4.0, G0 = s < 0 ? -3.05 : -0.95, GY = -4.6;
+      const E = c => (oxG(c) === 0 || oxG(c) === 4) + (c.y === 0 || c.y === 4) + (c.z === 0 || c.z === 3);
+      new Vox({
+        cell: [GW / 5, 0.88, 1.0], at: [G0, GY, -2.0], maxLen: 2, merge: 0.35, gap: 0.03, bev: 0.06, salt: 55 + s,
+        bevFor: c => (E(c) >= 2 ? 0.14 : 0),
         clip: c => (E(c) === 3 ? CUT.corner(c.x ? 1 : -1, c.y ? 1 : -1, c.z ? 1 : -1, 1.9) : null),
         studs: (c, f) => {
-          if (c.cls === 'dark' || f === 3) return false;
-          if (f === 4 || f === outF || f === 2) return 0.46;
-          if (f === 5) return ((c.x + c.y) & 1) === 0 ? 0.46 : false;
-          if (f === inF) return ((c.y + c.z) & 1) === 1 ? 0.44 : false;
+          const o = oxG(c);
+          if (f === 4) return (o === 1 || o === 2) && c.y >= 1 && c.y <= 3 ? 0.4 : (o === 4 && (c.y === 1 || c.y === 3) ? 0.3 : false);
+          if (f === out) return (c.y === 1 || c.y === 4) && (c.z === 1 || c.z === 2) ? 0.3 : false;
+          if (f === 5) return c.y >= 1 && c.y <= 3 && ((o + c.y) & 1) === 0 ? 0.3 : false;
           return false;
         }
-      }).box(0, 3, 0, FR, 0, 3, (x, y) => (y === 0 ? 'dark' : 'fist')).build(fist.bufs.plastic);
-      axial(fist.bufs.metal, CYL, 0, FH, 0, [0, 1, 0], 0.42, 0.3, LIN.GM);            // штифт к плечу
-      p.fist = fist.finish();
-      p.g.rotation.z = -s * ARM_POSE.tilt;
+      }).box(0, 5, 0, 5, 0, 4, (x, y, z) => {
+        const o = s < 0 ? 4 - x : x;
+        if (y === 4) return 'gauntTop';
+        return o <= 2 ? 'gauntDark' : 'fist';
+      }).build(NP);
+      /* оранжевая накладка снаружи (выступает — видна и спереди полоской), на ней тёмная ступица */
+      const ox0 = s < 0 ? G0 - 0.3 : G0 + GW;
+      new Vox({ cell: [0.3, 0.62, 0.7], at: [ox0, GY + 1.64, -1.05], maxLen: 1, salt: 57 + s,
+        clip: c => (c.z === 2 ? CUT.edge([s, 0, 0], [0, 0, 1], 1.0) : (c.z === 0 ? CUT.edge([s, 0, 0], [0, 0, -1], 1.2) : null))
+      }).box(0, 1, 0, 2, 0, 3, 'orangeBright').build(NP);
+      const hx = s * (s < 0 ? -G0 : G0 + GW) + s * 0.312;
+      axial(naruch.bufs.metal, CYL_FINE, hx, GY + 3 * 0.88, 0, [s, 0, 0], 0.66, 0.16, LIN.DG2);
+      axial(naruch.bufs.metal, CYL_FINE, hx + s * 0.16, GY + 3 * 0.88, 0, [s, 0, 0], 0.42, 0.14, LIN.GM);
+      axial(naruch.bufs.metal, HEX, hx + s * 0.3, GY + 3 * 0.88, 0, [s, 0, 0], 0.16, 0.04, LIN.BK);
+      /* кулак: три пальца и большой палец изнутри (y 9.9…10.9 в мире) */
+      const cxg = G0 + GW / 2, fcol = tone('FG');
+      [-0.7, 0, 0.7].forEach((dx, i) => {
+        const x = cxg + dx, c = fcol.clone().multiplyScalar(0.94 + 0.06 * i);
+        bevelBox(NP, x, GY - 0.65, 0.25, 0.32, 0.65, 0.95, 0.12, c, 63 - 4);
+        NP.occ.addBox(x - 0.32, GY - 1.3, -0.7, x + 0.32, GY, 1.2);
+      });
+      bevelBox(NP, cxg - s * 1.25, GY - 0.35, 0.9, 0.26, 0.4, 0.42, 0.1, fcol, 63 - 4);
+      axial(naruch.bufs.metal, CYL, cxg - s * 0.6, GY + 4.4, 0, [0, 1, 0], 0.4, 0.3, LIN.GM);   // штифт к локтю
+      p.naruch = naruch.finish();
+      p.g.rotation.z = s * (ARM.swing - ARM.pad);
       p.finish(); root.add(p.g); parts[name] = p;
     }
     arm(-1); arm(1);
 
     /* ============================================================
-       НОГИ: один наклонный блок (верх тёмный, дальше средне-серая мелкая кладка),
-       3 × 4.2 × 3, ось бедра наружу; ось голеностопа проходит сквозь низ голени
-       и наклонена вместе с ней (наружный болт выше внутреннего, как на листе)
+       НОГИ v5: бедро 3.2 × 4.2 × 3.0 (светлый верх, 2 шипа вперёд, оранжевая пластина
+       снаружи, тёмный узел с болтом внутрь), тёмное колено с осью и оранжевым кольцом,
+       голень — подгруппа у колена, отведена наружу (ступни шире бёдер, как на листе 2)
        ============================================================ */
-    const LEG_TILT = 0.2;
+    const LEG = Object.assign({ hipX: 3.7, shin: 0.12, toeOut: 0.35 }, opts.legPose || {});
+    const HIP_Y = 11.1, KNEE_Y = -4.1;
+    const ANKLE = 2.1;                                         // ось голеностопа ниже колена
+    const ankle = s => [s * (LEG.hipX + Math.sin(LEG.shin) * ANKLE), HIP_Y + KNEE_Y - Math.cos(LEG.shin) * ANKLE];
     function leg(s) {
       const name = s < 0 ? 'nogaL' : 'nogaR';
-      const p = part(name, [s * 4.15, 8.6, 0]);
-      new Vox({ cell: [0.85, 0.42, 0.75], at: [-1.7, -4.62, -1.5], maxLen: 3, merge: 0.35, salt: 65 + s,
-        clip: c => (c.y === 10 && (c.z === 0 || c.z === 3) && (s < 0 ? c.x === 0 : c.x === 3) ? CUT.corner(s, 1, c.z ? 1 : -1, 1.5) : null)
-      }).box(0, 4, 0, 11, 0, 4, (x, y) => (y >= 9 ? 'dark' : (y === 0 ? 'darkMid' : 'shin'))).build(p.bufs.plastic);
-      bolt(p, s * 1.71, -0.9, 0, [s, 0, 0], 0.9);                                        // ось бедра
-      axial(p.bufs.metal, CYL, -s * 2.75, -3.45, 0, [s, 0, 0], 0.17, 5.5, LIN.SV);        // ось голеностопа
-      bolt(p, s * 2.75, -3.45, 0, [s, 0, 0], 1.05);
-      bolt(p, -s * 2.75, -3.45, 0, [-s, 0, 0], 1.05);
-      [-0.8, 0.8].forEach(z => magnet(p, 0, 0, z, [0, 1, 0]));
-      p.g.rotation.z = s * LEG_TILT;
+      const p = part(name, [s * LEG.hipX, HIP_Y, 0]);
+      const P = p.bufs.plastic;
+      const ox = c => (s < 0 ? 3 - c.x : c.x);
+      /* бедро 3.6 × 3.4 × 3.0 (7.9…11.3), наружный верхний угол скруглён */
+      new Vox({ cell: [0.9, 3.4 / 6, 0.75], at: [-1.8, -3.2, -1.5], maxLen: 2, merge: 0.4, salt: 61 + s,
+        studTone: c => (c.y === 5 ? 'DG2' : null),
+        studs: (c, f) => {
+          if (f === 4) return c.y === 4 && (c.x === 1 || c.x === 2) ? 0.32 : false;
+          if (f === 2) return (c.z === 1 || c.z === 2) && (ox(c) === 1 || ox(c) === 2) ? 0.3 : false;
+          if (f === 5) return c.y === 3 && (c.x === 1 || c.x === 2) ? 0.3 : false;
+          return false;
+        },
+        clip: c => {
+          if (c.y === 5 && ox(c) === 2) return c.z === 3 ? CUT.corner(s, 1, 1, 1.2) : CUT.edge([s, 0, 0], [0, 1, 0], 1.0);
+          if (c.y === 4 && ox(c) === 3) return c.z === 3 ? CUT.corner(s, 1, 1, 1.2) : CUT.edge([s, 0, 0], [0, 1, 0], 1.0);
+          if (c.y === 5 && c.z === 3) return CUT.edge([0, 1, 0], [0, 0, 1], 1.1);
+          if (c.y === 0 && (c.z === 0 || c.z === 3) && (c.x === 0 || c.x === 3)) return CUT.corner(c.x ? 1 : -1, -1, c.z ? 1 : -1, 1.5);
+          return null;
+        }
+      }).box(0, 4, 0, 6, 0, 4, (x, y) => (y === 5 ? 'thighTop' : 'thigh')).del(c => c.y === 5 && ox(c) === 3).build(P);
+      /* оранжевая пластина на внешней стороне (8.8…10.5) */
+      new Vox({ cell: [0.34, 0.56, 0.75], at: [s < 0 ? -2.14 : 1.8, -2.3, -1.125], maxLen: 1, salt: 63 + s,
+        clip: c => (c.z === 2 ? CUT.edge([s, 0, 0], [0, 0, 1], 0.9) : (c.y === 2 ? CUT.edge([s, 0, 0], [0, 1, 0], 1.0) : null))
+      }).box(0, 1, 0, 3, 0, 3, 'orangeBright').build(P);
+      /* узел изнутри: тёмная ступица и крупный болт-ось */
+      axial(P, CYL_FINE, -s * 1.8, -2.2, 0.2, [-s, 0, 0], 0.62, 0.22, LIN.DG2.clone().multiplyScalar(0.8), true);
+      bolt(p, -s * 2.02, -2.2, 0.2, [-s, 0, 0], 1.25);
+      /* наколенник 7.3…8.0 (серый) и тёмный шарнир 6.7…7.3 с осью, снаружи оранжевое кольцо с болтом */
+      new Vox({ cell: [2.3 / 3, 0.3, 0.733], at: [-1.15, -3.8, -1.1], maxLen: 3, salt: 66 + s,
+        clip: c => (c.y === 1 && c.z === 2 ? CUT.edge([0, 1, 0], [0, 0, 1], 1.1) : null)
+      }).box(0, 3, 0, 2, 0, 3, 'shin').build(P);
+      new Vox({ cell: [0.66, 0.3, 0.66], at: [-0.99, KNEE_Y - 0.3, -0.99], maxLen: 3, salt: 64 + s })
+        .box(0, 3, 0, 2, 0, 3, 'knee').build(P);
+      axial(p.bufs.metal, CYL, -s * 1.25, KNEE_Y, 0, [s, 0, 0], 0.18, 2.5, LIN.SV);
+      socket(p, s * 0.991, KNEE_Y, 0, [s, 0, 0], LIN.O2, 0.52);
+      bolt(p, s * 1.13, KNEE_Y, 0, [s, 0, 0], 0.85);
+      /* голень: подгруппа у колена, мелкая серая кладка 2.6 × 4.4 × 2.6, тёмный верх */
+      const golen = subPart(p.g, name + '_golen', [0, KNEE_Y, 0], [0, 0, s * LEG.shin]);
+      new Vox({ cell: [0.7, 0.4, 0.7], at: [-1.4, -4.8, -1.4], maxLen: 3, merge: 0.35, salt: 65 + s,
+        clip: c => (c.y === 10 && (c.x === 0 || c.x === 3) && (c.z === 0 || c.z === 3) ? CUT.corner(c.x ? 1 : -1, 1, c.z ? 1 : -1, 1.5) : null)
+      }).box(0, 4, 0, 11, 0, 4, (x, y) => (y === 10 ? 'dark' : 'shin')).build(golen.bufs.plastic);
+      axial(golen.bufs.metal, CYL, -1.55, -ANKLE, 0, [1, 0, 0], 0.17, 3.1, LIN.SV);          // ось голеностопа
+      [-0.8, 0.8].forEach(z => magnet(golen, 0, -4.8, z, [0, -1, 0]));
+      p.golen = golen.finish();
+      [-0.8, 0.8].forEach(z => magnet(p, 0, 0.4, z, [0, 1, 0]));
       p.finish(); root.add(p.g); parts[name] = p;
     }
     leg(-1); leg(1);
 
     /* ============================================================
-       СТУПНИ 7 × 13 (ширина 5.8, центр ±5.2):
-       основание 0…1.65 — по центру два высоких жёлто-оранжевых кирпича, по бокам стопки плит,
-       средний ярус 1.65…2.45 — две плиты; верхний 2.45…3.5 — ряд кирпичей со скруглённым
-       носком; боковые ступени 3.5…4.4 спереди; вилка голеностопа сзади; нижние болты.
+       СТУПНИ v5 — спортивные: 7 × 10 шипов (5.6 × 8.0), основной объём до 2.5.
+       Подошва 0…1.0 (тёмный протектор + жёлтый борт, носок приподнят, пятка скошена),
+       контрастная полоса 1.0…1.3, верх 1.3…2.5 с носком-клином и «шнуровкой» из шипов,
+       задник до 3.3, стойки голеностопа по бокам голени до 4.5 с осевыми болтами.
        ============================================================ */
     function foot(s) {
       const name = s < 0 ? 'stupnyaL' : 'stupnyaR';
       const p = part(name);
       const P = p.bufs.plastic;
-      const FL = +(opts.footLen || 13);                          // длина ступни в шипах
-      const cx = s * 5.2, X0 = cx - 2.905, Z0 = -4.0;
-      new Vox({ cell: [1.45, 1.45, S], at: [cx - 1.45, 0.2, Z0], maxLen: 1, salt: 71 + s })
-        .box(0, 2, 0, 1, 0, FL, 'O4').build(P);
-      [cx - 2.9, cx + 1.45].forEach((x, i) => new Vox({ cell: [0.725, 0.3625, S], at: [x, 0.2, Z0], maxLen: 4, merge: 0.5, salt: 72 + s + i })
-        .box(0, 2, 0, 4, 0, FL, 'footBase')
-        .del(c => (i === 0 ? c.x === 0 : c.x === 1) && c.y === 0 && (c.z === 0 || c.z === FL - 1))
-        .build(P));
-      new Vox({ cell: [S, 0.2, S], at: [cx - 2.4, 0, Z0 + 0.4], maxLen: 4, salt: 76 + s })        // утопленное дно
-        .box(0, 6, 0, 1, 0, FL - 1, 'O5').build(P);
-      new Vox({ cell: [0.83, 0.4, S], at: [X0, 1.65, Z0], maxLen: 4, merge: 0.55, salt: 73 + s })
-        .box(0, 7, 0, 2, 0, FL, 'footMid')
-        .del(c => c.y === 1 && (c.x === 0 || c.x === 6) && (c.z === 0 || c.z === FL - 1))
+      const NL = +(opts.footLen || 10), toe = NL - 1;
+      const [ax, ay] = ankle(s);
+      const bx = s * (LEG.hipX + Math.sin(LEG.shin) * 4.4);        // голень у верха ступни
+      const fx = bx + s * LEG.toeOut, X0 = fx - 2.8, Z0 = -3.0;   // ступня чуть наружу от голени
+      const plan = c => {                                          // скругление носка и пятки в плане
+        const sx = c.x === 0 ? -1 : (c.x === 6 ? 1 : 0);
+        if (!sx) return [];
+        if (c.z === toe) return [[sx, 0, 1, 1.05]];
+        if (c.z === 0) return [[sx, 0, -1, 1.3]];
+        return [];
+      };
+      const clipOf = extra => c => { const pl = plan(c).concat(extra(c) || []); return pl.length ? pl : null; };
+      /* протектор 0…0.36: носок убран (подъём носка), пятка скошена снизу */
+      new Vox({ cell: [S, 0.36, S], at: [X0, 0, Z0], maxLen: 4, merge: 0.5, salt: 71 + s,
+        clip: clipOf(c => (c.z === 0 ? CUT.edge([0, -1, 0], [0, 0, -1], 1.0) : (c.z === toe - 1 ? CUT.edge([0, -1, 0], [0, 0, 1], 1.0) : null)))
+      }).box(0, 7, 0, 1, 0, toe, 'tread').build(P);
+      /* жёлтый борт подошвы 0.36…1.1, носок снизу чуть скошен */
+      new Vox({ cell: [S, 0.74, S], at: [X0, 0.36, Z0], maxLen: 4, merge: 0.55, salt: 72 + s,
+        clip: clipOf(c => (c.z === toe ? CUT.edge([0, -1, 0], [0, 0, 1], 1.45) : null))
+      }).box(0, 7, 0, 1, 0, NL, 'sole').build(P);
+      /* контрастная полоса 1.1…1.4 */
+      new Vox({ cell: [S, 0.3, S], at: [X0, 1.1, Z0], maxLen: 4, merge: 0.6, salt: 73 + s, clip: clipOf(() => null) })
+        .box(0, 7, 0, 1, 0, NL, 'stripe').build(P);
+      /* верх 1.4…2.8: носок-клин, проём под голень, шипы-«шнуровка» перед голенью */
+      const inShin = c => Math.abs(X0 + (c.x + 0.5) * S - bx) < 1.4 && Math.abs(Z0 + (c.z + 0.5) * S) < 1.4;
+      new Vox({ cell: [S, 0.7, S], at: [X0, 1.4, Z0], maxLen: 3, merge: 0.5, salt: 74 + s,
+        studTone: () => 'O4',
+        studs: (c, f) => f === 2 && c.y === 1 && c.z >= toe - 4 && c.z <= toe - 3 && c.x >= 2 && c.x <= 4 ? 0.22 : false,
+        clip: clipOf(c => {
+          if (c.y === 0 && c.z === toe) return CUT.edge([0, 1, 0], [0, 0, 1], 0.7);
+          if (c.y === 1 && c.z === toe - 2) return CUT.edge([0, 1, 0], [0, 0, 1], 0.85);
+          if (c.y === 1 && c.z === 0) return CUT.edge([0, 1, 0], [0, 0, -1], 1.2);
+          return null;
+        })
+      }).box(0, 7, 0, 2, 0, NL, 'upper')
+        .del(c => c.y === 1 && (c.z >= toe - 1 || inShin(c)))
         .build(P);
-      /* верхний ярус 2.45…3.6: четыре кирпича 1.45 во всю ширину, передняя кромка скруглена, на верху шипы */
-      new Vox({
-        cell: [1.45, 1.15, S], at: [X0, 2.45, Z0], maxLen: 1, salt: 74 + s,
-        studs: (c, f) => f === 2 && c.z === FL - 3 ? 0.26 : false,
+      /* задник 2.8…3.6 и язычок-петля сверху */
+      new Vox({ cell: [S, 0.4, S], at: [X0, 2.8, Z0], maxLen: 3, merge: 0.4, salt: 75 + s,
         clip: c => {
-          if (c.z === FL - 2) return CUT.edge([0, 1, 0], [0, 0, 1], 1.3);
-          if (c.z === 0) return CUT.edge([0, 1, 0], [0, 0, -1], 1.0);
+          if (c.z === 0 && c.y === 1) return CUT.edge([0, 1, 0], [0, 0, -1], 1.1);
+          if (c.y === 1 && (c.x === 2 || c.x === 4)) return CUT.edge([c.x === 2 ? -1 : 1, 0, 0], [0, 1, 0], 1.0);
           return null;
         }
-      }).box(0, 4, 0, 1, 0, FL - 1, 'footTop').build(P);
-      /* задний верхний ярус 3.5…4.1: плита-подкова вокруг гнезда голени, мелкие ступеньки с шипами */
-      new Vox({
-        cell: [0.83, 0.6, S], at: [X0, 3.6, Z0], maxLen: 2, merge: 0.3, salt: 75 + s,
-        studs: (c, f) => f === 2 && (c.z === 1 || c.z === 6) && ((c.x + c.z) & 1) === 0 ? 0.22 : false,
-        clip: c => {
-          const sx = c.x === 1 ? -1 : (c.x === 5 ? 1 : 0);
-          if (c.z === 6) return sx ? CUT.corner(sx, 1, 1, 1.35) : CUT.edge([0, 1, 0], [0, 0, 1], 0.85);
-          if (c.z === 0) return sx ? CUT.corner(sx, 1, -1, 1.35) : CUT.edge([0, 1, 0], [0, 0, -1], 1.0);
-          return null;
-        }
-      }).box(1, 6, 0, 1, 0, 7, 'footTop')
-        .del(c => c.x >= 2 && c.x <= 4 && c.z >= 2 && c.z <= 5)
-        .build(P);
-      /* вилка голеностопа: тонкие стойки по бокам низа голени, наружная выше (ось наклонена) */
-      const shinX = s * (4.15 + Math.sin(LEG_TILT) * 4.3);
-      [[1, 3, 0.77], [-1, 2, 0.75]].forEach(([side, rows, h]) => {
-        const x = shinX + side * s * 1.75 - (side * s < 0 ? 0.6 : 0);
-        new Vox({ cell: [0.6, h, 0.8], at: [x, 4.1, -1.2], maxLen: 2, merge: 0.4, salt: 77 + s + side,
-          clip: c => (c.y === rows - 1 && (c.z === 0 || c.z === 2) ? CUT.edge([0, 1, 0], [0, 0, c.z ? 1 : -1], 0.85) : null)
-        }).box(0, 1, 0, rows, 0, 3, 'bracket').build(P);
+      }).box(1, 6, 0, 1, 0, 2, 'upper').box(2, 5, 1, 2, 0, 1, 'upper').build(P);
+      new Vox({ cell: [S, 0.4, 0.4], at: [X0 + 3 * S, 3.6, Z0], maxLen: 1, salt: 76 + s,
+        clip: () => CUT.edge([0, 1, 0], [0, 0, -1], 1.0) }).box(0, 1, 0, 1, 0, 1, 'stripe').build(P);
+      /* высокий манжет голеностопа: стойки по бокам голени 2.5…5.3, ось (верхний болт)
+         и нижний болт-заклёпка — две пары болтов, как на листе 2 */
+      const cx = s * (LEG.hipX + Math.sin(LEG.shin) * 3.3);        // ось голени на середине стоек
+      [-1, 1].forEach(side => {
+        const x = cx + side * 1.63 - (side < 0 ? 1.0 : 0);
+        const sx = x + (side < 0 ? 0 : 1.0);
+        new Vox({ cell: [1.0, 0.75, 0.8], at: [x, 2.8, -1.2], maxLen: 2, merge: 0.4, salt: 77 + s + side,
+          studTone: () => 'DG2',
+          studs: (c, f) => (f === 2 && c.z === 1 ? 0.24 : false),
+          clip: c => (c.y === 3 && c.z !== 1 ? CUT.corner(side, 1, c.z ? 1 : -1, 1.4) : null)
+        }).box(0, 1, 0, 4, 0, 3, 'bracket').build(P);
+        bolt(p, sx + side * 0.012, ay, 0, [side, 0, 0], 1.3);
+        bolt(p, sx + side * 0.012, 3.4, 0.1, [side, 0, 0], 1.1);
       });
-      bolt(p, cx + s * 2.905 + s * 0.01, 3.0, 2.2, [s, 0, 0], 1.05);                             // нижние болты
-      bolt(p, cx - s * 2.905 - s * 0.01, 3.0, 2.2, [-s, 0, 0], 1.05);
-      [-0.8, 0.8].forEach(z => magnet(p, shinX, 3.52, z, [0, 1, 0]));
+      /* спортивная косая полоса на боках верха: от носка вверх к пятке */
+      [-1, 1].forEach(side => {
+        const x = fx + side * (2.8 + 0.035), z0 = 3.3, y0 = 1.62, z1 = -1.9, y1 = 2.5;
+        const L = Math.hypot(z1 - z0, y1 - y0), ang = Math.atan2(y1 - y0, z0 - z1);
+        const mm = new T.Matrix4().compose(new T.Vector3(x, (y0 + y1) / 2, (z0 + z1) / 2),
+          new T.Quaternion().setFromAxisAngle(new T.Vector3(1, 0, 0), ang), new T.Vector3(1, 1, 1));
+        bevelBox(P, 0, 0, 0, 0.05, 0.13, L / 2, 0.03, tone('DG', 0.02), 63, mm);
+      });
+      [-0.8, 0.8].forEach(z => magnet(p, bx, 1.9, z, [0, 1, 0]));
       p.finish(); root.add(p.g); parts[name] = p;
     }
     foot(-1); foot(1);
@@ -1025,8 +1177,8 @@
     /* ---------- разлёт (разобранный вид) — снизу вверх, как на листе ---------- */
     const EXPLODE = {
       shapka: [0, 6.2, 0], ochki: [0, 5.3, 1.5], lico: [0, 0, 0], bokL: [-5.4, 0, 0], bokR: [5.4, 0, 0],
-      golova: [0, 11.5, 0], sheya: [0, 9.0, 0], korpus: [0, 6.0, 0], rukaL: [-5.4, 6.0, 0], rukaR: [5.4, 6.0, 0],
-      nogaL: [-1.0, 3.8, 0], nogaR: [1.0, 3.8, 0], stupnyaL: [-0.6, 0, 0], stupnyaR: [0.6, 0, 0]
+      golova: [0, 14.2, 0], sheya: [0, 11.8, 0], korpus: [0, 8.8, 0], rukaL: [-4.6, 8.8, 0], rukaR: [4.6, 8.8, 0],
+      taz: [0, 6.0, 0], nogaL: [-0.9, 3.6, 0], nogaR: [0.9, 3.6, 0], stupnyaL: [-0.6, 0, 0], stupnyaR: [0.6, 0, 0]
     };
     parts.golova = { g: head, name: 'golova' };
     root.traverse(o => {
@@ -1100,7 +1252,7 @@
     key.position.set(6, 26, 26); key.castShadow = true;
     const sm = o.shadowMap || 2048;
     key.shadow.mapSize.set(sm, sm);
-    Object.assign(key.shadow.camera, { left: -24, right: 24, top: 36, bottom: -18, near: 1, far: 100 });
+    Object.assign(key.shadow.camera, { left: -24, right: 24, top: 44, bottom: -18, near: 1, far: 110 });
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03;
     scene.add(key);
     const rim = new T.DirectionalLight(0xdce9ff, 0.4); rim.position.set(-15, 14, -18); scene.add(rim);
@@ -1118,7 +1270,7 @@
     const SIDE_C = { bokL: new T.Vector3(-5.9, 0, -0.8), bokR: new T.Vector3(5.9, 0, -0.8) };
     const tmpV = new T.Vector3(), Y_AX = new T.Vector3(0, 1, 0);
     const glowLight = new T.PointLight(0x9a6bff, 0, 9, 2);
-    glowLight.position.set(0, 28.6 - model.HEAD_Y, 0);
+    glowLight.position.set(0, 11.6, 0);           // над пришельцем
     P.golova.g.add(glowLight);
     function ease(obj, key, target, k) { obj[key] += (target - obj[key]) * k; }
     function update(t, dtK) {
