@@ -29,10 +29,10 @@ const EXPLODED_ANCHORS = [
   ['skullcap', 'shapka', [4.8, 7.8, 0]], ['sunglasses', 'ochki', [6.1, 5.9, 1.5]], ['face', 'lico', [4.8, 1.4, 4.8]],
   ['sideplating', 'bokR', [6.1, 5.4, -1.2]], ['neck', 'sheya', [1.47, 0.5, 0.1]], ['torso', 'korpus', [4.4, 16.6, 3.0]],
   ['arms', 'rukaR', [4.0, -4.5, 2.0]], ['pelvis', 'taz', [2.0, 11.8, 2.0]],
-  ['legs', 'nogaR', [1.8, -1.6, 1.5]], ['feet', 'stupnyaR', [7.2, 1.9, 3.0]],
+  ['legs', 'nogaR', [1.8, -1.6, 1.5]], ['feet', 'stupnyaR', [6.6, 1.9, 3.0]],
   ['m1L', 'lico', [-6.6, 7.2, 4.8]], ['m1R', 'lico', [6.6, 7.2, 4.8]], ['m2L', 'sheya', [-2.4, -0.2, 0]], ['m2R', 'sheya', [2.4, -0.2, 0]],
   ['m3L', 'korpus', [-5.6, 18.2, 2.0]], ['m3R', 'korpus', [5.6, 18.2, 2.0]], ['m4L', 'korpus', [-3.2, 12.1, 2.6]], ['m4R', 'korpus', [3.2, 12.1, 2.6]],
-  ['m5L', 'nogaL', [0, 1.0, 1.5]], ['m5R', 'nogaR', [0, 1.0, 1.5]], ['m6L', 'stupnyaL', [-7.8, 3.2, 1.6]], ['m6R', 'stupnyaR', [7.8, 3.2, 1.6]]
+  ['m5L', 'nogaL', [0, 1.0, 1.5]], ['m5R', 'nogaR', [0, 1.0, 1.5]], ['m6L', 'stupnyaL', [-6.7, 3.2, 1.2]], ['m6R', 'stupnyaR', [6.7, 3.2, 1.2]]
 ];
 /* опорные точки вида спереди: по ним tools/qa_body.py переводит рендер в мировые единицы */
 const WORLD_ANCHORS = [];
@@ -78,5 +78,15 @@ if (!ONLY_RENDERS && !PICK) {
   const buf = Buffer.from(b64, 'base64');
   writeFileSync(join(ROOT, 'pixel-mech.glb'), buf);
   console.log('pixel-mech.glb', (buf.length / 1048576).toFixed(2), 'МБ');
+  /* для Godot/VR: скелет (гуманоидные имена костей), метры; полная и облегчённая геометрия */
+  mkdirSync(join(ROOT, 'export'), { recursive: true });
+  for (const [file, lite] of [['pixel-mech-rig.glb', false], ['pixel-mech-rig-lite.glb', true]]) {
+    const rb = Buffer.from(await page.evaluate(l => window.exportRigGLB(l), lite), 'base64');
+    writeFileSync(join(ROOT, 'export', file), rb);
+    console.log('export/' + file, (rb.length / 1048576).toFixed(2), 'МБ');
+  }
+  const man = await page.evaluate(() => window.brickManifest());
+  writeFileSync(join(ROOT, 'export', 'pixel-mech.bricks.json'), man);
+  console.log('export/pixel-mech.bricks.json', (man.length / 1024).toFixed(0), 'КБ');
 }
 await browser.close();

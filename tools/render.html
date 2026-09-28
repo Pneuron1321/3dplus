@@ -90,6 +90,15 @@ window.exportGLB = () => new Promise((res, rej) => {
     }, { binary: true });
   } catch (e) { rej(e); }
 });
+/* скелетный GLB для Godot/VR (lite — облегчённая геометрия для Quest) и паспорт кирпичей */
+const toB64 = glb => { const b = new Uint8Array(glb); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
+window.exportRigGLB = lite => new Promise((res, rej) => {
+  try {
+    const m = lite ? PixelMech.create(T, { lite: true, lensEnv: studio.lensEnv }) : model;
+    new T.GLTFExporter().parse(PixelMech.exportRig(T, m), glb => res(toB64(glb)), { binary: true });
+  } catch (e) { rej(e); }
+});
+window.brickManifest = () => JSON.stringify(PixelMech.brickManifest(T, PixelMech.create(T, { manifest: true, noAO: true, lensEnv: studio.lensEnv })));
 window.ready = true;
 </script>
 </body>
