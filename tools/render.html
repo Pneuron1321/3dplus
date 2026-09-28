@@ -38,7 +38,8 @@ const ALL = Object.keys(model.parts);
            only:[детали], hide:[детали], explode, glasses, state, floor } */
 window.renderView = function (spec) {
   const w = spec.w || 1200, h = spec.h || 1200;
-  r.setPixelRatio(1); r.setSize(w, h, false);
+  const ss = spec.ss || 2;                                   // суперсэмплинг: рендер ×2, потом уменьшение
+  r.setPixelRatio(1); r.setSize(w * ss, h * ss, false);
   cam.fov = spec.fov || 20; cam.aspect = w / h;
   cam.updateProjectionMatrix();
   ALL.forEach(k => { model.parts[k].g.visible = true; });
@@ -73,7 +74,10 @@ window.renderView = function (spec) {
     const v = new T.Vector3(...loc); model.parts[part].g.localToWorld(v); v.project(cam);
     anchors[name] = [Math.round((v.x + 1) / 2 * w), Math.round((1 - v.y) / 2 * h)];
   });
-  return { png: cv.toDataURL('image/png'), anchors };
+  const out = document.createElement('canvas'); out.width = w; out.height = h;
+  const g2 = out.getContext('2d'); g2.imageSmoothingEnabled = true; g2.imageSmoothingQuality = 'high';
+  g2.drawImage(cv, 0, 0, w, h);
+  return { png: out.toDataURL('image/png'), anchors };
 };
 window.stats = () => model.stats;
 window.exportGLB = () => new Promise((res, rej) => {
