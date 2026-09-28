@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PIXEL MECH · модульный коллекционный</title>
+<title>PIXEL MECH 3D</title>
 <style>
   :root{
     --sky1:#b6dcf7; --sky2:#86bfe9; --ink:#0f1a2b; --dim:#3a5068; --chip:rgba(255,255,255,.78);
@@ -188,17 +188,49 @@ document.getElementById('bVid').addEventListener('click', () => { vidI = (vidI +
 const bK = document.getElementById('bKrutit');
 bK.addEventListener('click', () => { krutit = !krutit; bK.setAttribute('aria-pressed', krutit ? 'true' : 'false'); });
 
-/* ---------- сохранение: снимок и модель ---------- */
+/* ---------- сохранение: снимок и модель ----------
+   Внутри просмотрщика Claude файлы отдаются через возможность downloads (зритель подтверждает);
+   .glb там не в списке разрешённых форматов, поэтому модель уходит в .zip. Если сохранение
+   недоступно — кнопки прячутся. Вне Claude (свой диск, свой сервер) — обычная ссылка-загрузка. */
 let downloads = null;
-if (window.claude && typeof window.claude.use === 'function'){
-  window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
+const vKlode = !!(window.claude && typeof window.claude.use === 'function');
+if (vKlode){
+  window.claude.use('downloads').then(d => {
+    downloads = d;
+    if (!d) ['bSnimok', 'bSkachat'].forEach(id => { document.getElementById(id).hidden = true; });
+  }).catch(() => {});
+}
+/* zip из одного файла без сжатия (метод «хранение») */
+function zipOdin(imya, bajty){
+  const tab = zipOdin.t || (zipOdin.t = Array.from({ length: 256 }, (_, n) => {
+    let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0;
+  }));
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bajty.length; i++) crc = tab[(crc ^ bajty[i]) & 255] ^ (crc >>> 8);
+  crc = (crc ^ 0xFFFFFFFF) >>> 0;
+  const nm = new TextEncoder().encode(imya), n = bajty.length;
+  const lh = new DataView(new ArrayBuffer(30)), ch = new DataView(new ArrayBuffer(46)), kon = new DataView(new ArrayBuffer(22));
+  [[0, 0x04034b50, 4], [4, 20, 2], [12, 0x21, 2], [14, crc, 4], [18, n, 4], [22, n, 4], [26, nm.length, 2]]
+    .forEach(([o, v, w]) => (w === 4 ? lh.setUint32(o, v, true) : lh.setUint16(o, v, true)));
+  [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [14, 0x21, 2], [16, crc, 4], [20, n, 4], [24, n, 4], [28, nm.length, 2]]
+    .forEach(([o, v, w]) => (w === 4 ? ch.setUint32(o, v, true) : ch.setUint16(o, v, true)));
+  [[0, 0x06054b50, 4], [8, 1, 2], [10, 1, 2], [12, 46 + nm.length, 4], [16, 30 + nm.length + n, 4]]
+    .forEach(([o, v, w]) => (w === 4 ? kon.setUint32(o, v, true) : kon.setUint16(o, v, true)));
+  return new Blob([lh, nm, bajty, ch, nm, kon], { type: 'application/zip' });
 }
 async function otdat(filename, blob){
   if (downloads){
     try{ await downloads.save({ filename, data: blob }); toast('Сохранено: ' + filename); }
-    catch(e){ if (e && e.code !== 'declined') toast('Не сохранилось: ' + (e.message || e.code)); }
+    catch(e){
+      const kod = e && e.code;
+      if (kod === 'declined') return;
+      if (kod === 'rate_limited') toast('Окно сохранения уже открыто — подтверди или закрой его');
+      else if (kod === 'rejected_extension' || kod === 'extension_not_enabled') toast('Этот формат здесь не сохраняется. Файл pixel-mech.glb лежит в репозитории.', 6000);
+      else toast('Не сохранилось: ' + ((e && e.message) || kod || 'ошибка'));
+    }
     return;
   }
+  if (vKlode){ toast('Сохранение файлов здесь недоступно'); return; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
@@ -217,7 +249,8 @@ bS.addEventListener('click', async () => {
     const glb = await new Promise((res, rej) => {
       try{ new T.GLTFExporter().parse(PixelMech.exportScene(T, model), res, { binary: true }); }catch(e){ rej(e); }
     });
-    await otdat('pixel-mech.glb', new Blob([glb], { type: 'model/gltf-binary' }));
+    if (downloads) await otdat('pixel-mech.zip', zipOdin('pixel-mech.glb', new Uint8Array(glb)));
+    else await otdat('pixel-mech.glb', new Blob([glb], { type: 'model/gltf-binary' }));
   }catch(e){ toast('Не собралось: ' + (e.message || e)); }
   bS.disabled = false; bS.textContent = 'Скачать GLB';
 });
