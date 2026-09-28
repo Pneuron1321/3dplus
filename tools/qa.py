@@ -1,12 +1,15 @@
 """Сверка рендера с листом-образцом: силуэт, профиль ширины, цвета по зонам.
 
-Запуск:  python3 tools/qa.py <образец.jpg> [renders/front.png]
-Нужны Pillow и numpy. Образец — исходный лист 1312×1199 (вид спереди берётся из него по координатам).
+Запуск:  python3 tools/qa.py <образец.jpg> [renders/front.png] [--view front|three4]
+Нужны Pillow и numpy. Образец — исходный лист 1312×1199 (панели видов берутся из него по координатам).
 
 Что считает:
-  • IoU силуэтов (фон — голубой) после совмещения по габаритной рамке;
+  • IoU силуэтов (фон — голубой) после совмещения по высоте фигуры и центру головы;
   • ширину фигуры в 24 горизонтальных срезах (доли высоты) — где модель шире/уже образца;
-  • медианные цвета 16 зон (лицо, линза, шапка, пришелец, грудь…) и ΔE (CIE76) между образцом и рендером.
+  • (вид спереди) медианные цвета 17 зон (лицо, линза, шапка, пришелец, грудь…) и ΔE (CIE76);
+  • ΔE по картинке: средняя разница цвета по общей площади фигуры после размытия —
+    ловит свет, контраст и раскладку цветов, а не отдельные кирпичи;
+  • (вид спереди) очки: ΔE в 8 точках — глаза сквозь линзу, полосы бликов, тёмная середина.
 """
 import os
 import sys
@@ -15,6 +18,7 @@ import numpy as np
 from PIL import Image
 
 REF_FRONT_BOX = (0, 80, 445, 560)          # вид спереди на листе-образце
+REF_BOXES = {'front': REF_FRONT_BOX, 'three4': (450, 62, 885, 564)}
 
 # зоны цвета в мировых единицах вида спереди (x0, x1, y0, y1): фигура высотой 28 от пола до шипов рожек,
 # центр по голове. Брать плоские места без шипов и швов.
@@ -97,10 +101,36 @@ def zone_color(a, box):
     return np.median(px, axis=0)
 
 
+# точки на очках и лице (x, y): глаза сквозь линзу, зеркальные полосы, тёмная середина, переносица
+LENS_POINTS = {'глаз Л': (-1.65, 21.7), 'глаз П': (1.65, 21.7), 'блик Л': (-3.0, 22.5), 'середина': (0, 22.8),
+               'блик П': (3.0, 22.0), 'висок Л': (-4.2, 21.5), 'верх линзы': (0, 23.2), 'под переносицей': (0, 21.0)}
+
+
+def point_color(a, x, y, r=3):
+    h, w = a.shape[:2]
+    k = FIG_H / h
+    row, col = int((FIG_H - y) / k), int(w / 2 + x / k)
+    return np.median(a[row - r:row + r + 1, col - r:col + r + 1].reshape(-1, 3), axis=0)
+
+
+def blur(a, r=3):
+    from PIL import ImageFilter
+    return np.asarray(Image.fromarray(a.astype(np.uint8)).filter(ImageFilter.GaussianBlur(r))).astype(int)
+
+
+def image_de(RA, RM, MA, MM):
+    both = RM & MM
+    ra, ma = blur(RA)[both], blur(MA)[both]
+    idx = np.linspace(0, len(ra) - 1, min(len(ra), 6000)).astype(int)
+    return float(np.mean([np.linalg.norm(lab(ra[i]) - lab(ma[i])) for i in idx]))
+
+
 def main():
-    ref_path = sys.argv[1]
-    ren_path = sys.argv[2] if len(sys.argv) > 2 else 'renders/front.png'
-    ra = load_rgb(ref_path, REF_FRONT_BOX)
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    view = next((a.split('=')[1] for a in sys.argv[1:] if a.startswith('--view=')), 'front')
+    ref_path = args[0]
+    ren_path = args[1] if len(args) > 1 else 'renders/%s.png' % view
+    ra = load_rgb(ref_path, REF_BOXES[view])
     rm = figure_mask(ra)
     ma = load_rgb(ren_path)
     mm = figure_mask(ma)
@@ -118,6 +148,12 @@ def main():
         rw, mw = RM[y].sum() / W, MM[y].sum() / W
         flag = '  <<' if abs(rw - mw) > 0.06 else ''
         print(f'{(i + 0.5) / 24:4.2f}  {rw:6.3f}  {mw:6.3f}  {mw - rw:+.3f}{flag}')
+    ide = image_de(RA, RM, MA, MM)
+    bad = sum(1 for i in range(24) if abs(RM[int((i + 0.5) / 24 * H)].sum() / W - MM[int((i + 0.5) / 24 * H)].sum() / W) > 0.06)
+    if view != 'front':
+        print(f'ИТОГ {view}  IoU {iou:.3f} · плохих срезов {bad}/24 · ΔE по картинке {ide:.1f}')
+        save_pics(RA, RM, MA, MM)
+        return
     print('зона                    образец        модель         ΔE')
     des = []
     for name, box in ZONES.items():
@@ -128,8 +164,15 @@ def main():
         hexm = '#%02x%02x%02x' % tuple(int(v) for v in mc)
         print(f'{name:22s}  {hexr}  {hexm}  {de:5.1f}')
     print(f'средний ΔE: {np.mean(des):.1f}   худший: {np.max(des):.1f}')
-    bad = sum(1 for i in range(24) if abs(RM[int((i + 0.5) / 24 * H)].sum() / W - MM[int((i + 0.5) / 24 * H)].sum() / W) > 0.06)
-    print(f'ИТОГ  IoU {iou:.3f} · плохих срезов {bad}/24 · ΔE ср. {np.mean(des):.1f} · ΔE макс. {np.max(des):.1f}')
+    RB, MB = normalize(ra, rm, 1400, 1400)[0], normalize(ma, mm, 1400, 1400)[0]
+    lde = [float(np.linalg.norm(lab(point_color(RB, *xy)) - lab(point_color(MB, *xy)))) for xy in LENS_POINTS.values()]
+    print('очки и глаза (ΔE по точкам): ' + ', '.join(f'{n} {d:.0f}' for n, d in zip(LENS_POINTS, lde)) + f'  → ср. {np.mean(lde):.1f}')
+    print(f'ИТОГ front  IoU {iou:.3f} · плохих срезов {bad}/24 · ΔE ср. {np.mean(des):.1f} · ΔE макс. {np.max(des):.1f} · ΔE по картинке {ide:.1f} · очки {np.mean(lde):.1f}')
+    save_pics(RA, RM, MA, MM)
+
+
+def save_pics(RA, RM, MA, MM):
+    H, W = RM.shape
     out = tempfile.gettempdir()
     Image.fromarray(np.concatenate([RA, MA], axis=1).astype(np.uint8)).save(os.path.join(out, 'qa_side_by_side.png'))
     over = np.zeros((H, W, 3), np.uint8)

@@ -25,8 +25,9 @@ function skyTexture(top, bottom) {
 }
 const SKY = skyTexture('#aad6f5', '#92c6ee');
 const studio = PixelMech.stage(T, r, scene, { shadowMap: 4096 });
+window.studio = studio;
 const floor = studio.floor;
-const model = PixelMech.create(T, Object.fromEntries(new URLSearchParams(location.search)));
+const model = PixelMech.create(T, Object.assign({ lensEnv: studio.lensEnv }, Object.fromEntries(new URLSearchParams(location.search))));
 scene.add(model.root);
 window.model = model;
 const anim = PixelMech.makeAnimator(T, model);

@@ -27,9 +27,10 @@
   const PALETTE = {
     WH: '#dcdddb', WH2: '#e6e6e4', LG: '#bdbebe', LG2: '#aeafb0', MG: '#8a8b8c', MG2: '#747270',
     DG: '#565759', DG2: '#444547', GM: '#0f1012', BK: '#121214', SV: '#9ea3a8',
-    YE: '#fbd822', YE2: '#f3cb16', YE3: '#fce045',
+    YE: '#f6cd10', YE2: '#efc20c', YE3: '#f9d52c',
     O1: '#d06400', O2: '#f27400', O3: '#ee9010', O4: '#f39a12', O5: '#bf5a00', O6: '#ea7c06',
-    PU: '#8f5ff0', PU2: '#7442dc', PU3: '#a070f5'
+    OT1: '#e06c00', OT2: '#cc5e00', OT3: '#ec7a04',
+    PU: '#8656ec', PU2: '#7444dc', PU3: '#9464f0'
   };
 
   /* смеси: класс клетки → из чего выбирается цвет каждого кирпича */
@@ -39,17 +40,18 @@
     side: [['LG', 0.5], ['WH', 0.3], ['LG2', 0.2]],
     sideFront: [['DG', 0.6], ['MG', 0.25], ['DG2', 0.15]],
     yellow: [['YE', 0.72], ['YE2', 0.16], ['YE3', 0.12]],
-    purple: [['PU', 0.7], ['PU2', 0.18], ['PU3', 0.12]],
+    purple: [['PU', 0.8], ['PU2', 0.12], ['PU3', 0.08]],
     dark: [['DG', 0.72], ['DG2', 0.28]],
     darkMid: [['DG', 0.55], ['MG', 0.2], ['DG2', 0.25]],
     beltMid: [['MG', 0.75], ['DG', 0.25]],
     light: [['LG', 0.68], ['WH', 0.16], ['LG2', 0.16]],
+    topBand: [['LG2', 0.45], ['MG', 0.4], ['LG', 0.15]],
     fist: [['WH', 0.5], ['WH2', 0.38], ['LG', 0.12]],
     shin: [['MG2', 0.55], ['MG', 0.2], ['DG', 0.25]],
-    ear: [['O1', 0.5], ['O2', 0.5]],
+    ear: [['O1', 0.5], ['O5', 0.5]],
     footBase: [['O4', 0.6], ['O3', 0.4]],
     footMid: [['O1', 0.62], ['O6', 0.2], ['O5', 0.18]],
-    footTop: [['O2', 0.6], ['O6', 0.25], ['O5', 0.15]],
+    footTop: [['OT1', 0.45], ['OT3', 0.3], ['OT2', 0.25]],
     bracket: [['O2', 0.5], ['O1', 0.3], ['O6', 0.2]],
     techDG: [['DG', 1]]
   };
@@ -310,6 +312,8 @@
         this.studR = o.studR || 0.24 * Math.min(this.cell[0], this.cell[2]) / S;
         this.coreDark = o.coreDark == null ? 0.2 : o.coreDark;
         this.bevFor = o.bevFor || null;     // своя фаска для клетки
+        this.mergeFor = o.mergeFor || null; // своя вероятность слияния по ряду (под линзой — длинные кирпичи)
+        this.studTone = o.studTone || null; // (клетка, грань) → ключ палитры: шип другого цвета, чем кирпич
         this.clip = o.clip || null;         // (клетка) → плоскости скоса [nx,ny,nz,d] | null
       }
       K(x, y, z) { return ((x + 300) * 600 + (y + 300)) * 600 + (z + 300); }
@@ -346,7 +350,7 @@
         }
         const isBreak = (pos, row, line, dir) => {
           if (((pos + row) & 1) !== 0) return false;              // перевязка: стыки через ряд со сдвигом
-          return hash(pos * 7 + this.salt, row * 13 + (dir === 'x' ? 1 : 2), line * 31) > this.merge;
+          return hash(pos * 7 + this.salt, row * 13 + (dir === 'x' ? 1 : 2), line * 31) > (this.mergeFor ? this.mergeFor(row) : this.merge);
         };
         for (const v of cells) {
           const key = this.K(v.x, v.y, v.z);
@@ -404,7 +408,8 @@
               const d = FACE[f];
               const px = this.cx(c.x) + d[0] * (sx / 2 - g / 2), py = this.cy(c.y) + d[1] * (sy / 2 - g / 2), pz = this.cz(c.z) + d[2] * (sz / 2 - g / 2);
               m4.compose(vv.set(px, py, pz), QF[f], ss.set(rad, rad, rad));
-              emitTpl(mb, STUD, m4, col.clone().lerp(LIN.WH, 0.03));
+              const sk = this.studTone && this.studTone(c, f);
+              emitTpl(mb, STUD, m4, sk ? tone(sk) : col.clone().lerp(LIN.WH, 0.03));
               stats.studs++;
             }
           }
@@ -449,9 +454,13 @@
         premultipliedAlpha: true, depthWrite: false, toneMapped: false
       }),
       /* … плюс зеркальные блики софтбоксов поверх */
-      gloss: new T.MeshStandardMaterial({
-        color: new T.Color('#ff4a2c').convertSRGBToLinear(), roughness: 0.05, metalness: 1,
-        envMapIntensity: 0.07, blending: T.AdditiveBlending, transparent: true, depthWrite: false
+      /* блики — только отражение окружения линзы (красные полосы), без бликов от ламп */
+      gloss: opts.lensEnv ? new T.MeshBasicMaterial({
+        color: 0x000000, envMap: opts.lensEnv, combine: T.AddOperation, reflectivity: 1,
+        blending: T.AdditiveBlending, transparent: true, depthWrite: false
+      }) : new T.MeshStandardMaterial({
+        color: new T.Color('#ff1a05').convertSRGBToLinear(), roughness: 0.05, metalness: 1,
+        envMapIntensity: 1.3, blending: T.AdditiveBlending, transparent: true, depthWrite: false
       }),
       frame: new T.MeshStandardMaterial({ color: new T.Color('#8f0d08').convertSRGBToLinear(), roughness: 0.24, metalness: 0.25, envMapIntensity: 1.5 }),
       ink: new T.MeshStandardMaterial({ color: LIN.BK.clone(), roughness: 0.5, metalness: 0, envMapIntensity: 0.4 })
@@ -504,8 +513,8 @@
     function bolt(p, x, y, z, dir, k) {
       k = k || 1;
       const d = dir, gm = LIN.GM, bk = LIN.BK;
-      axial(p.bufs.metal, CYL, x, y, z, d, 0.38 * k, 0.07 * k, LIN.SV.clone().multiplyScalar(0.35));
-      axial(p.bufs.metal, CYL, x + d[0] * 0.06 * k, y + d[1] * 0.06 * k, z + d[2] * 0.06 * k, d, 0.2 * k, 0.42 * k, bk);
+      axial(p.bufs.metal, CYL, x, y, z, d, 0.38 * k, 0.07 * k, LIN.BK);                              // чёрная шайба
+      axial(p.bufs.metal, CYL, x + d[0] * 0.06 * k, y + d[1] * 0.06 * k, z + d[2] * 0.06 * k, d, 0.2 * k, 0.42 * k, LIN.SV); // хромированный стержень
       axial(p.bufs.metal, CYL_FINE, x + d[0] * 0.46 * k, y + d[1] * 0.46 * k, z + d[2] * 0.46 * k, d, 0.33 * k, 0.22 * k, gm);
       const q = new T.Quaternion().setFromUnitVectors(new T.Vector3(0, 0, 1), new T.Vector3(d[0], d[1], d[2]));
       const c = new T.Vector3(x + d[0] * 0.685 * k, y + d[1] * 0.685 * k, z + d[2] * 0.685 * k);
@@ -529,6 +538,13 @@
     function rod(p, x, y, z, dir, len, col) {
       axial(p.bufs.plastic, CYL, x, y, z, dir, 0.13, len, col || LIN.LG, true);
     }
+    /* шип по произвольной нормали (на скошенной грани) */
+    function studOn(mb, x, y, z, n, rad, col) {
+      qq.setFromUnitVectors(UP, vv.set(n[0], n[1], n[2]).normalize());
+      m4.compose(new T.Vector3(x, y, z), qq, ss.set(rad, rad, rad));
+      emitTpl(mb, STUD, m4, col);
+      stats.studs++;
+    }
     /* магнитная шайба на стыке: в сборке скрыта, в разлёте видна */
     function magnet(p, x, y, z, dir) {
       axial(p.bufs.metal, CYL_FINE, x - dir[0] * 0.02, y - dir[1] * 0.02, z - dir[2] * 0.02, dir, 0.27, 0.05, LIN.SV);
@@ -540,26 +556,32 @@
     const root = new T.Group(); root.name = 'PixelMech';
 
     /* ============================================================
-       ГОЛОВА — узел у верха шеи (0, 17.05, 0).
+       ГОЛОВА — узел у верха шеи (0, 17.0, 0). Замеры — сетка по листу (docs/PROMPT-v4.md).
        lico (блок с лицевой панелью), bokL/bokR (боковые плиты),
        shapka (череп-шапка с пришельцем), ochki (очки).
        ============================================================ */
-    const HEAD_Y = 17.3;
+    const HEAD_Y = 17.0;
     const W = y => y - HEAD_Y;                               // мировая высота → координаты головы
     const head = new T.Group(); head.name = 'golova'; head.position.set(0, HEAD_Y, 0); root.add(head);
+    head.rotation.x = opts.headTilt == null ? 0 : +opts.headTilt;     // наклон головы вперёд (поза)
+    const FACE_ROW = 0.512, FACE_ROWS = 13, FACE_Y0 = 0.2;
+    const CAP_Y = FACE_Y0 + FACE_ROWS * FACE_ROW;            // низ шапки: 23.86 в мире
 
-    /* ---- лицевой блок: 12 × 14 рядов по 0.48 × 12; спереди 2 клетки жёлтые ---- */
+    /* ---- лицевой блок: 12 × 13 рядов по 0.512 × 12; спереди 2 клетки жёлтые;
+            нижний ряд утоплен (подбородок ±3.6); под линзой — длинные кирпичи ---- */
     const lico = part('lico');
     {
-      const face = new Vox({ cell: [S, 0.48, S], at: [-4.8, 0.3, -4.8], maxLen: 6, merge: 0.62, salt: 3, gap: 0.02, bev: 0.034 });
-      face.box(0, 12, 0, 14, 0, 12, (x, y, z) => (z >= 10 ? 'yellow' : (z <= 1 ? 'headBack' : 'head')));
-      face.paint(v => (v.y === 0 && v.z < 10 ? 'dark' : null));
-      face.del(v => v.y === 0 && (v.x === 0 || v.x === 11));               // нижний ряд утоплен — «подбородок»
-      face.build(lico.bufs.plastic);
-      new Vox({ cell: [S, 0.3, S], at: [-4.0, 0.0, -4.0], maxLen: 4, salt: 5 })  // тёмные плиты низа головы
-        .box(0, 10, 0, 1, 0, 10, 'dark').build(lico.bufs.plastic);
-      [[-3.2, -2.4], [3.2, -2.4], [-3.2, 2.4], [3.2, 2.4]].forEach(([x, z]) => magnet(lico, x, 7.02, z, [0, 1, 0]));
-      [-1, 1].forEach(s => { magnet(lico, s * 4.8, 2.4, -2.0, [s, 0, 0]); magnet(lico, s * 4.8, 5.6, -2.0, [s, 0, 0]); });
+      new Vox({ cell: [S, FACE_ROW, S], at: [-4.8, FACE_Y0, -4.8], maxLen: 6, merge: 0.62, salt: 3, gap: 0.02, bev: 0.034,
+        mergeFor: row => (row >= 6 && row <= 11 ? 0.93 : 0.62),
+        clip: c => (c.y === 0 && (c.x === 1 || c.x === 10) ? CUT.edge([c.x === 1 ? -1 : 1, 0, 0], [0, -1, 0], 0.9) : null) })
+        .box(0, 12, 0, FACE_ROWS, 0, 12, (x, y, z) => (z >= 10 ? 'yellow' : (z <= 1 ? 'headBack' : 'head')))
+        .paint(v => (v.y === 0 && v.z < 10 ? 'dark' : null))
+        .del(v => v.y === 0 && (v.x === 0 || v.x === 11))
+        .build(lico.bufs.plastic);
+      new Vox({ cell: [S, 0.2, S], at: [-3.6, 0.0, -3.6], maxLen: 4, salt: 5 })   // тёмные плиты низа головы
+        .box(0, 9, 0, 1, 0, 9, 'dark').build(lico.bufs.plastic);
+      [[-3.2, -2.4], [3.2, -2.4], [-3.2, 2.4], [3.2, 2.4]].forEach(([x, z]) => magnet(lico, x, CAP_Y + 0.02, z, [0, 1, 0]));
+      [-1, 1].forEach(s => { magnet(lico, s * 4.8, 2.4, -2.0, [s, 0, 0]); magnet(lico, s * 4.8, 5.2, -2.0, [s, 0, 0]); });
     }
     lico.finish(); head.add(lico.g); parts.lico = lico;
 
@@ -574,68 +596,69 @@
       lico.g.add(mesh); faceParts[name] = mesh;
       return mesh;
     }
-    inkTile('eyeL', 1.56, 1.5, -1.6, 21.62);
-    inkTile('eyeR', 1.56, 1.5, 1.6, 21.62);
-    inkTile('mouthBar', 4.0, 0.44, 0, 19.4);
-    inkTile('mouthLegL', 0.4, 0.62, -1.8, 18.87);
-    inkTile('mouthLegR', 0.4, 0.62, 1.8, 18.87);
-    inkTile('mouthCornerL', 0.4, 0.4, -2.2, 19.95);
-    inkTile('mouthCornerR', 0.4, 0.4, 2.2, 19.95);
+    inkTile('eyeL', 1.5, 1.5, -1.65, 21.7);
+    inkTile('eyeR', 1.5, 1.5, 1.65, 21.7);
+    inkTile('mouthBar', 4.4, 0.52, 0, 19.2);
+    inkTile('mouthLegL', 0.42, 0.52, -1.99, 18.7);
+    inkTile('mouthLegR', 0.42, 0.52, 1.99, 18.7);
+    inkTile('mouthCornerL', 0.4, 0.4, -2.45, 19.98);
+    inkTile('mouthCornerR', 0.4, 0.4, 2.45, 19.98);
     {                                                        // зубы для улыбки/речи
       const mb = new MeshBuf();
-      bevelBox(mb, 0, 0, 0, 1.5, 0.13, 0.05, 0.03, LIN.WH2, 63 - 32);
+      bevelBox(mb, 0, 0, 0, 1.7, 0.15, 0.05, 0.03, LIN.WH2, 63 - 32);
       const t = new T.Mesh(mb.geometry(), MAT.plastic);
-      t.name = 'teeth'; t.position.set(0, W(19.4), FZ + 0.02); t.visible = false;
+      t.name = 'teeth'; t.position.set(0, W(19.2), FZ + 0.02); t.visible = false;
       lico.g.add(t); faceParts.teeth = t;
     }
 
-    /* ---- боковые плиты: толщина 1.25 шипа, y 18.4…24.8, техник-кирпич, уши ---- */
+    /* ---- боковые плиты: толщина 1.25, y 18.35…25.55; круглые шипы вбок и вперёд,
+            тёмный техник-кирпич с двумя отверстиями сверху спереди, оранжевое ухо сзади ---- */
     function sidePlate(s) {
       const name = s < 0 ? 'bokL' : 'bokR';
       const p = part(name);
       const out = s < 0 ? 1 : 0;                           // индекс грани наружу
-      const x0 = s < 0 ? -6.05 : 4.8, Y0 = 1.3;
-      const v = new Vox({
-        cell: [1.25, S, S], at: [x0, Y0, -4.8], maxLen: 3, merge: 0.5, salt: s < 0 ? 11 : 12,
+      const TH = 1.25, x0 = s < 0 ? -4.8 - TH : 4.8, Y0 = W(18.15);
+      new Vox({
+        cell: [TH, S, S], at: [x0, Y0, -4.8], maxLen: 3, merge: 0.5, salt: s < 0 ? 11 : 12,
+        studTone: c => (c.cls === 'sideFront' || c.cls === 'techDG' ? 'LG' : null),
         studs: (c, f) => {
-          if (f === out) return c.cls === 'side' && (c.z === 3 || c.z === 5) && (c.y === 1 || c.y === 3 || c.y === 5) ? 0.33 : false;
-          if (f === 4) return c.z === 9 && (c.y === 1 || c.y === 2);          // круглые шипы вперёд на торце
+          if (f === out) return (((c.y === 1 || c.y === 3) && (c.z === 6 || c.z === 8)) || (c.y === 5 && c.z === 6)) ? 0.38 : false;
+          if (f === 4) return (c.y === 0 || c.y === 2 || c.y === 7) ? 0.32 : false;   // шипы вперёд на торце плиты
+          if (f === 2) return c.y === 8 && (c.z & 1) === 1 && c.z <= 7;
           return false;
         },
         clip: c => {
-          if (c.y === 8) return c.z === 0 ? CUT.corner(s, 1, -1, 1.4) : CUT.edge([s, 0, 0], [0, 1, 0], 0.9);   // скруглённый верх плиты
-          if (c.y === 7 && c.z === 0) return CUT.edge([0, 1, 0], [0, 0, -1], 1.1);
+          if (c.y === 8) {
+            if (c.z === 0) return CUT.corner(s, 1, -1, 1.4);
+            if (c.z === 9) return CUT.corner(s, 1, 1, 1.4);
+            return CUT.edge([s, 0, 0], [0, 1, 0], 1.05);
+          }
+          if (c.y === 0 && c.z === 0) return CUT.corner(s, -1, -1, 1.4);
           return null;
         }
-      });
-      v.box(0, 1, 0, 9, 0, 10, (x, y, z) => {
-        if (y === 0) return 'beltMid';
-        if (y === 7 && (z === 7 || z === 8)) return 'techDG';
-        if (y === 8) return 'LG';
-        if (z === 9) return 'sideFront';
+      }).box(0, 1, 0, 9, 0, 10, (x, y, z) => {
+        if ((y === 6 || y === 7) && z >= 6 && z <= 8) return 'techDG';
+        if (y === 8) return z === 0 ? 'DG' : 'LG';
+        if (z === 9 && y <= 5) return 'sideFront';
         return 'side';
-      });
-      v.del(c => c.y === 0 && c.z === 9);
-      v.build(p.bufs.plastic);
-      /* оранжевое ухо сзади: выступ 1.0, два кирпича стоймя с боковыми шипами */
+      }).build(p.bufs.plastic);
+      /* ухо: выступ 1.0, 5 рядов (19.95…23.95), два боковых шипа */
       new Vox({
-        cell: [1.05, S, S], at: [s < 0 ? -7.1 : 6.05, Y0 - 0.4, -4.0], maxLen: 2, merge: 0.2, salt: s < 0 ? 13 : 14,
-        studs: (c, f) => f === out && c.z === 1 && (c.y === 3 || c.y === 5) ? 0.3 : false,
+        cell: [1.0, S, S], at: [s < 0 ? x0 - 1.0 : x0 + TH, Y0, -4.8], maxLen: 2, merge: 0.2, salt: s < 0 ? 13 : 14,
+        studs: (c, f) => (f === out && c.z === 1 && (c.y === 3 || c.y === 5)) ? 0.33 : false,
         clip: c => ((c.y === 6 || c.y === 2) && c.z === 0 ? CUT.edge([0, c.y === 6 ? 1 : -1, 0], [0, 0, -1], 0.9) : null)
       }).box(0, 1, 2, 7, 0, 3, 'ear').build(p.bufs.plastic);
-      /* техник снаружи: две втулки техник-кирпича, тёмный диск сзади сверху, шарнир дужки */
-      const xo = s < 0 ? -6.05 - 0.011 : 6.05 + 0.011, d = [s, 0, 0];
-      socket(p, xo, Y0 + 7.5 * S, -4.8 + 7.5 * S, d, LIN.DG);
-      socket(p, xo, Y0 + 7.5 * S, -4.8 + 8.5 * S, d, LIN.DG);
-      socket(p, xo, Y0 + 7.5 * S, -4.8 + 4.5 * S, d, LIN.LG, 0.42);             // светлый диск на верхнем углу
-      socket(p, xo, Y0 + 2.5 * S, -4.8 + 7.5 * S, d, LIN.DG2, 0.3);
-      pin(p, xo, W(23.2), 0.35, d, LIN.BK.clone().multiplyScalar(1.6), 0.22);
-      [-2.8, 1.2].forEach(z => magnet(p, s < 0 ? -4.8 : 4.8, 3.9, z, [-s, 0, 0]));
+      const xo = s < 0 ? x0 - 0.011 : x0 + TH + 0.011, d = [s, 0, 0];
+      socket(p, xo, W(23.75), 0.6, d, LIN.DG, 0.36);                             // техник-кирпич: два отверстия
+      socket(p, xo, W(23.75), 1.8, d, LIN.DG, 0.36);
+      socket(p, s * (4.8 + TH / 2), W(24.15), 3.211, [0, 0, 1], LIN.DG2, 0.3);   // отверстие на торце
+      pin(p, xo, W(22.6), 0.1, d, LIN.BK.clone().multiplyScalar(1.6), 0.22);     // шарнир дужки очков
+      [-2.8, 1.2].forEach(z => magnet(p, s * 4.8, 3.9, z, [-s, 0, 0]));
       p.finish(); head.add(p.g); parts[name] = p;
     }
     sidePlate(-1); sidePlate(1);
 
-    /* ---- шапка-череп: 2 ряда, верхний утоплен (скруглённый верх), пришелец ---- */
+    /* ---- шапка-череп: макро-кирпичи с крупными шипами, пришелец утоплен в кольцо ---- */
     const shapka = part('shapka');
     const ALIEN = [                                          // сзади → вперёд, 8 шипов шириной
       '.A....A.',
@@ -651,58 +674,62 @@
       return ALIEN[i][j];
     };
     {
-      const CAP_Y = 0.3 + 14 * 0.48;
-      const cap = new Vox({
-        cell: [S, S, S], at: [-4.8, CAP_Y, -4.8], maxLen: 4, merge: 0.4, salt: 21,
-        studs: (c, f) => f === 2 && alienAt(c.x, c.z) === '.',
-        clip: c => {
-          if (c.y !== 1) return null;
-          const ex = c.x === 0 || c.x === 11, ez = c.z === 0 || c.z === 11;
-          if (ex && ez) return CUT.corner(c.x ? 1 : -1, 1, c.z ? 1 : -1, 1.5);     // скруглённые углы верха
-          if (ex) return CUT.edge([c.x ? 1 : -1, 0, 0], [0, 1, 0], 1.05);          // скос вдоль боков
-          if (c.x === 11 && c.z === 1) return CUT.edge([1, 0, 0], [0, 1, 0], 0.8); // тёмный скос сзади
-          return null;
-        }
-      });
-      cap.box(0, 12, 0, 1, 0, 12, (x, y, z) => (z === 0 ? 'headBack' : (z === 11 ? 'WH' : 'head')));
-      cap.box(0, 12, 1, 2, 0, 12, (x, y, z) => (x === 11 && z === 1 ? 'DG' : (z === 11 ? 'WH' : 'head')));
-      cap.build(shapka.bufs.plastic);
-      /* пришелец: тело 3 ряда по 0.44, рожки ещё 2, глазницы — утопленные чёрные плитки */
-      const alien = new Vox({
-        cell: [S, 0.48, S], at: [-3.2, CAP_Y + 1.6, -1.6], maxLen: 3, merge: 0.5, salt: 23, gap: 0.024,
-        studs: (c, f) => f === 2 && c.y === 3
-      });
+      /* макро-кирпичи 1.6 × 0.8 × 1.6 с крупными шипами, как на панели HEAD TOP:
+         два слоя 6 × 6 (верхний со скруглёнными углами, сзади справа — тёмный скос), пришелец стоит сверху */
+      const M = 1.6, inAlien = (x, z) => x >= 1 && x <= 4 && z >= 2 && z <= 4;
+      const corner = c => (c.x === 0 || c.x === 5) && (c.z === 0 || c.z === 5);
+      new Vox({ cell: [M, S, M], at: [-4.8, CAP_Y, -4.8], maxLen: 2, merge: 0.4, salt: 21, bev: 0.05,
+        clip: c => (corner(c) && c.z === 0 ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, 0, -1], 0.62) : null)
+      }).box(0, 6, 0, 1, 0, 6, (x, y, z) => (z === 0 ? 'headBack' : 'head')).build(shapka.bufs.plastic);
+      new Vox({ cell: [M, S, M], at: [-4.8, CAP_Y + S, -4.8], maxLen: 2, merge: 0.35, salt: 22, bev: 0.05,
+        studs: (c, f) => (f === 2 && !inAlien(c.x, c.z)) ? 0.46 : false,
+        clip: c => (!corner(c) ? null : (c.z === 0 ? CUT.corner(c.x ? 1 : -1, 1, -1, 1.25) : CUT.edge([c.x ? 1 : -1, 0, 0], [0, 1, 0], 1.45)))
+      }).box(0, 6, 0, 1, 0, 6, (x, y, z) => ((x === 5 && z === 0) ? 'DG' : (z === 0 ? 'headBack' : (z === 5 ? 'WH' : 'head'))))
+        .build(shapka.bufs.plastic);
+      /* пришелец на шапке: тело — кирпич 0.8 + гладкая плитка 0.24 (1.04),
+         рожки — два блока по 1.0 с шипом (выше тела на ~1); глазницы — утопленные чёрные плитки */
+      const AY = CAP_Y + 2 * S;
+      const HORN = +(opts.hornH || 1.0);
+      const alien = new Vox({ cell: [S, 0.8, S], at: [-3.2, AY, -1.6], maxLen: 4, merge: 0.8, salt: 23, gap: 0.024 });
+      const tiles = new Vox({ cell: [S, 0.24, S], at: [-3.2, AY + 0.8, -1.6], maxLen: 4, merge: 0.85, salt: 24, gap: 0.024, bev: 0.03 });
+      const horns = new Vox({ cell: [S, HORN, S], at: [-3.2, AY, -1.6], maxLen: 1, salt: 26, gap: 0.024,
+        studs: (c, f) => f === 2 && c.y === 1 });
       ALIEN.forEach((row, i) => [...row].forEach((ch, j) => {
-        if (ch === 'X') for (let y = 0; y < 2; y++) alien.set(j, y, i, 'purple');
-        if (ch === 'o') { alien.set(j, 0, i, 'BK'); alien.set(j, 1, i, 'BK'); }
-        if (ch === 'A') for (let y = 0; y < 4; y++) alien.set(j, y, i, 'PU');
+        if (ch === 'X') { alien.set(j, 0, i, 'purple'); tiles.set(j, 0, i, 'purple'); }
+        if (ch === 'o') alien.set(j, 0, i, 'BK');
+        if (ch === 'A') for (let y = 0; y < 2; y++) horns.set(j, y, i, 'PU');
       }));
-      alien.build(shapka.bufs.plastic);
+      [alien, tiles, horns].forEach(v => v.build(shapka.bufs.plastic));
     }
     shapka.finish(); head.add(shapka.g); parts.shapka = shapka;
 
-    /* ---- ОЧКИ: зеркальный щиток с переносицей, градиент тонировки, оправа, дужки ---- */
+    /* ---- ОЧКИ: зеркальный щиток с переносицей, тёмная тонировка, оправа, дужки к шарниру ---- */
     const ochki = new T.Group(); ochki.name = 'ochki'; head.add(ochki);
     {
-      const A = 6.22, ZF = 5.2, R = 0.95, ZB = 1.9;        // полуширина, фронт, радиус угла, конец линзы
-      const YT = W(23.8), YB = W(20.22), YN = W(21.1), YS = W(23.1);
-      const Lf = A - R, La = R * Math.PI / 2, Ls = ZF - R - ZB, Lt = Lf + La + Ls;
+      /* в плане: пологая дуга спереди (радиус RF — зеркальные полосы расходятся к краям, как на листе),
+         скругление R у висков, прямые бока назад до ZB */
+      const A = 6.2, ZF = 5.56, R = 0.95, RF = 20, ZB = 1.9;
+      const YT = W(23.32), YB = W(20.45), YN = W(21.24), YS = W(22.4);
+      const P0 = Math.asin((A - R) / (RF - R));
+      const Lf = RF * P0, La = R * (Math.PI / 2 - P0);
+      const CX0 = RF * Math.sin(P0) - R * Math.sin(P0), CZ0 = ZF - RF * (1 - Math.cos(P0)) - R * Math.cos(P0);
+      const Ls = CZ0 - ZB, Lt = Lf + La + Ls;
       const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
       function at(u) {
         const s = u < 0 ? -1 : 1, a = Math.abs(u);
-        if (a <= Lf) return { x: s * a, z: ZF, nx: 0, nz: 1 };
+        if (a <= Lf) { const f = a / RF; return { x: s * RF * Math.sin(f), z: ZF - RF * (1 - Math.cos(f)), nx: s * Math.sin(f), nz: Math.cos(f) }; }
         if (a <= Lf + La) {
-          const t = (a - Lf) / R;
-          return { x: s * (Lf + R * Math.sin(t)), z: ZF - R + R * Math.cos(t), nx: s * Math.sin(t), nz: Math.cos(t) };
+          const t = P0 + (a - Lf) / R;
+          return { x: s * (CX0 + R * Math.sin(t)), z: CZ0 + R * Math.cos(t), nx: s * Math.sin(t), nz: Math.cos(t) };
         }
-        return { x: s * A, z: ZF - R - (a - Lf - La), nx: s, nz: 0 };
+        return { x: s * A, z: CZ0 - (a - Lf - La), nx: s, nz: 0 };
       }
       function bottom(u) {
         const a = Math.abs(u);
         let y = YB;
-        y += (YN - YB) * (1 - sm(0.35, 1.0, a));                // переносица
-        y += 0.36 * sm(3.2, Lf + La * 0.8, a);                  // скругление к вискам
-        y += (YS - YB - 0.36) * sm(Lf + La * 0.6, Lt, a);       // бок сужается к дужке
+        y += (YN - YB) * (1 - sm(0.55, 1.05, a));               // переносица: трапеция ±1.0 внизу
+        y += 0.45 * sm(3.4, Lf + La * 0.8, a);                  // скругление к вискам
+        y += (YS - YB - 0.45) * sm(Lf + La * 0.6, Lt, a);       // бок сужается к дужке
         return y;
       }
       const top = u => YT - 0.05 * sm(Lf + La, Lt, Math.abs(u));
@@ -710,9 +737,9 @@
       const YM = (YT + YB) / 2 + 0.2, HH = (YT - YB) / 2, BUL = 0.24;
       const bulge = y => -BUL * Math.pow((y - YM) / HH, 2);
       const bulgeD = y => -2 * BUL * (y - YM) / (HH * HH);
-      /* тонировка: множитель sRGB снизу тёмно-красный, к верху светлее и оранжевее (как на листе) */
-      const tLow = new T.Color('#b01604').convertSRGBToLinear(), tHigh = new T.Color('#f04a1c').convertSRGBToLinear();
-      const tintAt = y => tLow.clone().lerp(tHigh, sm(0.86, 1.0, (y - YB) / (YT - YB)));
+      /* тонировка: тёмный красный (жёлтое под ним → #70…90 красный, чёрное → чёрное), светлее у верхней кромки */
+      const tLow = new T.Color('#720c00').convertSRGBToLinear(), tHigh = new T.Color('#861206').convertSRGBToLinear();
+      const tintAt = y => tLow.clone().lerp(tHigh, sm(0.82, 1.0, (y - YB) / (YT - YB)));
       const lens = new MeshBuf(), rim = new MeshBuf();
       const col = new T.Color(1, 1, 1);
       for (const side of [1, -1]) {
@@ -742,9 +769,10 @@
       const lensGeo = lens.geometry();
       const lensMesh = new T.Mesh(lensGeo, MAT.tint);
       lensMesh.name = 'ochki_linza'; lensMesh.renderOrder = 2; ochki.add(lensMesh);
+      lensMesh.castShadow = true;                                   // линза затеняет лицо и переносицу под собой
       const glossMesh = new T.Mesh(lensGeo, MAT.gloss);
-      glossMesh.name = 'ochki_blik'; glossMesh.renderOrder = 3; lensMesh.add(glossMesh);
-      /* оправа-бровь: чуть толще по центру, по всей дуге */
+      glossMesh.name = 'ochki_blik'; glossMesh.renderOrder = 4; lensMesh.add(glossMesh);
+      /* оправа-бровь по всей дуге */
       const RW = 0.12, RH = 0.24;
       {
         const base = rim.v, prof = [[-RW, -RH], [RW, -RH], [RW, 0.02], [RW * 0.6, 0.07], [-RW * 0.6, 0.07], [-RW, 0.02], [-RW, -RH]];
@@ -764,8 +792,8 @@
       /* дужки: петля у линзы с винтом, прямая часть назад, загиб к шарниру на плите */
       [-1, 1].forEach(s => {
         const ax = s * (A + 0.02), yT = YT - 0.1, h = 0.46;
-        bevelBox(rim, ax, yT - h / 2, 1.2, 0.1, h / 2, 1.0, 0.04, col, 63);
-        bevelBox(rim, ax, yT - 0.62, 0.3, 0.1, 0.34, 0.2, 0.05, col, 63);
+        bevelBox(rim, ax, yT - h / 2, 1.05, 0.1, h / 2, 0.95, 0.04, col, 63);
+        bevelBox(rim, ax, yT - 0.55, 0.15, 0.1, 0.36, 0.2, 0.05, col, 63);
         bevelBox(rim, ax, yT - 0.2, ZB + 0.1, 0.17, 0.33, 0.27, 0.05, col, 63);
         axial(rim, CYL, ax + s * 0.16, yT - 0.2, ZB + 0.1, [s, 0, 0], 0.1, 0.05, col.clone().multiplyScalar(0.4));
         axial(rim, HEX, ax + s * 0.2, yT - 0.2, ZB + 0.1, [s, 0, 0], 0.045, 0.02, col.clone().multiplyScalar(0.15));
@@ -776,203 +804,220 @@
     parts.ochki = { g: ochki, name: 'ochki' };
 
     /* ============================================================
-       ШЕЯ-ШТЫРЬ: воронёный металл, воротник с винтами
+       ШЕЯ-ШТЫРЬ: воронёный ПВХ, воротник с винтами
        ============================================================ */
     const sheya = part('sheya', [0, 16.3, 0]);
     {
       const pb = sheya.bufs.plastic, mb = sheya.bufs.metal, gm = new T.Color('#0f1012').convertSRGBToLinear(), dk = LIN.BK;
       axial(pb, CYL_FINE, 0, -1.62, 0.1, [0, 1, 0], 0.86, 0.22, gm, true);    // нижний поясок
-      axial(pb, CYL_FINE, 0, -1.45, 0.1, [0, 1, 0], 1.04, 1.8, gm, true);     // тело штыря (воронёный ПВХ)
+      axial(pb, CYL_FINE, 0, -1.45, 0.1, [0, 1, 0], 1.04, 1.8, gm, true);     // тело штыря
       axial(pb, CYL_FINE, 0, -0.5, 0.1, [0, 1, 0], 1.08, 0.07, dk, true);     // канавка
-      axial(pb, CYL_FINE, 0, 0.28, 0.1, [0, 1, 0], 1.47, 0.47, gm, true);     // воротник под головой
-      axial(pb, CYL_FINE, 0, 0.22, 0.1, [0, 1, 0], 1.32, 0.07, dk, true);
+      axial(pb, CYL_FINE, 0, 0.26, 0.1, [0, 1, 0], 1.47, 0.44, gm, true);     // воротник под головой
+      axial(pb, CYL_FINE, 0, 0.2, 0.1, [0, 1, 0], 1.32, 0.07, dk, true);
       [-0.9, 0, 0.9, 2.3, -2.3].forEach(a => {                                // винты с шестигранником
         const nx = Math.sin(a), nz = Math.cos(a);
-        axial(mb, CYL, nx * 1.43, 0.51, 0.1 + nz * 1.43, [nx, 0, nz], 0.16, 0.07, gm.clone().multiplyScalar(1.8));
-        axial(mb, HEX, nx * 1.46, 0.51, 0.1 + nz * 1.46, [nx, 0, nz], 0.075, 0.05, dk.clone().multiplyScalar(0.3));
+        axial(mb, CYL, nx * 1.43, 0.48, 0.1 + nz * 1.43, [nx, 0, nz], 0.16, 0.07, gm.clone().multiplyScalar(1.8));
+        axial(mb, HEX, nx * 1.46, 0.48, 0.1 + nz * 1.46, [nx, 0, nz], 0.075, 0.05, dk.clone().multiplyScalar(0.3));
       });
     }
     sheya.finish(); root.add(sheya.g); parts.sheya = sheya;
 
     /* ============================================================
-       КОРПУС: таз, двухцветный пояс, грудь из макро-блоков 1.55 × 1.95,
-       верхний ряд с шипами, гнездо шеи, тёмные плечевые колодки, светлые оси
+       КОРПУС (замеры с листа): таз ±4.1 (8.35…10.3) с гнёздами бёдер и выступом
+       промежности, тёмный пояс (10.3…11.3), грудь 6 × 2 макро-блока ±4.74 (11.3…14.8):
+       4 крупных шипа спереди, белая середина 2 × 2, крайние столбцы со скосом
+       и шипами на скосе; верхний ряд (14.8…15.4) и верх с шипами (15.4…16.2);
+       тёмные плечевые блоки с чёрными штырями, светлая ось к руке.
        ============================================================ */
     const korpus = part('korpus');
     {
       const P = korpus.bufs.plastic;
-      /* таз: 10 × 4 × 8, y 7.9…10.46 */
+      /* таз: ±3.7, y 8.3…10.4, спереди круглые гнёзда бёдер, по углам чёрные штифты; промежность ниже, до 7.6 */
+      new Vox({ cell: [0.925, 0.683, 0.8], at: [-3.7, 8.3, -2.8], maxLen: 3, merge: 0.5, salt: 31,
+        clip: c => (c.y === 0 && (c.x === 0 || c.x === 7) && (c.z === 0 || c.z === 6) ? CUT.corner(c.x ? 1 : -1, -1, c.z ? 1 : -1, 1.4) : null)
+      }).box(0, 8, 0, 3, 0, 7, (x, y, z) => (z === 6 && (x === 3 || x === 4) ? 'darkMid' : 'dark')).build(P);
+      new Vox({ cell: [0.75, 0.7, 0.8], at: [-1.5, 7.6, -2.0], maxLen: 4, salt: 32 })
+        .box(0, 4, 0, 1, 0, 5, 'darkMid').build(P);
+      [-1, 1].forEach(s => {
+        socket(korpus, s * 3.0, 9.6, 2.811, [0, 0, 1], LIN.DG2, 0.5);                           // гнёзда бёдер
+        axial(P, CYL, s * 3.45, 10.35, 2.4, [0, 1, 0], 0.17, 0.3, LIN.BK, true);                // чёрные штифты по углам
+        magnet(korpus, s * 3.3, 8.3, 0, [0, -1, 0]);
+      });
+      /* пояс под грудью: тёмный ряд 10.35…10.9 на всю ширину груди */
+      new Vox({ cell: [S, 0.55, S], at: [-4.8, 10.35, -3.2], maxLen: 4, merge: 0.5, salt: 33 })
+        .box(0, 12, 0, 1, 0, 8, 'darkMid').build(P);
+      /* грудь: 6 × 2 × 4 макро-блоков 1.58 × 1.8 × 1.55 (10.9…14.5) */
+      const CX = [1.58, 1.8, 1.55], CA = [-4.74, 10.9, -3.1];
       new Vox({
-        cell: [S, 0.64, S], at: [-4.0, 7.9, -3.2], maxLen: 4, merge: 0.5, salt: 31,
-        clip: c => (c.y === 0 && (c.x === 0 || c.x === 9) && (c.z === 0 || c.z === 7) ? CUT.corner(c.x ? 1 : -1, -1, c.z ? 1 : -1, 1.4) : null)
-      }).box(0, 10, 0, 4, 0, 8, (x, y, z) => (z === 7 && (x === 4 || x === 5) && y <= 1 ? 'darkMid' : 'dark')).build(P);
-      socket(korpus, -2.8, 9.18, 3.211, [0, 0, 1], LIN.DG2, 0.38);
-      socket(korpus, 2.8, 9.18, 3.211, [0, 0, 1], LIN.DG2, 0.38);
-      socket(korpus, -4.011, 9.18, 0, [-1, 0, 0], LIN.DG2, 0.32);
-      socket(korpus, 4.011, 9.18, 0, [1, 0, 0], LIN.DG2, 0.32);
-      [-1, 1].forEach(s => { magnet(korpus, s * 3.3, 7.9, -0.8, [0, -1, 0]); magnet(korpus, s * 3.3, 7.9, 0.8, [0, -1, 0]); });
-      /* пояс: тёмный ряд, над ним средне-серый */
-      new Vox({ cell: [S, 0.4, S], at: [-4.8, 10.46, -3.2], maxLen: 4, merge: 0.5, salt: 33 })
-        .box(0, 12, 0, 2, 0, 8, (x, y) => (y === 0 ? 'dark' : 'beltMid')).build(P);
-      /* грудь: 6 × 2 × 4 макро-блока */
-      new Vox({
-        cell: [1.55, 1.95, 1.55], at: [-4.65, 11.26, -3.1], maxLen: 1, gap: 0.03, bev: 0.06, salt: 35,
+        cell: CX, at: CA, maxLen: 1, gap: 0.03, bev: 0.06, salt: 35,
         studs: (c, f) => {
           if (c.cls === 'WH') return false;
-          if (f === 4) return 0.55;                                   // перёд: 8 крупных шипов
-          if (f === 0 || f === 1) return (c.z === 1 || c.z === 2) ? 0.42 : false;
+          if (f === 4) return (c.x === 1 || c.x === 4) ? 0.52 : false;
+          if (f === 0 || f === 1) return (c.z === 1 || c.z === 2) ? 0.44 : false;
           if (f === 5) return (c.x === 1 || c.x === 4) ? 0.48 : false;
           return false;
-        }
-      }).box(0, 6, 0, 2, 0, 4, (x, y, z) => (z === 3 && (x === 2 || x === 3) ? 'WH' : (z === 3 ? 'LG' : 'light'))).build(P);
-      /* верхний ряд груди: шипы по периметру, белое продолжение середины спереди */
+        },
+        clip: c => ((c.x === 0 || c.x === 5) && c.z === 3 ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, 0, 1], 0.55) : null)
+      }).box(0, 6, 0, 2, 0, 4, (x, y, z) => (z === 3 && (x === 2 || x === 3) ? 'WH' : 'light')).build(P);
+      [0, 5].forEach(xi => [0, 1].forEach(yi => {                                             // шипы на скошенных углах
+        const sx = xi ? 1 : -1, hx = CX[0] / 2 - 0.015, hz = CX[2] / 2 - 0.015, u = 0.275;
+        const cx = CA[0] + (xi + 0.5) * CX[0], cy = CA[1] + (yi + 0.5) * CX[1], cz = CA[2] + 3.5 * CX[2];
+        studOn(P, cx + sx * u * hx, cy, cz + u * hz, [sx / hx, 0, 1 / hz], 0.44, tone('LG'));
+      }));
+      /* верхний ряд груди 14.5…15.1: спереди белые кирпичи */
       new Vox({
-        cell: [S, S, S], at: [-4.8, 15.16, -3.2], maxLen: 4, merge: 0.45, salt: 37,
+        cell: [S, 0.6, S], at: [-4.8, 14.5, -3.2], maxLen: 2, merge: 0.3, salt: 36,
+        clip: c => ((c.x === 0 || c.x === 11) && (c.z === 0 || c.z === 7) ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, 0, c.z ? 1 : -1], 0.7) : null)
+      }).box(0, 12, 0, 1, 0, 8, (x, y, z) => (z === 7 && x >= 2 && x <= 9 ? 'WH' : 'light')).build(P);
+      /* верх 15.1…15.7: шипы по периметру, передняя кромка скошена */
+      new Vox({
+        cell: [S, 0.6, S], at: [-4.8, 15.1, -3.2], maxLen: 4, merge: 0.45, salt: 37,
         studs: (c, f) => {
           if (f !== 2) return false;
           const x = -4.8 + (c.x + 0.5) * S, z = -3.2 + (c.z + 0.5) * S;
-          return Math.hypot(x, z - 0.1) > 1.9;
+          return c.z < 7 && Math.hypot(x, z - 0.1) > 1.9;
         },
-        clip: c => ((c.x === 0 || c.x === 11) && (c.z === 0 || c.z === 7) ? CUT.corner(c.x ? 1 : -1, 1, c.z ? 1 : -1, 1.5) : null)
-      }).box(0, 12, 0, 1, 0, 8, (x, y, z) => {
-        if (z === 7 && x >= 4 && x < 8) return 'WH';
-        if (x === 0 || x === 11) return 'dark';
-        if (z === 0) return 'headBack';
-        return 'light';
-      }).build(P);
-      /* гнездо шеи: тёмная пластина с шипами по углам */
-      new Vox({ cell: [S, 0.32, S], at: [-1.6, 15.96, -1.5], maxLen: 4, salt: 39,
+        clip: c => {
+          const sx = c.x === 0 ? -1 : (c.x === 11 ? 1 : 0);
+          if (sx && (c.z === 0 || c.z === 7)) return CUT.corner(sx, 1, c.z ? 1 : -1, 1.45);
+          if (c.z === 7) return CUT.edge([0, 0, 1], [0, 1, 0], 1.1);
+          if (sx) return CUT.edge([sx, 0, 0], [0, 1, 0], 1.2);
+          return null;
+        }
+      }).box(0, 12, 0, 1, 0, 8, (x, y, z) => (z === 0 ? 'headBack' : 'topBand')).build(P);
+      new Vox({ cell: [S, 0.32, S], at: [-1.6, 15.7, -1.5], maxLen: 4, salt: 39,                 // гнездо шеи
         studs: (c, f) => f === 2 && (c.x === 0 || c.x === 3) && (c.z === 0 || c.z === 3) })
         .box(0, 4, 0, 1, 0, 4, 'dark').build(P);
-      /* плечевые колодки (остаются на корпусе в разлёте) и светлые оси к плечам */
+      /* плечевые блоки: x 5.3…8.3, y 12.3…15.3, с чёрными штырями сверху */
       [-1, 1].forEach(s => {
         new Vox({
-          cell: [S, S, S], at: [s < 0 ? -5.45 : 4.65, 11.66, -2.4], maxLen: 3, salt: 41 + s,
-          studs: (c, f) => (f === (s < 0 ? 1 : 0)) && ((c.y + c.z) & 1) === 0 && c.y < 4,
-          clip: c => (c.y === 4 && (c.z === 0 || c.z === 3) ? CUT.edge([0, 1, 0], [0, 0, c.z ? 1 : -1], 0.9) : null)
-        }).box(0, 1, 0, 5, 0, 4, 'dark').build(P);
-        rod(korpus, s * 4.65, 15.3, 1.9, [s, 0, 0], 0.9);
-        rod(korpus, s * 4.65, 12.3, 1.9, [s, 0, 0], 0.9);
-        magnet(korpus, s * 5.45, 12.4, 0, [s, 0, 0]);
+          cell: [0.75, 0.75, 0.8], at: [s < 0 ? -8.3 : 5.3, 12.3, -1.6], maxLen: 3, merge: 0.45, salt: 41 + s,
+          clip: c => (c.y === 3 && (s < 0 ? c.x === 0 : c.x === 3) ? CUT.edge([s, 0, 0], [0, 1, 0], 0.9) : null)
+        }).box(0, 4, 0, 4, 0, 4, (x, y) => (y === 3 ? 'darkMid' : 'dark')).build(P);
+        axial(P, CYL, s * 6.0, 15.3, 0, [0, 1, 0], 0.32, 0.45, LIN.BK.clone().multiplyScalar(1.3), true);
+        axial(P, CYL, s * 6.0, 15.73, 0, [0, 1, 0], 0.2, 0.08, LIN.BK, true);
+        axial(P, CYL, s * 7.95, 15.0, 0, [s * 0.5, 0.87, 0], 0.26, 0.42, LIN.BK.clone().multiplyScalar(1.3), true);
+        socket(korpus, s * 7.55, 13.4, 1.611, [0, 0, 1], LIN.DG2, 0.34);
+        socket(korpus, s * 6.1, 14.5, 1.611, [0, 0, 1], LIN.DG2, 0.26);
+        rod(korpus, s * 4.74, 14.3, 0.6, [s, 0, 0], 0.6);                                      // светлая ось к плечу
+        magnet(korpus, s * 5.3, 14.0, -0.8, [s, 0, 0]);
       });
     }
     korpus.finish(); root.add(korpus.g); parts.korpus = korpus;
 
     /* ============================================================
-       РУКИ: угловатое тёмное плечо со скосом + кулак-куб углом вниз
+       РУКИ: кулак-блок 3 × 5 × 3 макро-клеток 1.4 (4.2 × 7.0 × 4.2),
+       на каждой наружной клетке один крупный шип, нижний ряд — тёмные костяшки;
+       поза подобрана по силуэту листа (крепится под плечевым блоком)
        ============================================================ */
-    const ARM_POSE = opts.armPose || { pos: [3.8, -4.5, 0.35], rot: [0.6, 0.1, 0.3], tilt: -0.1 };
+    const ARM_POSE = opts.armPose || { pos: [2.6, -1.8, 0.35], rot: [0.4, 0.05, 0.45], tilt: 0 };
     function arm(s) {
       const name = s < 0 ? 'rukaL' : 'rukaR';
-      const p = part(name, [s * 5.45, 14.6, 0]);
-      const P = p.bufs.plastic;
-      /* плечо: 5 × 4 × 4 вплотную к корпусу, внешний верхний край скошен */
-      new Vox({
-        cell: [S, S, S], at: [s < 0 ? -3.2 : 0, -2.2, -1.6], maxLen: 3, merge: 0.5, salt: 51 + s,
-        studs: (c, f) => f === 2 && c.y === 3 && (s < 0 ? c.x > 0 : c.x < 3),
-        clip: c => (c.y === 3 && (s < 0 ? c.x === 0 : c.x === 3) ? CUT.edge([s, 0, 0], [0, 1, 0], 0.95) : null)
-      }).box(0, 4, 0, 4, 0, 4, (x, y) => (y === 3 ? 'darkMid' : 'dark')).build(P);
-      bolt(p, s * 1.2, 1.0, 0, [0, 1, 0], 0.85);                                       // шарнир-ось сверху
-      socket(p, s * 1.2, -0.6, 1.611, [0, 0, 1], LIN.DG2, 0.32);                       // техник-отверстия спереди
-      socket(p, s * 2.0, -1.4, 1.611, [0, 0, 1], LIN.DG2, 0.26);
-      magnet(p, 0, -0.6, 0, [-s, 0, 0]);
-      /* кулак-блок: 4 × 5 × 4 макро-блока 1.2; углы — скосы, рёбра со скруглением, тёмные костяшки снизу */
+      const p = part(name, [s * 6.8, 12.3, 0]);
       const fist = subPart(p.g, name + '_kulak', [s * ARM_POSE.pos[0], ARM_POSE.pos[1], ARM_POSE.pos[2]],
         [ARM_POSE.rot[0], s * ARM_POSE.rot[1], s * ARM_POSE.rot[2]]);
-      const outF = s < 0 ? 1 : 0;
-      const edges = c => (c.x === 0 || c.x === 3) + (c.y === 0 || c.y === 4) + (c.z === 0 || c.z === 3);
-      const isCorner = c => edges(c) === 3;
+      const outF = s < 0 ? 1 : 0, inF = s < 0 ? 0 : 1;
+      const FR = +(opts.fistRows || 5), FC = +(opts.fistCell || 1.4), FH = FR * FC / 2;
+      const E = c => (c.x === 0 || c.x === 2) + (c.y === 0 || c.y === FR - 1) + (c.z === 0 || c.z === 2);
       new Vox({
-        cell: [1.2, 1.2, 1.2], at: [-2.4, -3.0, -2.4], maxLen: 1, gap: 0.034, bev: 0.07, salt: 55 + s,
-        studR: 0.34,
-        bevFor: c => (edges(c) === 2 ? 0.13 : 0),
-        clip: c => (isCorner(c) ? CUT.corner(c.x ? 1 : -1, c.y ? 1 : -1, c.z ? 1 : -1, 1.5) : null),
+        cell: [FC, FC, FC], at: [-1.5 * FC, -FH, -1.5 * FC], maxLen: 1, gap: 0.036, bev: 0.08, salt: 55 + s,
+        bevFor: c => (E(c) >= 2 ? 0.16 : 0),
+        clip: c => (E(c) === 3 ? CUT.corner(c.x ? 1 : -1, c.y ? 1 : -1, c.z ? 1 : -1, 1.9) : null),
         studs: (c, f) => {
           if (c.cls === 'dark' || f === 3) return false;
-          if (f === 2 || f === 4 || f === outF || f === 5) return ((c.x + c.y + c.z + (s < 0 ? 1 : 0)) & 1) === 0;
-          return ((c.x + c.y + c.z) & 1) === 1 && c.y >= 2 && c.y <= 3;
+          if (f === 4 || f === outF || f === 2) return 0.46;
+          if (f === 5) return ((c.x + c.y) & 1) === 0 ? 0.46 : false;
+          if (f === inF) return ((c.y + c.z) & 1) === 1 ? 0.44 : false;
+          return false;
         }
-      }).box(0, 4, 0, 5, 0, 4, (x, y, z) => (y === 0 || (y === 4 && (s < 0 ? x === 3 : x === 0) && z <= 2) ? 'dark' : 'fist'))
-        .build(fist.bufs.plastic);
-      axial(fist.bufs.metal, CYL, 0, -3.0, 0, [0, -1, 0], 0.45, 0.3, LIN.GM);
+      }).box(0, 3, 0, FR, 0, 3, (x, y) => (y === 0 ? 'dark' : 'fist')).build(fist.bufs.plastic);
+      axial(fist.bufs.metal, CYL, 0, FH, 0, [0, 1, 0], 0.42, 0.3, LIN.GM);            // штифт к плечу
       p.fist = fist.finish();
-      p.g.rotation.z = -s * ARM_POSE.tilt;                                              // плечо опущено наружу
+      p.g.rotation.z = -s * ARM_POSE.tilt;
       p.finish(); root.add(p.g); parts[name] = p;
     }
     arm(-1); arm(1);
 
     /* ============================================================
-       НОГИ: тёмное бедро + средне-серая голень мелкой кладкой под наклоном
+       НОГИ: один наклонный блок (верх тёмный, дальше средне-серая мелкая кладка),
+       3 × 4.2 × 3, ось бедра наружу; ось голеностопа проходит сквозь низ голени
+       и наклонена вместе с ней (наружный болт выше внутреннего, как на листе)
        ============================================================ */
+    const LEG_TILT = 0.2;
     function leg(s) {
       const name = s < 0 ? 'nogaL' : 'nogaR';
-      const p = part(name, [s * 3.6, 8.6, 0]);
-      new Vox({
-        cell: [S, 0.64, S], at: [-2.0, -2.56, -1.6], maxLen: 4, merge: 0.4, salt: 61 + s,
-        clip: c => (c.y === 0 && (c.z === 0 || c.z === 3) && (s < 0 ? c.x === 0 : c.x === 4) ? CUT.corner(s, -1, c.z ? 1 : -1, 1.4) : null)
-      }).box(0, 5, 0, 4, 0, 4, (x, y) => (y === 3 ? 'dark' : 'darkMid')).build(p.bufs.plastic);
-      bolt(p, -s * 2.0, -0.9, 0, [-s, 0, 0], 0.9);                     // ось бедра внутрь (в таз)
-      bolt(p, s * 2.0, -1.7, 0, [s, 0, 0], 0.95);                      // колено наружу
+      const p = part(name, [s * 4.15, 8.6, 0]);
+      new Vox({ cell: [0.85, 0.42, 0.75], at: [-1.7, -4.62, -1.5], maxLen: 3, merge: 0.35, salt: 65 + s,
+        clip: c => (c.y === 10 && (c.z === 0 || c.z === 3) && (s < 0 ? c.x === 0 : c.x === 3) ? CUT.corner(s, 1, c.z ? 1 : -1, 1.5) : null)
+      }).box(0, 4, 0, 11, 0, 4, (x, y) => (y >= 9 ? 'dark' : (y === 0 ? 'darkMid' : 'shin'))).build(p.bufs.plastic);
+      bolt(p, s * 1.71, -0.9, 0, [s, 0, 0], 0.9);                                        // ось бедра
+      axial(p.bufs.metal, CYL, -s * 2.75, -3.45, 0, [s, 0, 0], 0.17, 5.5, LIN.SV);        // ось голеностопа
+      bolt(p, s * 2.75, -3.45, 0, [s, 0, 0], 1.05);
+      bolt(p, -s * 2.75, -3.45, 0, [-s, 0, 0], 1.05);
       [-0.8, 0.8].forEach(z => magnet(p, 0, 0, z, [0, 1, 0]));
-      const shin = subPart(p.g, name + '_golen', [s * 1.4, -2.0, -0.2], [0, 0, s * 0.17]);
-      new Vox({ cell: [S, 0.4, S], at: [-1.6, -3.6, -1.6], maxLen: 3, merge: 0.35, salt: 65 + s })
-        .box(0, 4, 0, 9, 0, 4, (x, y, z) => {
-          if (y === 0) return 'dark';
-          return 'shin';
-        }).build(shin.bufs.plastic);
-      shin.finish();
+      p.g.rotation.z = s * LEG_TILT;
       p.finish(); root.add(p.g); parts[name] = p;
     }
     leg(-1); leg(1);
 
     /* ============================================================
-       СТУПНИ 7 × 13: основание (высокие кирпичи по центру, плиты по бокам),
-       средний ярус из плит, верхний ярус со скруглённой кромкой, вилка, болты
+       СТУПНИ 7 × 13 (ширина 5.8, центр ±5.2):
+       основание 0…1.65 — по центру два высоких жёлто-оранжевых кирпича, по бокам стопки плит,
+       средний ярус 1.65…2.45 — две плиты; верхний 2.45…3.5 — ряд кирпичей со скруглённым
+       носком; боковые ступени 3.5…4.4 спереди; вилка голеностопа сзади; нижние болты.
        ============================================================ */
     function foot(s) {
       const name = s < 0 ? 'stupnyaL' : 'stupnyaR';
       const p = part(name);
       const P = p.bufs.plastic;
-      const X0 = s < 0 ? -7.85 : 2.25, Z0 = -4.0;
-      const topStud = (c, f) => f === 2 && ((c.x + c.z) & 1) === 0;
-      /* основание: центр — высокие кирпичи 1.6, бока — 5 плит */
-      new Vox({ cell: [S, 1.28, S], at: [X0 + 1.6, 0, Z0], maxLen: 2, merge: 0.3, salt: 71 + s })
-        .box(0, 3, 0, 1, 0, 13, 'O4').build(P);
-      new Vox({ cell: [S, 0.32, S], at: [X0, 0, Z0], maxLen: 4, merge: 0.5, salt: 72 + s })
-        .box(0, 7, 0, 4, 0, 13, 'footBase')
-        .del(c => (c.x >= 2 && c.x <= 4) || ((c.x === 0 || c.x === 6) && (c.z === 0 || c.z === 12)))
+      const FL = +(opts.footLen || 13);                          // длина ступни в шипах
+      const cx = s * 5.2, X0 = cx - 2.905, Z0 = -4.0;
+      new Vox({ cell: [1.45, 1.45, S], at: [cx - 1.45, 0.2, Z0], maxLen: 1, salt: 71 + s })
+        .box(0, 2, 0, 1, 0, FL, 'O4').build(P);
+      [cx - 2.9, cx + 1.45].forEach((x, i) => new Vox({ cell: [0.725, 0.3625, S], at: [x, 0.2, Z0], maxLen: 4, merge: 0.5, salt: 72 + s + i })
+        .box(0, 2, 0, 4, 0, FL, 'footBase')
+        .del(c => (i === 0 ? c.x === 0 : c.x === 1) && c.y === 0 && (c.z === 0 || c.z === FL - 1))
+        .build(P));
+      new Vox({ cell: [S, 0.2, S], at: [cx - 2.4, 0, Z0 + 0.4], maxLen: 4, salt: 76 + s })        // утопленное дно
+        .box(0, 6, 0, 1, 0, FL - 1, 'O5').build(P);
+      new Vox({ cell: [0.83, 0.4, S], at: [X0, 1.65, Z0], maxLen: 4, merge: 0.55, salt: 73 + s })
+        .box(0, 7, 0, 2, 0, FL, 'footMid')
+        .del(c => c.y === 1 && (c.x === 0 || c.x === 6) && (c.z === 0 || c.z === FL - 1))
         .build(P);
-      /* средний ярус: 2 плиты */
-      new Vox({ cell: [S, 0.32, S], at: [X0, 1.28, Z0], maxLen: 4, merge: 0.55, salt: 73 + s })
-        .box(0, 7, 0, 2, 0, 13, 'footMid')
-        .del(c => (c.y === 1 && c.z === 12) || ((c.x === 0 || c.x === 6) && (c.z === 0 || c.z === 12)))
-        .build(P);
-      /* верхний ярус: 2 ряда, передние клетки — скос; гнездо под голень */
+      /* верхний ярус 2.45…3.6: четыре кирпича 1.45 во всю ширину, передняя кромка скруглена, на верху шипы */
       new Vox({
-        cell: [S, 0.72, S], at: [X0, 1.92, Z0], maxLen: 4, merge: 0.5, salt: 74 + s,
-        studs: (c, f) => topStud(c, f) && ((c.y === 1 && c.z === 7) || (c.y === 0 && c.z === 9)),
+        cell: [1.45, 1.15, S], at: [X0, 2.45, Z0], maxLen: 1, salt: 74 + s,
+        studs: (c, f) => f === 2 && c.z === FL - 3 ? 0.26 : false,
         clip: c => {
-          const front = c.y === 0 ? 10 : 8;
-          if (c.z === front) return CUT.edge([0, 1, 0], [0, 0, 1], 0.75);
-          if (c.z === 0 && c.y === 1) return CUT.edge([0, 1, 0], [0, 0, -1], 0.95);
+          if (c.z === FL - 2) return CUT.edge([0, 1, 0], [0, 0, 1], 1.3);
+          if (c.z === 0) return CUT.edge([0, 1, 0], [0, 0, -1], 1.0);
           return null;
         }
-      }).box(0, 7, 0, 1, 0, 11, 'footTop').box(0, 7, 1, 2, 0, 9, 'footTop')
-        .del(c => c.y === 1 && c.x >= 1 && c.x <= 4 && c.z >= 1 && c.z <= 6)
-        .del(c => (c.x === 0 || c.x === 6) && c.z === 0 && c.y === 0)
-        .build(P);
-      /* вилка голеностопа: две короткие стойки со скруглённым верхом */
+      }).box(0, 4, 0, 1, 0, FL - 1, 'footTop').build(P);
+      /* задний верхний ярус 3.5…4.1: плита-подкова вокруг гнезда голени, мелкие ступеньки с шипами */
       new Vox({
-        cell: [S, 1.0, S], at: [X0, 3.36, Z0], maxLen: 2, merge: 0.4, salt: 75 + s,
-        clip: c => (c.y === 1 && (c.z === 1 || c.z === 5) ? CUT.edge([0, 1, 0], [0, 0, c.z === 5 ? 1 : -1], 0.85) : null)
-      }).box(0, 1, 0, 2, 1, 6, 'bracket').box(5, 6, 0, 2, 1, 6, 'bracket').build(P);
-      /* болты: ось сквозь вилку наружу с обеих сторон, по болту на боках верхнего яруса */
-      const xi = s < 0 ? -2.25 : 2.25, xo = s < 0 ? -7.85 : 7.85, xw = s < 0 ? -7.05 : 7.05;
-      bolt(p, xw + s * 0.01, 4.86, -1.2, [s, 0, 0]);
-      bolt(p, xi - s * 0.01, 4.86, -1.2, [-s, 0, 0]);
-      bolt(p, xo + s * 0.01, 2.64, 2.4, [s, 0, 0], 1.05);
-      bolt(p, xi - s * 0.01, 2.64, 2.4, [-s, 0, 0], 1.05);
-      [-2.0, -0.4].forEach(z => magnet(p, s * 4.65, 2.64, z, [0, 1, 0]));
+        cell: [0.83, 0.6, S], at: [X0, 3.6, Z0], maxLen: 2, merge: 0.3, salt: 75 + s,
+        studs: (c, f) => f === 2 && (c.z === 1 || c.z === 6) && ((c.x + c.z) & 1) === 0 ? 0.22 : false,
+        clip: c => {
+          const sx = c.x === 1 ? -1 : (c.x === 5 ? 1 : 0);
+          if (c.z === 6) return sx ? CUT.corner(sx, 1, 1, 1.35) : CUT.edge([0, 1, 0], [0, 0, 1], 0.85);
+          if (c.z === 0) return sx ? CUT.corner(sx, 1, -1, 1.35) : CUT.edge([0, 1, 0], [0, 0, -1], 1.0);
+          return null;
+        }
+      }).box(1, 6, 0, 1, 0, 7, 'footTop')
+        .del(c => c.x >= 2 && c.x <= 4 && c.z >= 2 && c.z <= 5)
+        .build(P);
+      /* вилка голеностопа: тонкие стойки по бокам низа голени, наружная выше (ось наклонена) */
+      const shinX = s * (4.15 + Math.sin(LEG_TILT) * 4.3);
+      [[1, 3, 0.77], [-1, 2, 0.75]].forEach(([side, rows, h]) => {
+        const x = shinX + side * s * 1.75 - (side * s < 0 ? 0.6 : 0);
+        new Vox({ cell: [0.6, h, 0.8], at: [x, 4.1, -1.2], maxLen: 2, merge: 0.4, salt: 77 + s + side,
+          clip: c => (c.y === rows - 1 && (c.z === 0 || c.z === 2) ? CUT.edge([0, 1, 0], [0, 0, c.z ? 1 : -1], 0.85) : null)
+        }).box(0, 1, 0, rows, 0, 3, 'bracket').build(P);
+      });
+      bolt(p, cx + s * 2.905 + s * 0.01, 3.0, 2.2, [s, 0, 0], 1.05);                             // нижние болты
+      bolt(p, cx - s * 2.905 - s * 0.01, 3.0, 2.2, [-s, 0, 0], 1.05);
+      [-0.8, 0.8].forEach(z => magnet(p, shinX, 3.52, z, [0, 1, 0]));
       p.finish(); root.add(p.g); parts[name] = p;
     }
     foot(-1); foot(1);
@@ -1006,13 +1051,38 @@
       const m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: new T.Color(k, k, k), side: T.DoubleSide }));
       m.position.set(x, y, z); m.lookAt(0, 4, 0); sc.add(m);
     };
-    soft(4, 44, -15, 4, 18, 3.2);          // главный софтбокс слева-спереди: вертикальный блик
-    soft(2.2, 44, -8, 4, 22, 2.4);         // второй узкий — двойная полоса на очках
-    soft(3, 40, 14, 4, 20, 1.6);           // заполняющий справа
-    soft(24, 5, 0, 26, 4, 1.7);            // верхний
-    soft(5, 16, 4, 8, -24, 1.8);           // контровой
+    /* свет на листе падает справа-спереди (правое ухо и плечо светлее левых) */
+    soft(4, 44, 15, 4, 18, 3.2);           // главный софтбокс справа-спереди: вертикальный блик
+    soft(2.2, 44, 8, 4, 22, 2.4);          // второй узкий — двойная полоса на очках
+    soft(3, 40, -14, 4, 20, 1.6);          // заполняющий слева
+    soft(24, 5, 0, 26, 4, 1.2);            // верхний
+    soft(5, 16, -4, 8, -24, 1.8);          // контровой
     const pm = new T.PMREMGenerator(renderer);
     const tex = pm.fromScene(sc, 0.03).texture;
+    pm.dispose();
+    return tex;
+  }
+  /* отражения для зеркальной линзы: тёмная комната (середина линзы тёмная), узкие вертикальные
+     полосы под ±17° и софтбоксы под ±40° — на дуге щитка они дают две пары бликов, как на листе */
+  function lensEnvironment(T, renderer) {
+    const sc = new T.Scene();
+    const box = new T.BoxGeometry(1, 1, 1);
+    const room = new T.Mesh(box, new T.MeshBasicMaterial({ color: 0x000000, side: T.BackSide }));
+    room.scale.set(60, 40, 60); room.position.y = 10; sc.add(room);
+    /* красные полосы: на дуге щитка (R 20) отражаются в левой и правой третях линзы */
+    const strip = (w, h, x, y, z, k) => {
+      const m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: new T.Color(k, k * 0.05, k * 0.012), side: T.DoubleSide }));
+      m.position.set(x, y, z); m.lookAt(0, y, 0); sc.add(m);
+    };
+    strip(3.2, 70, 7.6, 8, 22.5, 1.0);
+    strip(3.4, 70, -7.9, 8, 22.5, 1.1);
+    strip(2.5, 70, 11.2, 8, 21, 0.45);
+    strip(2.5, 70, -11.2, 8, 21, 0.45);
+    strip(8, 70, 20, 8, 12, 0.22);                          // виски
+    strip(8, 70, -20, 8, 12, 0.22);
+    strip(30, 6, 0, 30, 0, 0.35);                            // верхняя кромка
+    const pm = new T.PMREMGenerator(renderer);
+    const tex = pm.fromScene(sc, 0.02).texture;
     pm.dispose();
     return tex;
   }
@@ -1024,19 +1094,20 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = T.PCFSoftShadowMap;
     scene.environment = studioEnvironment(T, renderer);
-    const hemi = new T.HemisphereLight(0xfffcf6, 0x8a8478, 0.22); scene.add(hemi);
-    const key = new T.DirectionalLight(0xfff8ee, 0.84);
-    key.position.set(-11, 23, 25); key.castShadow = true;
+    const lensEnv = lensEnvironment(T, renderer);
+    const hemi = new T.HemisphereLight(0xfffcf6, 0x8a8478, 0.34); scene.add(hemi);
+    const key = new T.DirectionalLight(0xfff8ee, 0.75);
+    key.position.set(6, 26, 26); key.castShadow = true;
     const sm = o.shadowMap || 2048;
     key.shadow.mapSize.set(sm, sm);
     Object.assign(key.shadow.camera, { left: -24, right: 24, top: 36, bottom: -18, near: 1, far: 100 });
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03;
     scene.add(key);
-    const rim = new T.DirectionalLight(0xdce9ff, 0.4); rim.position.set(15, 14, -18); scene.add(rim);
-    const fill = new T.DirectionalLight(0xe9f1ff, 0.16); fill.position.set(20, 3, 10); scene.add(fill);
+    const rim = new T.DirectionalLight(0xdce9ff, 0.4); rim.position.set(-15, 14, -18); scene.add(rim);
+    const fill = new T.DirectionalLight(0xe9f1ff, 0.3); fill.position.set(-20, 3, 10); scene.add(fill);
     const floor = new T.Mesh(new T.PlaneGeometry(240, 240), new T.ShadowMaterial({ opacity: o.shadow == null ? 0.2 : o.shadow }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.name = 'pol'; scene.add(floor);
-    return { hemi, key, rim, fill, floor };
+    return { hemi, key, rim, fill, floor, lensEnv };
   }
 
   /* ======================= АНИМАЦИЯ СОСТОЯНИЙ ======================= */
@@ -1087,8 +1158,9 @@
       if (st.glassesTarget === 0) o.rotation.y = Math.sin(t / 1300) * 0.35;
       else o.rotation.y *= Math.pow(0.9, dtK);
       const hg = P.golova.g;
-      ease(hg.rotation, 'x', talk ? Math.sin(t / 150) * 0.035 : (listen ? 0.05 : 0), k);
-      ease(hg.rotation, 'z', think ? 0.07 : (listen ? -0.06 : 0), k);
+      const hr0 = hg.userData.homeRot || hg.rotation;
+      ease(hg.rotation, 'x', hr0.x + (talk ? Math.sin(t / 150) * 0.035 : (listen ? 0.05 : 0)), k);
+      ease(hg.rotation, 'z', hr0.z + (think ? 0.07 : (listen ? -0.06 : 0)), k);
       st.glow += ((listen ? 0.6 + 0.4 * Math.sin(t / 300) : 0) - st.glow) * k;
       glowLight.intensity = st.glow * 2.4;
       const hl = P.rukaL.g.userData.homeRot, hr = P.rukaR.g.userData.homeRot;
@@ -1132,5 +1204,5 @@
     return sc;
   }
 
-  global.PixelMech = { create, studioEnvironment, stage, makeAnimator, exportScene, PALETTE };
+  global.PixelMech = { create, studioEnvironment, lensEnvironment, stage, makeAnimator, exportScene, PALETTE };
 })(typeof window !== 'undefined' ? window : globalThis);
