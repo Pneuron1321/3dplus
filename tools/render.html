@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>PIXEL MECH · рендер</title>
+<style>html,body{margin:0;background:transparent}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="../node_modules/three/build/three.min.js"></script>
+<script src="../node_modules/three/examples/js/exporters/GLTFExporter.js"></script>
+<script src="../src/pixel-mech.js"></script>
+<script>
+'use strict';
+/* Студийный рендер для листа и экспорт GLB. Управляется из tools/build.mjs. */
+const T = THREE;
+const cv = document.getElementById('c');
+const r = new T.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, preserveDrawingBuffer: true });
+const scene = new T.Scene();
+function skyTexture(top, bottom) {
+  const c = document.createElement('canvas'); c.width = 2; c.height = 256;
+  const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, top); gr.addColorStop(1, bottom); g.fillStyle = gr; g.fillRect(0, 0, 2, 256);
+  const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; return t;
+}
+const SKY = skyTexture('#aad6f5', '#92c6ee');
+const studio = PixelMech.stage(T, r, scene, { shadowMap: 4096 });
+window.studio = studio;
+const floor = studio.floor;
+const model = PixelMech.create(T, Object.assign({ lensEnv: studio.lensEnv }, Object.fromEntries(new URLSearchParams(location.search))));
+scene.add(model.root);
+window.model = model;
+const anim = PixelMech.makeAnimator(T, model);
+
+const cam = new T.PerspectiveCamera(20, 1, 1, 800);
+const ALL = Object.keys(model.parts);
+
+/* spec: { w, h, yaw, pitch, target:[x,y,z], height (сколько мира по вертикали в кадре), fov,
+           only:[детали], hide:[детали], explode, glasses, state, floor } */
+window.renderView = function (spec) {
+  const w = spec.w || 1200, h = spec.h || 1200;
+  const ss = spec.ss || 2;                                   // суперсэмплинг: рендер ×2, потом уменьшение
+  r.setPixelRatio(1); r.setSize(w * ss, h * ss, false);
+  cam.fov = spec.fov || 20; cam.aspect = w / h;
+  cam.updateProjectionMatrix();
+  ALL.forEach(k => { model.parts[k].g.visible = true; });
+  if (spec.only) ALL.forEach(k => { if (k !== 'golova') model.parts[k].g.visible = spec.only.includes(k); });
+  if (spec.only && !spec.only.includes('golova')) {
+    const headParts = ['lico', 'bokL', 'bokR', 'shapka', 'ochki'];
+    model.parts.golova.g.visible = headParts.some(k => spec.only.includes(k));
+  }
+  (spec.hide || []).forEach(k => { model.parts[k].g.visible = false; });
+  floor.visible = spec.floor !== false;
+  scene.background = spec.transparent ? null : (spec.bg ? new T.Color(spec.bg) : SKY);
+  anim.st.state = spec.state || 'тихо';
+  anim.st.explodeTarget = anim.st.explode = spec.explode || 0;
+  anim.st.glassesTarget = anim.st.glasses = spec.glasses == null ? 1 : spec.glasses;
+  anim.st.blinkAt = 1e12;
+  for (let i = 0; i < 400; i++) anim.update(1000 + i * 16, 1);
+  if (spec.glassesPose) {
+    const o = model.parts.ochki.g;
+    o.position.set(...spec.glassesPose.pos); o.rotation.set(...spec.glassesPose.rot);
+  }
+  const t = new T.Vector3(...(spec.target || [0, 13.5, 0]));
+  const fovR = T.MathUtils.degToRad(cam.fov / 2);
+  const dist = (spec.height || 32) / 2 / Math.tan(fovR);
+  const yaw = spec.yaw || 0, pitch = spec.pitch || 0;
+  cam.position.set(t.x + Math.sin(yaw) * Math.cos(pitch) * dist, t.y + Math.sin(pitch) * dist, t.z + Math.cos(yaw) * Math.cos(pitch) * dist);
+  cam.lookAt(t);
+  r.render(scene, cam);
+  /* экранные точки якорей (для выносок на листе): [деталь, [x,y,z] в координатах детали] */
+  const anchors = {};
+  scene.updateMatrixWorld();
+  (spec.anchors || []).forEach(([name, part, loc]) => {
+    const v = new T.Vector3(...loc); model.parts[part].g.localToWorld(v); v.project(cam);
+    anchors[name] = [+((v.x + 1) / 2 * w).toFixed(2), +((1 - v.y) / 2 * h).toFixed(2)];
+  });
+  const out = document.createElement('canvas'); out.width = w; out.height = h;
+  const g2 = out.getContext('2d'); g2.imageSmoothingEnabled = true; g2.imageSmoothingQuality = 'high';
+  g2.drawImage(cv, 0, 0, w, h);
+  return { png: out.toDataURL('image/png'), anchors };
+};
+window.stats = () => model.stats;
+window.exportGLB = () => new Promise((res, rej) => {
+  try {
+    new T.GLTFExporter().parse(PixelMech.exportScene(T, model), glb => {
+      const b = new Uint8Array(glb); let s = '';
+      for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+      res(btoa(s));
+    }, { binary: true });
+  } catch (e) { rej(e); }
+});
+/* скелетный GLB для Godot/VR (lite — облегчённая геометрия для Quest) и паспорт кирпичей */
+const toB64 = glb => { const b = new Uint8Array(glb); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
+window.exportRigGLB = lite => new Promise((res, rej) => {
+  try {
+    const m = lite ? PixelMech.create(T, { lite: true, lensEnv: studio.lensEnv }) : model;
+    new T.GLTFExporter().parse(PixelMech.exportRig(T, m), glb => res(toB64(glb)), { binary: true });
+  } catch (e) { rej(e); }
+});
+window.brickManifest = () => JSON.stringify(PixelMech.brickManifest(T, PixelMech.create(T, { manifest: true, noAO: true, lensEnv: studio.lensEnv })));
+window.ready = true;
+</script>
+</body>
+</html>
