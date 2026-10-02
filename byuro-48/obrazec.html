@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Muster Lebenslauf</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Golos+Text:wght@400;600&display=swap">
+<style>
+/* Ein Blatt Papier: bewusst nur helles Design, wie ein gedrucktes Dokument. */
+:root {
+  --desk: #DDE3E2;
+  --sheet: #FFFFFF;
+  --ink: #18242C;
+  --muted: #5B6A72;
+  --rule: #CBD5D6;
+  --accent: #0E6A86;
+  --stamp: rgba(178, 58, 43, 0.13);
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans: "Golos Text", "Segoe UI", Roboto, Arial, sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--desk);
+  color: var(--ink);
+  font: 15px/1.5 var(--sans);
+  padding-block: 24px;
+  padding-inline: 16px;
+}
+.sheet {
+  position: relative;
+  max-width: 760px;
+  margin: 0 auto 24px;
+  background: var(--sheet);
+  padding: clamp(20px, 5vw, 56px);
+  box-shadow: 0 1px 2px rgba(24, 36, 44, 0.12), 0 8px 24px rgba(24, 36, 44, 0.08);
+  overflow: hidden;
+}
+.sheet::after {
+  content: "MUSTER · OBRAZAC · ОБРАЗЕЦ";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 600 clamp(22px, 6vw, 52px)/1 var(--sans);
+  letter-spacing: 0.08em;
+  color: var(--stamp);
+  transform: rotate(-24deg);
+  pointer-events: none;
+  white-space: nowrap;
+}
+h1 {
+  font: 600 clamp(26px, 6vw, 36px)/1.1 var(--serif);
+  margin: 0;
+  text-wrap: balance;
+}
+.role { color: var(--accent); font-weight: 600; margin: 6px 0 0; }
+.contact { color: var(--muted); margin: 10px 0 0; font-size: 14px; }
+h2 {
+  font: 600 12px/1 var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 28px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.row {
+  display: grid;
+  grid-template-columns: 9.5em 1fr;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+.row > div { min-width: 0; }
+.when { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+.what { font-weight: 600; }
+.where { color: var(--muted); }
+ul { margin: 4px 0 0; padding-left: 1.1em; }
+li { margin: 2px 0; }
+p { margin: 0 0 10px; max-width: 65ch; }
+.letter p { font-family: var(--serif); font-size: 16px; }
+.sign { margin-top: 18px; }
+.foot { color: var(--muted); font-size: 13px; margin-top: 24px; }
+@media (max-width: 520px) {
+  .row { grid-template-columns: 1fr; gap: 0; }
+}
+</style>
+</head>
+<body>
+
+<article class="sheet">
+  <h1>Erika Mustermann</h1>
+  <p class="role">Rezeptionistin · Servicekraft · Wintersaison 2026/27</p>
+  <p class="contact">Rovinj, Kroatien · +385 00 000 0000 · erika.mustermann@example.com · verfügbar ab 01.12.2026</p>
+
+  <h2>Profil</h2>
+  <p>Vier Sommersaisons in der Hotellerie an der kroatischen Adria, davon zwei an der Rezeption eines 4★-Hotels. Gewohnt an volle Häuser, Schichtdienst und internationale Gäste. Gesucht: eine Stelle für die gesamte Wintersaison in Österreich oder der Schweiz, gern mit Personalunterkunft.</p>
+
+  <h2>Berufserfahrung</h2>
+  <div class="row">
+    <div class="when">05/2025 – 10/2026</div>
+    <div>
+      <div class="what">Rezeptionistin (Saison)</div>
+      <div class="where">4★-Hotel, Rovinj (Kroatien)</div>
+      <ul>
+        <li>Check-in und Check-out für bis zu 120 Anreisen pro Tag</li>
+        <li>Reservierungen und Zimmerplanung in der Hotelsoftware (PMS)</li>
+        <li>Gästebetreuung und Beschwerden auf Deutsch, Englisch und Italienisch</li>
+        <li>Abrechnung und Kassenabschluss der Schicht</li>
+      </ul>
+    </div>
+  </div>
+  <div class="row">
+    <div class="when">05/2023 – 10/2024</div>
+    <div>
+      <div class="what">Servicekraft (Saison)</div>
+      <div class="where">Restaurant am Hafen, Rovinj</div>
+      <ul>
+        <li>À-la-carte-Service für 80 Plätze, Bar und Getränkeservice</li>
+        <li>Einarbeitung neuer Saisonkräfte</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Ausbildung</h2>
+  <div class="row">
+    <div class="when">2019 – 2023</div>
+    <div>
+      <div class="what">Hotel- und Tourismustechnikerin</div>
+      <div class="where">Fachschule für Tourismus und Gastgewerbe, Kroatien</div>
+    </div>
+  </div>
+
+  <h2>Sprachen</h2>
+  <div class="row"><div class="when">Kroatisch</div><div>Muttersprache</div></div>
+  <div class="row"><div class="when">Englisch</div><div>C1</div></div>
+  <div class="row"><div class="when">Deutsch</div><div>B2</div></div>
+  <div class="row"><div class="when">Italienisch</div><div>B1</div></div>
+
+  <h2>Kenntnisse</h2>
+  <p>Hotelsoftware (PMS), Kassensysteme, MS Office · HACCP-Schulung (2024) · Führerschein Klasse B</p>
+
+  <p class="foot">Rovinj, 03.10.2026</p>
+</article>
+
+<article class="sheet letter">
+  <p class="contact">Erika Mustermann · Rovinj, Kroatien · erika.mustermann@example.com</p>
+  <h2>Bewerbung als Rezeptionistin für die Wintersaison 2026/27</h2>
+  <p>Sehr geehrte Damen und Herren,</p>
+  <p>nach vier Sommersaisons an der kroatischen Adria möchte ich meine Erfahrung in der Wintersaison in Ihrem Haus einbringen. An der Rezeption eines 4★-Hotels in Rovinj habe ich an Spitzentagen bis zu 120 Anreisen betreut, Reservierungen in der Hotelsoftware gepflegt und Gäste auf Deutsch, Englisch und Italienisch beraten.</p>
+  <p>Ich arbeite gern im Schichtdienst, bleibe auch bei vollem Haus ruhig und lerne neue Systeme schnell. Ab dem 1. Dezember 2026 stehe ich für die gesamte Saison zur Verfügung.</p>
+  <p>Über eine Einladung zu einem Gespräch, gern per Video, freue ich mich.</p>
+  <p class="sign">Mit freundlichen Grüßen<br>Erika Mustermann</p>
+</article>
+
+</body>
+</html>

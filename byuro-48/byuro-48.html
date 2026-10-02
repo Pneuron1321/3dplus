@@ -1,0 +1,445 @@
+<title>Бюро 48</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600&family=Golos+Text:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: один столбец-«стойка бюро»; выходные идут лентой времени, у каждой волны готовые сообщения с кнопкой «Копировать». */
+:root {
+  --paper: #EBF0EF;
+  --card: #FFFFFF;
+  --ink: #13202A;
+  --muted: #566871;
+  --line: #CFD9DA;
+  --accent: #0D6683;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #DCEBEF;
+  --stop: #A9382A;
+  --stop-soft: #F5E3E0;
+  --ok: #2C7447;
+  --display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --body: "Golos Text", "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0E161B; --card: #15212A; --ink: #E4ECEE; --muted: #93A6AE; --line: #273741;
+    --accent: #56B4D3; --accent-ink: #062330; --accent-soft: #15333F;
+    --stop: #E07A69; --stop-soft: #3A1F1B; --ok: #72C38F;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0E161B; --card: #15212A; --ink: #E4ECEE; --muted: #93A6AE; --line: #273741;
+  --accent: #56B4D3; --accent-ink: #062330; --accent-soft: #15333F;
+  --stop: #E07A69; --stop-soft: #3A1F1B; --ok: #72C38F;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 var(--body);
+}
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding-inline: 16px;
+  padding-block: 28px 56px;
+  display: grid;
+  gap: 28px;
+}
+h1 {
+  font: 600 clamp(30px, 8vw, 44px)/1 var(--display);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+h2 {
+  font: 600 13px/1.2 var(--body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+h3 { font: 600 17px/1.3 var(--body); margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 65ch; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+section { display: grid; gap: 12px; }
+
+/* Шапка */
+.head { display: grid; gap: 10px; }
+.goal {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.pill {
+  font: 500 13px/1 var(--mono);
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  white-space: nowrap;
+}
+.pill.strong { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* Ник PayPal */
+.desk {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.field { display: grid; gap: 6px; }
+label { font-weight: 600; }
+.input-row { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); overflow: hidden; }
+.input-row span { padding: 10px 0 10px 12px; color: var(--muted); font-family: var(--mono); font-size: 14px; }
+.input-row input {
+  flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink);
+  font: 500 15px var(--mono); padding: 10px 12px 10px 2px;
+}
+.input-row:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.input-row input:focus { outline: none; }
+.links { display: flex; flex-wrap: wrap; gap: 8px; }
+.linkchip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 500 13px/1 var(--mono);
+  border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink);
+  padding: 9px 10px; cursor: pointer; max-width: 100%;
+}
+.linkchip b { color: var(--accent); }
+.linkchip:hover { border-color: var(--accent); }
+.empty { color: var(--stop); }
+
+/* Списки шагов */
+ol.steps { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; }
+ol.steps li { padding-left: 4px; max-width: 65ch; }
+
+/* Меню */
+.menu { display: grid; border-top: 1px solid var(--line); }
+.menu-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 16px;
+  padding: 12px 0; border-bottom: 1px solid var(--line);
+}
+.menu-row > div { min-width: 0; }
+.price { font: 500 18px/1.2 var(--mono); color: var(--accent); }
+
+/* Лента выходных */
+.timeline { display: grid; gap: 0; }
+.slot {
+  display: grid; grid-template-columns: 7.2em 1fr; gap: 16px;
+  padding-block: 18px;
+  border-top: 1px solid var(--line);
+}
+.slot > div { min-width: 0; display: grid; gap: 12px; align-content: start; }
+.time { font: 500 14px/1.3 var(--mono); color: var(--muted); }
+.time b { display: block; color: var(--ink); font-size: 18px; }
+.rule {
+  display: inline-block; justify-self: start;
+  font: 600 12px/1 var(--body); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--stop); background: var(--stop-soft);
+  padding: 6px 8px; border-radius: 6px;
+}
+
+/* Сообщение */
+.msg {
+  margin: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.msg-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--line);
+}
+.msg-head .tag { font: 500 12px/1 var(--mono); color: var(--muted); }
+.msg-head .tag b { color: var(--ink); font-weight: 500; }
+.msg pre {
+  margin: 0; padding: 12px;
+  white-space: pre-wrap; word-break: break-word;
+  font: 14px/1.55 var(--body);
+}
+.ph { background: var(--accent-soft); border-radius: 4px; padding: 0 3px; }
+.ph.miss { background: var(--stop-soft); color: var(--stop); }
+button.copy {
+  font: 600 13px/1 var(--body);
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  padding: 8px 12px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+}
+button.copy.done { background: transparent; color: var(--ok); border-color: var(--ok); }
+button:focus-visible, .linkchip:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Переключатель цены */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; justify-self: start; }
+.seg button {
+  font: 500 14px/1 var(--mono); border: 0; background: var(--card); color: var(--ink);
+  padding: 9px 14px; cursor: pointer; border-right: 1px solid var(--line);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+a { color: var(--accent); }
+.note { font-size: 14px; color: var(--muted); max-width: 65ch; }
+.foot { border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 560px) {
+  .slot { grid-template-columns: 1fr; gap: 8px; }
+  .time b { display: inline; margin-right: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main class="wrap">
+
+  <header class="head">
+    <h2>Ровинь · сб 3 – вс 4 октября</h2>
+    <h1>Бюро 48</h1>
+    <p>Работу делает Claude. Ты отправляешь сообщения и принимаешь оплату. Всё, что нужно отправить, лежит ниже и копируется одной кнопкой.</p>
+    <div class="goal">
+      <span class="pill strong">цель: 80 € доступными</span>
+      <span class="pill">≈ 84 € брутто</span>
+      <span class="pill">твоё время ≤ 60 мин</span>
+    </div>
+  </header>
+
+  <section class="desk" aria-labelledby="nick-label">
+    <div class="field">
+      <label id="nick-label" for="nick">Твой ник PayPal.me</label>
+      <div class="input-row">
+        <span>paypal.me/</span>
+        <input id="nick" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="ник">
+      </div>
+    </div>
+    <div class="links" id="links"></div>
+    <p class="note">Ник подставится во все сообщения ниже. Нажми на ссылку, чтобы скопировать.</p>
+  </section>
+
+  <section aria-labelledby="today">
+    <h2 id="today">Пятница, сегодня · 10 минут</h2>
+    <ol class="steps">
+      <li>Впиши ник выше и напиши его Claude в сессии.</li>
+      <li>Попроси друга отправить <span class="mono">1 €</span> по ссылке <span class="mono" data-link="1"></span> как оплату <b>товаров и услуг</b>.</li>
+      <li>Открой платёж в приложении PayPal. Если статус «завершён» и деньги доступны, рельс готов. Если «удержан» или «на рассмотрении», деньги придут, но будут доступны позже: скажи Claude, план поменяется.</li>
+      <li>Открой <a href="obrazec.html" target="_blank" rel="noopener">образец резюме</a> и сделай скриншот. Его прикладываешь к сообщениям.</li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="menu">
+    <h2 id="menu">Меню бюро</h2>
+    <div class="menu">
+      <div class="menu-row">
+        <div><h3>Резюме и сопроводительное письмо</h3><p class="muted">Немецкий, английский или хорватский. Для зимнего сезона: Lebenslauf + Bewerbung.</p></div>
+        <div class="price">25 €</div>
+      </div>
+      <div class="menu-row">
+        <div><h3>Перевод или текст</h3><p class="muted">Письмо, объявление, описание до одной страницы. RU, UK, HR, EN, DE, IT.</p></div>
+        <div class="price">15 €</div>
+      </div>
+      <div class="menu-row">
+        <div><h3>Страница-визитка</h3><p class="muted">Апартамент, мастер, услуга. Одна страница в интернете, хостинг бесплатный.</p></div>
+        <div class="price">40 €</div>
+      </div>
+    </div>
+    <p class="note">Не берём: заверенные переводы (их делает судебный переводчик), юридические советы, учебные работы за студентов.</p>
+  </section>
+
+  <section aria-labelledby="waves">
+    <h2 id="waves">Выходные</h2>
+    <div class="timeline" id="timeline"></div>
+  </section>
+
+  <section aria-labelledby="order">
+    <h2 id="order">Пришёл заказ</h2>
+    <p>Скопируй шаблон, заполни и вставь в сессию Claude. В ответ получишь превью, финальный текст или файл и сообщение клиенту на его языке со ссылкой на оплату.</p>
+    <div id="order-slot"></div>
+    <p class="note">Сканы документов не нужны. Пересылай только текст, который нужен для работы.</p>
+  </section>
+
+  <section aria-labelledby="reply">
+    <h2 id="reply">Ответ клиенту с превью</h2>
+    <p>Сначала клиент видит превью, потом платит, потом получает финальный файл.</p>
+    <div class="seg" role="group" aria-label="Цена">
+      <button type="button" data-price="15" aria-pressed="false">15 €</button>
+      <button type="button" data-price="25" aria-pressed="true">25 €</button>
+      <button type="button" data-price="40" aria-pressed="false">40 €</button>
+    </div>
+    <div id="replies" style="display:grid;gap:12px"></div>
+  </section>
+
+  <footer class="foot">
+    <p class="note">Счёт ведёт Claude в сессии. Пиши «пришло 25 €, доступно» или «удержано», и Claude скажет, что дальше. Засчитываются только доступные деньги.</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  var PH = "ТВОЙ-НИК";
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  var nickInput = document.getElementById("nick");
+  var price = "25";
+
+  function cleanNick(v) {
+    return (v || "").trim().replace(/^https?:\/\//i, "").replace(/^(www\.)?paypal\.me\//i, "").replace(/^@/, "").split(/[\/?#\s]/)[0].replace(/[^A-Za-z0-9._-]/g, "");
+  }
+  function nick() { return cleanNick(nickInput.value); }
+  function link(amount) {
+    var n = nick();
+    return n ? "https://paypal.me/" + n + "/" + amount + "EUR" : "paypal.me/" + PH + "/" + amount + "EUR";
+  }
+
+  var waves = [
+    { day: "Сб", time: "08:45", title: "Волна 1 · тёплый круг",
+      text: "20–25 человек, которые тебя знают. Личным сообщением, каждому отдельно, с именем. Образец прикладывай к сезонному варианту.",
+      msgs: [
+        { lang: "RU", label: "общий", body: "Привет, {имя}! Эти выходные я работаю как маленькое бюро: с ИИ-помощником делаю примерно за час\n— резюме и сопроводительное письмо на немецком, английском или хорватском — 25 €\n— перевод или текст: письмо, объявление, описание — 15 €\n— страница-визитка в интернете (апартамент, мастер, услуга) — 40 €\nСначала показываю результат, платишь потом, через PayPal. Работаю до воскресенья вечера.\nТебе или кому-то из знакомых пригодится? Если перешлёшь — спасибо заранее." },
+        { lang: "RU", label: "сезон", body: "Привет, {имя}! Сезон заканчивается. Если ты или кто-то из коллег ищете зимнюю работу в Австрии или Швейцарии: делаю Lebenslauf и Bewerbung на немецком примерно за час, 25 €. Сначала увидишь результат, платишь потом, через PayPal. Образец прикладываю. Принимаю до воскресенья вечера." },
+        { lang: "HR", label: "opći", body: "Bok {ime}! Ovaj vikend radim kao mali biro: uz pomoć umjetne inteligencije za otprilike sat vremena napravim\n— životopis i motivacijsko pismo na njemačkom, engleskom ili hrvatskom — 25 €\n— prijevod ili tekst: pismo, oglas, opis — 15 €\n— jednostavnu web-stranicu (apartman, obrt, usluga) — 40 €\nPrvo vidiš rezultat, plaćaš poslije, preko PayPala. Do nedjelje navečer.\nTreba li tebi ili nekome koga znaš? Hvala ako proslijediš." },
+        { lang: "EN", label: "general", body: "Hi {name}! This weekend I'm running a small bureau: with an AI assistant I turn these around in about an hour\n— CV and cover letter in German, English or Croatian — €25\n— a translation or text: letter, listing, description — €15\n— a one-page website (apartment, trade, service) — €40\nYou see the result first and pay after, via PayPal. Open until Sunday evening.\nCould you or someone you know use it? Forwarding helps a lot." }
+      ] },
+    { day: "Сб", time: "13:00", rule: "Стоп-правило: 0 «да» с утра", title: "Волна 2 · группы Истрии и Хорватии",
+      text: "Сначала прочитай правила группы про объявления. Образец выложи первым комментарием.",
+      msgs: [
+        { lang: "RU", label: "пост в группу", body: "Сезон закончился? Пишу Lebenslauf и Bewerbung на немецком для зимнего сезона в Австрии и Швейцарии, а также резюме на хорватском и английском. Готово примерно за час, 25 €. Сначала вы видите результат, оплата потом (PayPal). Принимаю заказы до воскресенья вечера. Образец в комментарии, пишите в личку." },
+        { lang: "HR", label: "objava u grupi", body: "Sezona je gotova? Pišem životopis i motivacijsko pismo na njemačkom (Lebenslauf i Bewerbung) za zimsku sezonu u Austriji i Švicarskoj, a i na hrvatskom ili engleskom. Gotovo za otprilike sat vremena, 25 €. Prvo vidite rezultat, plaćate poslije (PayPal). Narudžbe primam do nedjelje navečer. Primjer je u komentaru, javite se u poruci." }
+      ] },
+    { day: "Сб", time: "19:00", rule: "Стоп-правило: меньше 40 € за день", title: "Волна 3 · биржи задач",
+      text: "r/slavelabour, r/forhire и похожие. Сначала правила сабреддита: возраст аккаунта, формат [OFFER]. На [TASK] отвечай только после того, как Claude уже сделал первую часть: пришли сюда текст задачи.",
+      msgs: [
+        { lang: "EN", label: "ответ на [TASK]", body: "Hi! I can do this today. I've already done the first part, screenshot attached, so you can check it's what you need. If it fits: {PRICE} via PayPal and you get the full file within the hour. AI-assisted, checked by me." },
+        { lang: "EN", label: "пост [OFFER]", body: "[OFFER] CVs and cover letters (EN/DE/HR), translations (EN/DE/HR/RU/UK/IT), short texts and listings. Done in about an hour, from €15. You see a preview first and pay via PayPal after. AI-assisted, checked by me. Open until Sunday evening (CEST)." }
+      ] },
+    { day: "Вс", time: "11:00", rule: "Меньше 80 € доступными", title: "Дожим и ступень 4",
+      text: "Одно напоминание тем, кто ответил «подумаю». Если всё ещё мало, ступень 4: хозяева апартаментов из Каскада 48, страница за 80 €.",
+      msgs: [
+        { lang: "RU", label: "напоминание", body: "Привет! Напоминаю: бюро работает до сегодняшнего вечера. Если ещё актуально, пришли данные, через час будет готово." },
+        { lang: "HR", label: "podsjetnik", body: "Bok! Samo podsjetnik: biro radi do večeras. Ako je još aktualno, pošalji podatke i za sat vremena je gotovo." }
+      ] },
+    { day: "Вс", time: "18:00", title: "Счёт",
+      text: "Считаются только доступные деньги на PayPal. Напиши Claude итог.", msgs: [] }
+  ];
+
+  var orderTpl = "ЗАКАЗ\nЧто: \nЯзык результата: \nЦена: \nЯзык клиента: \nДанные от клиента:\n";
+
+  var replies = [
+    { lang: "RU", body: "Готово, вот превью. Если всё подходит: {PRICE} сюда → {LINK}\nСразу после оплаты пришлю финальный файл (PDF и редактируемую версию)." },
+    { lang: "HR", body: "Gotovo, evo pregleda. Ako vam odgovara: {PRICE} ovdje → {LINK}\nOdmah nakon uplate šaljem konačnu datoteku (PDF i verziju za uređivanje)." },
+    { lang: "EN", body: "Done, here's a preview. If it works for you: {PRICE} here → {LINK}\nI'll send the final file (PDF and an editable version) right after payment." },
+    { lang: "DE", body: "Fertig, hier die Vorschau. Wenn alles passt: {PRICE} hier → {LINK}\nDirekt nach der Zahlung schicke ich die finale Datei (PDF und bearbeitbare Version)." }
+  ];
+
+  function priceText(lang, p) { return (lang === "EN") ? "€" + p : p + " €"; }
+
+  function fill(body, lang, p) {
+    return body.replace(/\{PRICE\}/g, priceText(lang, p)).replace(/\{LINK\}/g, link(p));
+  }
+
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  function highlight(text) {
+    var h = esc(text);
+    h = h.replace(/\{(имя|ime|name)\}/g, '<span class="ph">{$1}</span>');
+    h = h.replace(/(https:\/\/paypal\.me\/[^\s]+)/g, '<span class="ph">$1</span>');
+    h = h.replace(new RegExp("(paypal\\.me\\/" + PH + "\\/[^\\s]+)", "g"), '<span class="ph miss">$1</span>');
+    return h;
+  }
+
+  function copyText(text, btn) {
+    function ok() {
+      if (!btn) return;
+      var old = btn.dataset.label || btn.textContent;
+      btn.dataset.label = old;
+      btn.textContent = "Скопировано";
+      btn.classList.add("done");
+      setTimeout(function () { btn.textContent = old; btn.classList.remove("done"); }, 1600);
+    }
+    function fallback() {
+      var pre = btn && btn.closest(".msg") ? btn.closest(".msg").querySelector("pre") : null;
+      if (pre) {
+        var r = document.createRange(); r.selectNodeContents(pre);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        if (btn) { btn.textContent = "Выделено, скопируй"; }
+      }
+    }
+    try {
+      navigator.clipboard.writeText(text).then(ok, fallback);
+    } catch (e) { fallback(); }
+  }
+
+  function msgEl(tag, label, text) {
+    var fig = document.createElement("figure");
+    fig.className = "msg";
+    fig.innerHTML = '<div class="msg-head"><span class="tag"><b>' + esc(tag) + '</b>' + (label ? " · " + esc(label) : "") + '</span><button type="button" class="copy">Копировать</button></div><pre></pre>';
+    fig.querySelector("pre").innerHTML = highlight(text);
+    fig.querySelector("button").addEventListener("click", function (e) { copyText(text, e.currentTarget); });
+    return fig;
+  }
+
+  function renderLinks() {
+    var box = document.getElementById("links");
+    box.innerHTML = "";
+    ["15", "25", "40"].forEach(function (a) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "linkchip";
+      var l = link(a);
+      b.innerHTML = '<b>' + a + ' €</b><span class="' + (nick() ? "" : "empty") + '">' + esc(l.replace(/^https:\/\//, "")) + '</span>';
+      b.addEventListener("click", function () {
+        try { navigator.clipboard.writeText(l).then(function () { b.style.borderColor = "var(--ok)"; setTimeout(function () { b.style.borderColor = ""; }, 1200); }, function () {}); } catch (e) {}
+      });
+      box.appendChild(b);
+    });
+    document.querySelectorAll("[data-link]").forEach(function (el) { el.textContent = link(el.getAttribute("data-link")).replace(/^https:\/\//, ""); });
+  }
+
+  function renderTimeline() {
+    var tl = document.getElementById("timeline");
+    tl.innerHTML = "";
+    waves.forEach(function (w) {
+      var slot = document.createElement("div");
+      slot.className = "slot";
+      var left = document.createElement("div");
+      left.className = "time";
+      left.innerHTML = "<b>" + w.time + "</b>" + w.day;
+      var right = document.createElement("div");
+      if (w.rule) { var r = document.createElement("span"); r.className = "rule"; r.textContent = w.rule; right.appendChild(r); }
+      var h = document.createElement("h3"); h.textContent = w.title; right.appendChild(h);
+      var p = document.createElement("p"); p.className = "muted"; p.textContent = w.text; right.appendChild(p);
+      w.msgs.forEach(function (m) { right.appendChild(msgEl(m.lang, m.label, fill(m.body, m.lang, price))); });
+      slot.appendChild(left); slot.appendChild(right);
+      tl.appendChild(slot);
+    });
+  }
+
+  function renderOrder() {
+    var box = document.getElementById("order-slot");
+    box.innerHTML = "";
+    box.appendChild(msgEl("в сессию Claude", "шаблон", orderTpl));
+  }
+
+  function renderReplies() {
+    var box = document.getElementById("replies");
+    box.innerHTML = "";
+    replies.forEach(function (r) { box.appendChild(msgEl(r.lang, priceText(r.lang, price), fill(r.body, r.lang, price))); });
+  }
+
+  function renderAll() { renderLinks(); renderTimeline(); renderReplies(); }
+
+  document.querySelectorAll(".seg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      price = b.getAttribute("data-price");
+      document.querySelectorAll(".seg button").forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+      renderAll();
+    });
+  });
+
+  nickInput.value = store.get("byuro48-nick") || "";
+  nickInput.addEventListener("input", function () { store.set("byuro48-nick", nick()); renderAll(); });
+
+  renderOrder();
+  renderAll();
+})();
+</script>
