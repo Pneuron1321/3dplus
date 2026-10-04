@@ -2,10 +2,13 @@
 # skazhi — сказать текст голосом Авы в шлеме. Текст — аргументами или со stdin.
 # Фразы идут по очереди: первая звучит, пока готовится следующая (меньше ждать).
 # Оборвать речь — tiho (Claude продолжает работать). Молчать — touch /root/.golos-off
-import os, re, shutil, subprocess, sys, tempfile, threading, time, queue
+# Новая речь ждёт, пока договорит прежняя (Ава не перебивает сама себя);
+# tiho обрывает и звучащую, и ждущие.
+import fcntl, os, re, shutil, subprocess, sys, tempfile, threading, time, queue
 
 OFF = '/root/.golos-off'
 STOP = '/tmp/golos.stop'        # tiho пишет сюда время; речь, начатая раньше, замолкает
+LOCK = '/tmp/golos.lock'        # очередь: говорит тот, кто держит замок
 VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
 PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
 
@@ -31,6 +34,22 @@ def oborvano(t0):
         return False
 
 
+def ochered(t0):
+    """Ждать, пока договорит прежняя речь. None — оборвали (tiho)."""
+    f = open(LOCK, 'w')
+    while True:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return f
+        except BlockingIOError:
+            if oborvano(t0):
+                f.close()
+                return None
+            time.sleep(0.15)
+        except OSError:
+            return f            # замков нет — говорим без очереди
+
+
 def main():
     if os.path.exists(OFF):
         return 0
@@ -38,7 +57,6 @@ def main():
     parts = kuski(text)
     if not parts:
         return 0
-    open(STOP, 'w').write(repr(time.time()))     # прежняя речь замолкает
     t0 = time.time()
     tmp = tempfile.mkdtemp(prefix='golos-')
     ready = queue.Queue()
@@ -55,10 +73,11 @@ def main():
             synth[:] = [p]
             ready.put(mp3 if p.wait() == 0 else None)
         ready.put('')
-    threading.Thread(target=gotovit, daemon=True).start()
+    threading.Thread(target=gotovit, daemon=True).start()   # готовим, пока ждём
 
     code = 0
-    while True:
+    zamok = ochered(t0)
+    while zamok:
         mp3 = ready.get()
         if mp3 == '' or oborvano(t0):
             break

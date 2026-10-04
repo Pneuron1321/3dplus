@@ -1,8 +1,18 @@
 #!/bin/sh
 # plus — запустить Плюса: уши (ushi) в фоне и Claude в tmux-сессии «plus».
 # Уши вписывают услышанное в эту сессию. Выйти из Claude — /exit, как обычно.
+# Уши обновили (ushi или sluh новее запущенных) — перезапускает их сам.
+# -u и UTF-8: без них tmux меняет кириллицу на «_».
+export LANG=C.UTF-8
 P=$(cat /tmp/ushi.pid 2> /dev/null)
-if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
-  nohup /usr/local/bin/ushi > /tmp/ushi.log 2>&1 &
+if [ -n "$P" ] && kill -0 "$P" 2> /dev/null; then
+  for f in /usr/local/bin/ushi /usr/local/bin/sluh; do
+    if [ "$f" -nt /tmp/ushi.pid ]; then
+      kill "$P"; sleep 1; P=; break
+    fi
+  done
 fi
-exec tmux new-session -A -s plus claude
+if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
+  setsid nohup /usr/local/bin/ushi > /tmp/ushi.log 2>&1 < /dev/null &
+fi
+exec tmux -u new-session -A -s plus claude
