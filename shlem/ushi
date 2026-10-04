@@ -28,13 +28,15 @@ FRAZY = '/tmp/frazy'
 # «копи копи» в конце фразы (как «приём» в рации):
 # приложение уже отправило фразу, слова Плюсу не нужны.
 # Два слова подряд в конце срезаем всегда (в речи так не
-# бывает), одно — только если приложение отметило stop.
+# бывает), одно — только если приложение отметило stop;
+# «копик», «копейку» — быстрое «копи копи» одним словом.
 KOPI = (r'(?:капи|копи|капі|копі|кэпи|капе|копе|капий'
         r'|копий|копия|copy|coppy|kopi|kapi|cappy|capi)')
 KAPI = re.compile(r'(?:[\s,.!?…—-]*\b' + KOPI
                   + r'\b){1,2}[\s.!?…]*$', re.I)
-KAPI2 = re.compile(r'(?:[\s,.!?…—-]*\b' + KOPI
-                   + r'\b){2}[\s.!?…]*$', re.I)
+KAPI2 = re.compile(r'(?:(?:[\s,.!?…—-]*\b' + KOPI
+                   + r'\b){2}|[\s,.!?…—-]*\b(?:копик|копейку)\b)'
+                   r'[\s.!?…]*$', re.I)
 PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
 ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
@@ -207,6 +209,30 @@ def plus_alive():
         capture_output=True).returncode == 0
 
 
+STRIM = '/tmp/strim.jpg'      # кадр ретранслятора (retr)
+
+
+def strim_live():
+    try:
+        return time.time() - os.path.getmtime(STRIM) < 6
+    except OSError:
+        return False
+
+
+def retr():
+    """Ретранслятор стрима: уши держат его запущенным
+    (есть ffmpeg — запускаем, если не идёт)."""
+    try:
+        p = int(open('/tmp/retr.pid').read())
+        os.kill(p, 0)
+        return
+    except (OSError, ValueError):
+        pass
+    if subprocess.run(['sh', '-c', 'command -v ffmpeg'],
+                      capture_output=True).returncode == 0:
+        subprocess.run(['retr'], capture_output=True)
+
+
 def stamp():
     out = []
     for f in (ME, Sluh.SCRIPT, '/root/.sluh-model',
@@ -238,10 +264,13 @@ def main():
     sluh = Sluh()
     last = None
     st, n, alive = stamp(), 0, plus_alive()
+    retr()
     while True:
         n += 1
         if n % 8 == 0:                     # ~3 с
             alive = plus_alive()
+        if n % 75 == 0:                    # ~30 с
+            retr()
         if n % 8 == 0 and stamp() != st:
             st = stamp()
             if obnovleny(st):
@@ -255,8 +284,9 @@ def main():
             if last is None:
                 last = get(EAR)['id']   # старое не повторяем
                 pauza()
-            e = get('%s?after=%d%s' % (
-                EAR, last, '&plus=1' if alive else ''))
+            e = get('%s?after=%d%s%s' % (
+                EAR, last, '&plus=1' if alive else '',
+                '&strim=1' if strim_live() else ''))
             kind = e.get('kind', 'none')
             if kind == 'none' and e['id'] < last:
                 last = e['id']   # мост перезапущен

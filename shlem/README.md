@@ -12,6 +12,7 @@
   `sluh` — Whisper (облако Groq при ключе, иначе локально), `sluh-test` —
   сравнить модели, `kluch` — ключ Groq из буфера, `obnovi` — обновить
   скрипты из этой папки, `kadr` — взгляд,
+  `retr` — ретранслятор стрима (BeamXR → шлем → Twitch, кадр для Плюса),
   `skazhi` / `tiho` / `golos-hook` — голос, `plus` — запуск, `pamyat` — память
   после сжатия. `CLAUDE.md` — правила Плюса, `settings.json` — хуки.
 

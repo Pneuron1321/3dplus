@@ -1,15 +1,21 @@
 #!/bin/sh
-# kluch — ключ Groq из буфера обмена шлема в /root/.groq-key, не показывая его.
-# Скопируй ключ на console.groq.com, потом в окне Плюса: ! kluch
+# kluch — ключ из буфера обмена шлема в файл, не показывая его.
+#   ! kluch          — ключ Groq (console.groq.com/keys) → /root/.groq-key
+#   ! kluch twitch   — ключ трансляции Twitch (dashboard.twitch.tv → Настройки →
+#                      Трансляция → Основной ключ) → /root/.twitch-key, для retr
 # Ключ — секрет: не печатать, не читать вслух, не заливать, не в кадр.
 T=/data/data/com.termux/files/usr/bin
 k=$(timeout 15 $T/termux-clipboard-get 2> /dev/null | tr -d ' \r\n')
-case "$k" in
-  gsk_?*) ;;
-  '') echo "Буфер пуст или Termux:API не ответил. Скопируй ключ ещё раз."; exit 1 ;;
-  *) echo "В буфере не ключ Groq: он начинается с gsk_."; exit 1 ;;
-esac
+[ -n "$k" ] || { echo "Буфер пуст или Termux:API не ответил. Скопируй ключ ещё раз."; exit 1; }
 umask 077
+if [ "$1" = twitch ]; then
+  case "$k" in live_?*) ;; *) echo "В буфере не ключ Twitch: он начинается с live_."; exit 1 ;; esac
+  printf '%s\n' "$k" > /root/.twitch-key
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  echo "Ключ Twitch сохранён (${#k} знаков). Буфер очищен. Ретранслятор возьмёт его со следующего эфира."
+  exit 0
+fi
+case "$k" in gsk_?*) ;; *) echo "В буфере не ключ Groq: он начинается с gsk_."; exit 1 ;; esac
 printf '%s\n' "$k" > /root/.groq-key
 timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null   # стереть ключ из буфера
 h=$(mktemp)

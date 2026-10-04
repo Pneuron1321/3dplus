@@ -6,6 +6,23 @@
 #   kadr centr    — «зум зум центр»: центр вида в полном разрешении, 960×540 (≈700 токенов)
 U=http://localhost:8765
 OUT=${KADR_OUT:-/root/view.jpg}
+# Стрим идёт через ретранслятор (retr) — кадр из стрима: захват экрана у BeamXR,
+# наш захват его бы оборвал (Quest даёт захват одному приложению).
+S=${KADR_STRIM:-/tmp/strim.jpg}
+if [ -f "$S" ]; then
+  sa=$(( $(date +%s) - $(stat -c %Y "$S") ))
+  if [ "$sa" -lt 6 ]; then
+    case "$1" in
+      x2) VF='scale=1086:-2' ;;
+      x4|krupno) VF='scale=1536:-2' ;;
+      centr) VF='crop=iw/2:ih/2,scale=960:-2' ;;
+      *) VF='scale=768:-2' ;;
+    esac
+    ffmpeg -nostdin -loglevel error -y -i "$S" -vf "$VF" -q:v 3 "$OUT" || { echo "Кадр из стрима не получился."; exit 1; }
+    echo "Кадр из стрима: $OUT · возраст ~$sa с (то, что видят зрители)"
+    exit 0
+  fi
+fi
 case "$1" in
   x2) Q='?size=x2' ;;
   x4|krupno) Q='?size=big' ;;
