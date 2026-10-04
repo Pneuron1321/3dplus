@@ -9,8 +9,9 @@
 # Запускает plus; лог — /tmp/ushi.log (время
 # Whisper на фразу). Последние 10 фраз — в
 # /tmp/frazy: sluh-test сравнит на них модели.
-# Обновили ushi, sluh, /root/.sluh-model или
-# .sluh-threads — уши перезапускаются сами.
+# Обновили ushi, sluh, /root/.sluh-model,
+# .sluh-threads или .ushi-pauza — уши
+# перезапускаются сами.
 import glob
 import json
 import os
@@ -23,6 +24,7 @@ import urllib.request
 
 EAR = 'http://localhost:8765/ear'
 FRAZY = '/tmp/frazy'
+PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
 ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
 COMPACT = (
@@ -67,7 +69,7 @@ class Sluh:
         'SLUH_SCRIPT', '/usr/local/bin/sluh')
 
     def __init__(self):
-        self.p, self.ready = None, False
+        self.p, self.ready, self.via = None, False, ''
         if os.path.exists(self.PY) and \
                 os.path.exists(self.SCRIPT):
             self.p = subprocess.Popen(
@@ -96,8 +98,9 @@ class Sluh:
             out = [self.p.stdout]
             if not select.select(out, [], [], timeout)[0]:
                 return None
-            line = self.p.stdout.readline()
-            return json.loads(line).get('text', '').strip()
+            d = json.loads(self.p.stdout.readline())
+            self.via = d.get('via', '')
+            return d.get('text', '').strip()
         except Exception:
             return None
 
@@ -117,6 +120,18 @@ def fetch(event_id):
     for f in old:
         os.remove(f)
     return wav
+
+
+def pauza():
+    """Пауза конца фразы из PAUZA — приложение
+    (0.3.7+) забывает её при перезапуске."""
+    try:
+        p = float(open(PAUZA).read())
+        print(time.strftime('%H:%M:%S'), 'пауза:',
+              get('%s/set?pause=%s' % (EAR, p)),
+              flush=True)
+    except (OSError, ValueError):
+        pass
 
 
 def compact(kind):
@@ -146,7 +161,8 @@ def handle(e, sluh):
         t0 = time.time()
         w = sluh.hear(fetch(e['id']))
         print(time.strftime('%H:%M:%S'), 'vosk:', t,
-              '| whisper %.1f с:' % (time.time() - t0),
+              '| whisper %s %.1f с:'
+              % (sluh.via, time.time() - t0),
               w, flush=True)
         if w:
             t = w.strip(' .!?…').strip()
@@ -172,7 +188,7 @@ def handle(e, sluh):
 def stamp():
     out = []
     for f in (ME, Sluh.SCRIPT, '/root/.sluh-model',
-              '/root/.sluh-threads'):
+              '/root/.sluh-threads', PAUZA):
         try:
             out.append(os.path.getmtime(f))
         except OSError:
@@ -214,6 +230,7 @@ def main():
         try:
             if last is None:
                 last = get(EAR)['id']   # старое не повторяем
+                pauza()
             e = get('%s?after=%d' % (EAR, last))
             kind = e.get('kind', 'none')
             if kind == 'none' and e['id'] < last:

@@ -1,8 +1,12 @@
 #!/opt/sluh/bin/python
 """sluh — слух Плюса: Whisper распознаёт фразу
-после «плюс плюс». Модель в памяти: со stdin —
-пути к WAV, на каждый — строка JSON {text, lang}.
+после «плюс плюс». Со stdin — пути к WAV, на
+каждый — строка JSON {text, lang, via}.
 Языки ru, uk, en. Первая строка — {"ready": true}.
+Есть ключ Groq (/root/.groq-key или GROQ_API_KEY,
+кладёт `kluch`) — фраза идёт в облако: Whisper
+large-v3, ~1 с, точность диктовки. Нет ключа,
+сети или лимит — локальная модель (via=local).
 Модель: SLUH_MODEL или файл /root/.sluh-model,
 иначе small. large-v3-turbo — точнее, медленнее.
 Потоки: SLUH_THREADS или /root/.sluh-threads, иначе 4.
@@ -10,12 +14,21 @@
 import json
 import os
 import sys
+import time
+import urllib.error
+import urllib.request
+import uuid
 import wave
 
 import numpy as np
 from faster_whisper import WhisperModel
 
 LANGS = ('ru', 'uk', 'en')
+GROQ = os.environ.get(
+    'SLUH_GROQ_URL',
+    'https://api.groq.com/openai/v1/audio/transcriptions')
+NAMES = {'russian': 'ru', 'ukrainian': 'uk',
+         'english': 'en'}
 
 
 def model_name():
@@ -59,6 +72,69 @@ def run(audio, lang=None):
         condition_on_previous_text=False)
 
 
+def groq_key():
+    k = os.environ.get('GROQ_API_KEY')
+    try:
+        k = k or open('/root/.groq-key').read()
+    except OSError:
+        return None
+    return k.strip() or None
+
+
+def log(*a):
+    print(time.strftime('%H:%M:%S'), 'sluh:', *a,
+          file=sys.stderr, flush=True)
+
+
+def groq(path, key, lang=None):
+    """Облако. Ключ не печатаем никогда."""
+    b = uuid.uuid4().hex
+    f = {'model': os.environ.get(
+             'SLUH_GROQ_MODEL', 'whisper-large-v3'),
+         'response_format': 'verbose_json',
+         'temperature': '0'}
+    if lang:
+        f['language'] = lang
+    body = b''.join(
+        ('--%s\r\nContent-Disposition: form-data; '
+         'name="%s"\r\n\r\n%s\r\n'
+         % (b, k, v)).encode() for k, v in f.items())
+    body += ('--%s\r\nContent-Disposition: form-data; '
+             'name="file"; filename="fraza.wav"\r\n'
+             'Content-Type: audio/wav\r\n\r\n'
+             % b).encode()
+    body += open(path, 'rb').read()
+    body += ('\r\n--%s--\r\n' % b).encode()
+    req = urllib.request.Request(GROQ, data=body, headers={
+        'Authorization': 'Bearer ' + key,
+        'User-Agent': 'sluh/1.0',
+        'Content-Type':
+            'multipart/form-data; boundary=' + b})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        d = json.loads(r.read().decode('utf-8'))
+    lang = (d.get('language') or '').lower()
+    return d.get('text', '').strip(), NAMES.get(lang, lang)
+
+
+def oblako(path):
+    """(text, lang) из облака или None — тогда локально."""
+    key = groq_key()
+    if not key:
+        return None
+    try:
+        text, lang = groq(path, key)
+        if text and lang not in LANGS:
+            text, lang = groq(path, key, 'ru')
+        return text, lang
+    except urllib.error.HTTPError as e:
+        why = {401: 'ключ не принят', 429: 'лимит',
+               403: 'отказ (страна?)'}.get(e.code, '')
+        log('groq HTTP', e.code, why)
+    except Exception as e:
+        log('groq:', type(e).__name__, e)
+    return None
+
+
 def hear(path):
     audio = load(path)
     segs, info = run(audio)
@@ -77,8 +153,10 @@ for line in sys.stdin:
     if not path:
         continue
     try:
-        text, lang = hear(path)
-        out = {'text': text, 'lang': lang}
+        r = oblako(path)
+        via = 'groq' if r else 'local'
+        text, lang = r or hear(path)
+        out = {'text': text, 'lang': lang, 'via': via}
     except Exception as e:
         print('sluh: %s: %r' % (path, e),
               file=sys.stderr, flush=True)
