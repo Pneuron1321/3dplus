@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+# ushi — уши Плюса в Ubuntu. Берёт услышанное
+# quest-bridge (/ear) и вписывает фразу в Claude
+# (tmux-сессия «plus»). Вызов и «тихо» глушат
+# Аву без токенов. «Зум зум» — сам берёт кадр.
+# «Компакт» — подготовка, «компакт плюс» — сжатие.
+# Фразу точнее распознаёт Whisper (sluh), если
+# он поставлен; иначе — текст Vosk из приложения.
+# Запускает plus; лог — /tmp/ushi.log (время
+# Whisper на фразу). Последние 10 фраз — в
+# /tmp/frazy: sluh-test сравнит на них модели.
+import glob
+import json
+import os
+import select
+import subprocess
+import threading
+import time
+import urllib.request
+
+EAR = 'http://localhost:8765/ear'
+FRAZY = '/tmp/frazy'
+TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
+COMPACT = (
+    '/compact Сохрани: что делаем сейчас, '
+    'принятые решения, открытые задачи, '
+    'договорённости о голосе, глазах и фразах, '
+    'всё из /root/pamyat.md. Выкинь: описания '
+    'старых кадров, вывод команд, повторы.')
+ZOOM = {
+    'x2': ('x2', 'зум зум — кадр вдвое крупнее'),
+    'x4': ('x4', 'зум зум зум — кадр вчетверо крупнее'),
+    'centr': ('centr', 'зум зум центр — центр вида'),
+}
+
+
+def get(url):
+    with urllib.request.urlopen(url, timeout=3) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
+def say(text):
+    subprocess.run(['skazhi', text])
+
+
+def keys(*args):
+    subprocess.run(['tmux', 'send-keys', '-t', 'plus']
+                   + list(args))
+
+
+def v_plus(text):
+    """Вписать фразу в Claude и нажать Enter."""
+    keys('-l', '(голосом) ' + text)
+    keys('Enter')
+
+
+class Sluh:
+    """Whisper в своём процессе: модель грузится
+    один раз (первый запуск — скачивание)."""
+    PY = os.environ.get(
+        'SLUH_PY', '/opt/sluh/bin/python')
+    SCRIPT = os.environ.get(
+        'SLUH_SCRIPT', '/usr/local/bin/sluh')
+
+    def __init__(self):
+        self.p, self.ready = None, False
+        if os.path.exists(self.PY) and \
+                os.path.exists(self.SCRIPT):
+            self.p = subprocess.Popen(
+                [self.PY, self.SCRIPT],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=open('/tmp/sluh.log', 'a'),
+                text=True, bufsize=1)
+            threading.Thread(target=self._ready,
+                             daemon=True).start()
+
+    def _ready(self):
+        line = self.p.stdout.readline()
+        self.ready = '"ready"' in line
+        print(time.strftime('%H:%M:%S'), 'слух:',
+              'готов' if self.ready else 'не запустился',
+              flush=True)
+
+    def hear(self, wav, timeout=25):
+        if not wav or not self.ready or \
+                self.p.poll() is not None:
+            return None
+        try:
+            self.p.stdin.write(wav + '\n')
+            self.p.stdin.flush()
+            out = [self.p.stdout]
+            if not select.select(out, [], [], timeout)[0]:
+                return None
+            line = self.p.stdout.readline()
+            return json.loads(line).get('text', '').strip()
+        except Exception:
+            return None
+
+
+def fetch(event_id):
+    """Скачать WAV фразы, хранить последние 10."""
+    os.makedirs(FRAZY, exist_ok=True)
+    wav = '%s/%d.wav' % (FRAZY, event_id)
+    url = '%s/wav?id=%d' % (EAR, event_id)
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            open(wav, 'wb').write(r.read())
+    except Exception:
+        return None
+    old = sorted(glob.glob(FRAZY + '/*.wav'),
+                 key=os.path.getmtime)[:-10]
+    for f in old:
+        os.remove(f)
+    return wav
+
+
+def compact(kind):
+    if kind == 'go':
+        say('Сжимаю контекст.')
+        keys('-l', COMPACT)
+        keys('Enter')
+    else:
+        v_plus('компакт: подготовка')
+
+
+def zoom(kind):
+    arg, what = ZOOM.get(kind, ZOOM['x2'])
+    r = subprocess.run(['kadr', arg],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        v_plus(what + ' уже в /root/view.jpg — '
+               'открой и скажи, что там важно')
+    else:
+        say(r.stdout.strip() or 'Кадр не получился.')
+
+
+def handle(e, sluh):
+    kind = e['kind']
+    t = e.get('text', '').strip()
+    if kind == 'text' and e.get('audio'):
+        t0 = time.time()
+        w = sluh.hear(fetch(e['id']))
+        print(time.strftime('%H:%M:%S'), 'vosk:', t,
+              '| whisper %.1f с:' % (time.time() - t0),
+              w, flush=True)
+        if w:
+            t = w.strip(' .!?…').strip()
+        elif not t:
+            say('Не расслышала.')
+    print(time.strftime('%H:%M:%S'), kind, t, flush=True)
+    low = t.lower()
+    if kind in ('wake', 'tiho') or low in TIHO:
+        subprocess.run(['tiho'])
+    elif kind == 'zoom':
+        zoom(t)
+    elif kind == 'compact':
+        compact(t)
+    elif kind == 'text' and low in ('компакт', 'compact'):
+        compact('prep')   # пауза после «плюс плюс»
+    elif kind == 'text' and low in ('компакт плюс',
+                                    'compact plus'):
+        compact('go')
+    elif kind == 'text' and t:
+        v_plus(t)
+
+
+def main():
+    open('/tmp/ushi.pid', 'w').write(str(os.getpid()))
+    sluh = Sluh()
+    last = None
+    while True:
+        try:
+            if last is None:
+                last = get(EAR)['id']   # старое не повторяем
+            e = get('%s?after=%d' % (EAR, last))
+            kind = e.get('kind', 'none')
+            if kind == 'none' and e['id'] < last:
+                last = e['id']   # мост перезапущен
+            elif kind != 'none':
+                last = e['id']
+                handle(e, sluh)
+                continue
+        except Exception as x:   # мост выключен — ждём
+            last = None if isinstance(x, OSError) else last
+        time.sleep(0.4)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,8 @@
+#!/bin/sh
+# plus — запустить Плюса: уши (ushi) в фоне и Claude в tmux-сессии «plus».
+# Уши вписывают услышанное в эту сессию. Выйти из Claude — /exit, как обычно.
+P=$(cat /tmp/ushi.pid 2> /dev/null)
+if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
+  nohup /usr/local/bin/ushi > /tmp/ushi.log 2>&1 &
+fi
+exec tmux new-session -A -s plus claude

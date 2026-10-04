@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+# skazhi — сказать текст голосом Авы в шлеме. Текст — аргументами или со stdin.
+# Фразы идут по очереди: первая звучит, пока готовится следующая (меньше ждать).
+# Оборвать речь — tiho (Claude продолжает работать). Молчать — touch /root/.golos-off
+import os, re, shutil, subprocess, sys, tempfile, threading, time, queue
+
+OFF = '/root/.golos-off'
+STOP = '/tmp/golos.stop'        # tiho пишет сюда время; речь, начатая раньше, замолкает
+VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
+PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
+
+
+def kuski(t):
+    """Предложения, склеенные в куски: первый короткий — чтобы начать быстро."""
+    out, cur = [], ''
+    for f in re.split(r'(?<=[.!?…])\s+', t.strip()):
+        if cur and len(cur) + len(f) > (100 if not out else 300):
+            out.append(cur)
+            cur = f
+        else:
+            cur = (cur + ' ' + f).strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
+def oborvano(t0):
+    try:
+        return float(open(STOP).read()) > t0
+    except (OSError, ValueError):
+        return False
+
+
+def main():
+    if os.path.exists(OFF):
+        return 0
+    text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else sys.stdin.read()
+    parts = kuski(text)
+    if not parts:
+        return 0
+    open(STOP, 'w').write(repr(time.time()))     # прежняя речь замолкает
+    t0 = time.time()
+    tmp = tempfile.mkdtemp(prefix='golos-')
+    ready = queue.Queue()
+    synth = []                                     # текущий edge-tts: оборвём вместе с речью
+
+    def gotovit():
+        for i, k in enumerate(parts):
+            if oborvano(t0):
+                break
+            src, mp3 = os.path.join(tmp, '%d.txt' % i), os.path.join(tmp, '%d.mp3' % i)
+            open(src, 'w').write(k)
+            p = subprocess.Popen(['edge-tts', '--voice', VOICE, '-f', src, '--write-media', mp3],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            synth[:] = [p]
+            ready.put(mp3 if p.wait() == 0 else None)
+        ready.put('')
+    threading.Thread(target=gotovit, daemon=True).start()
+
+    code = 0
+    while True:
+        mp3 = ready.get()
+        if mp3 == '' or oborvano(t0):
+            break
+        if mp3 is None:
+            print('Голос: edge-tts не ответил (интернет?).')
+            code = 1
+            break
+        p = subprocess.Popen([PLAY, mp3], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        while p.poll() is None:
+            if oborvano(t0):
+                p.terminate()
+                break
+            time.sleep(0.15)
+    for p in synth:
+        if p.poll() is None:
+            p.terminate()
+            p.wait()
+    shutil.rmtree(tmp, ignore_errors=True)
+    return code
+
+
+if __name__ == '__main__':
+    sys.exit(main())

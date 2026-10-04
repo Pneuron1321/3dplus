@@ -1,0 +1,22 @@
+#!/bin/sh
+# kadr — один взгляд Плюса: свежий кадр шлема в /root/view.jpg
+#   kadr          — весь вид, 768 px (≈450 токенов)
+#   kadr x2       — «зум зум»: вдвое больше точек, 1086 px (≈900 токенов)
+#   kadr x4       — «зум зум зум»: вчетверо, 1536 px (≈1800 токенов)
+#   kadr centr    — «зум зум центр»: центр вида в полном разрешении, 960×540 (≈700 токенов)
+U=http://localhost:8765
+OUT=${KADR_OUT:-/root/view.jpg}
+case "$1" in
+  x2) Q='?size=x2' ;;
+  x4|krupno) Q='?size=big' ;;
+  centr) Q='?zoom=2' ;;
+  *) Q='' ;;
+esac
+s=$(curl -s --max-time 3 $U/status) || { echo "Глаза выключены: quest-bridge не отвечает. Открой Quest Claude Bridge и нажми «Начать захват»."; exit 1; }
+case "$s" in *'"capturing":false'*) echo "Захват остановлен. В Quest Claude Bridge нажми «Начать захват»."; exit 1;; esac
+case "$s" in *'"stale":true'*) echo "Захват застыл (системная видеозапись?). В Quest Claude Bridge: «Остановить» → «Начать захват» → «Разрешить»."; exit 2;; esac
+age=$(echo "$s" | grep -o '"ageMs":-*[0-9]*' | cut -d: -f2)
+if [ -z "$age" ] || [ "$age" -lt 0 ]; then echo "Кадров ещё нет — подожди пару секунд."; exit 1; fi
+if [ "$age" -gt 5000 ]; then echo "Захват застыл: последний кадр $((age / 1000)) с назад (системная видеозапись?). В Quest Claude Bridge: «Остановить» → «Начать захват» → «Разрешить»."; exit 2; fi
+curl -sf --max-time 5 -o "$OUT" "$U/frame.jpg$Q" || { echo "Кадр не скачался${Q:+ (крупный кадр — с quest-bridge 0.3)}."; exit 1; }
+echo "Кадр: $OUT · возраст $age мс"

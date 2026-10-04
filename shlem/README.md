@@ -1,0 +1,17 @@
+# shlem — файлы Плюса в шлеме Quest 3
+
+Плюс — Claude Code в шлеме (Termux → Ubuntu). Эта папка — публичное зеркало
+`shlem/` из закрытого репо quest-claude (публикация согласована с Александром
+04.10): отсюда Плюс сам скачивает файлы по ссылке, без копирования через буфер
+шлема.
+
+- `zadaniya/NN-*.md` — задания Плюсу. Александр присылает ему ссылку
+  `https://raw.githubusercontent.com/Pneuron1321/3dplus/<коммит>/shlem/zadaniya/…`,
+  Плюс читает её `curl -fsSL` и выполняет.
+- Скрипты (`/usr/local/bin`): `ushi` — уши (фраза из quest-bridge в Claude),
+  `sluh` — Whisper, `sluh-test` — сравнить модели Whisper, `kadr` — взгляд,
+  `skazhi` / `tiho` / `golos-hook` — голос, `plus` — запуск, `pamyat` — память
+  после сжатия. `CLAUDE.md` — правила Плюса, `settings.json` — хуки.
+
+Секретов здесь нет и быть не должно: ключи, коды и адреса туннелей — только
+в шлеме.

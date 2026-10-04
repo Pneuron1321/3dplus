@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/usr/local/bin/golos-hook", "async": true, "timeout": 300 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/usr/local/bin/tiho", "timeout": 5 }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          { "type": "command", "command": "/usr/local/bin/pamyat", "timeout": 5 }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          { "type": "command", "command": "/usr/local/bin/pamyat", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

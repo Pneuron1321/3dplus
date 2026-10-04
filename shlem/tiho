@@ -1,0 +1,3 @@
+#!/bin/sh
+# tiho — оборвать речь Плюса. Процессы Claude не трогает: skazhi сам глушит своё.
+date +%s.%N > /tmp/golos.stop
