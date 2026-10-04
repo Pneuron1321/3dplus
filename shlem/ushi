@@ -9,17 +9,21 @@
 # Запускает plus; лог — /tmp/ushi.log (время
 # Whisper на фразу). Последние 10 фраз — в
 # /tmp/frazy: sluh-test сравнит на них модели.
+# Обновили ushi, sluh, /root/.sluh-model или
+# .sluh-threads — уши перезапускаются сами.
 import glob
 import json
 import os
 import select
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
 
 EAR = 'http://localhost:8765/ear'
 FRAZY = '/tmp/frazy'
+ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
 COMPACT = (
     '/compact Сохрани: что делаем сейчас, '
@@ -165,11 +169,48 @@ def handle(e, sluh):
         v_plus(t)
 
 
+def stamp():
+    out = []
+    for f in (ME, Sluh.SCRIPT, '/root/.sluh-model',
+              '/root/.sluh-threads'):
+        try:
+            out.append(os.path.getmtime(f))
+        except OSError:
+            out.append(0)
+    return out
+
+
+def obnovleny(st):
+    """Файлы ушей сменились и дописаны: True —
+    пора перезапуститься. Битый ushi — не трогаем."""
+    time.sleep(2)              # curl мог не дописать
+    if stamp() != st:
+        return False
+    try:
+        compile(open(ME).read(), ME, 'exec')
+    except (OSError, SyntaxError) as x:
+        print(time.strftime('%H:%M:%S'),
+              'новый ushi с ошибкой:', x, flush=True)
+        return False
+    return True
+
+
 def main():
     open('/tmp/ushi.pid', 'w').write(str(os.getpid()))
     sluh = Sluh()
     last = None
+    st, n = stamp(), 0
     while True:
+        n += 1
+        if n % 8 == 0 and stamp() != st:   # ~3 с
+            st = stamp()
+            if obnovleny(st):
+                print(time.strftime('%H:%M:%S'),
+                      'обновлены — перезапуск', flush=True)
+                if sluh.p:
+                    sluh.p.terminate()
+                os.execv(sys.executable,
+                         [sys.executable, ME])
         try:
             if last is None:
                 last = get(EAR)['id']   # старое не повторяем

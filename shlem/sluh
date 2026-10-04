@@ -5,6 +5,7 @@
 Языки ru, uk, en. Первая строка — {"ready": true}.
 Модель: SLUH_MODEL или файл /root/.sluh-model,
 иначе small. large-v3-turbo — точнее, медленнее.
+Потоки: SLUH_THREADS или /root/.sluh-threads, иначе 4.
 """
 import json
 import os
@@ -26,10 +27,19 @@ def model_name():
         return 'small'
 
 
+def threads():
+    t = os.environ.get('SLUH_THREADS')
+    try:
+        t = t or open('/root/.sluh-threads').read()
+        return int(t.strip())
+    except (OSError, ValueError):
+        return 4
+
+
 model = WhisperModel(
     model_name() or 'small',
     device='cpu', compute_type='int8',
-    cpu_threads=int(os.environ.get('SLUH_THREADS', '4')))
+    cpu_threads=threads())
 print(json.dumps({'ready': True}), flush=True)
 
 
