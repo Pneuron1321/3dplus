@@ -194,6 +194,15 @@ def handle(e, sluh):
         v_plus(t)
 
 
+def plus_alive():
+    """Claude Плюса работает (tmux «plus») — приложение
+    тогда не запускает его заново, а только открывает
+    Termux."""
+    return subprocess.run(
+        ['tmux', 'has-session', '-t', 'plus'],
+        capture_output=True).returncode == 0
+
+
 def stamp():
     out = []
     for f in (ME, Sluh.SCRIPT, '/root/.sluh-model',
@@ -224,10 +233,12 @@ def main():
     open('/tmp/ushi.pid', 'w').write(str(os.getpid()))
     sluh = Sluh()
     last = None
-    st, n = stamp(), 0
+    st, n, alive = stamp(), 0, plus_alive()
     while True:
         n += 1
-        if n % 8 == 0 and stamp() != st:   # ~3 с
+        if n % 8 == 0:                     # ~3 с
+            alive = plus_alive()
+        if n % 8 == 0 and stamp() != st:
             st = stamp()
             if obnovleny(st):
                 print(time.strftime('%H:%M:%S'),
@@ -240,7 +251,8 @@ def main():
             if last is None:
                 last = get(EAR)['id']   # старое не повторяем
                 pauza()
-            e = get('%s?after=%d' % (EAR, last))
+            e = get('%s?after=%d%s' % (
+                EAR, last, '&plus=1' if alive else ''))
             kind = e.get('kind', 'none')
             if kind == 'none' and e['id'] < last:
                 last = e['id']   # мост перезапущен
