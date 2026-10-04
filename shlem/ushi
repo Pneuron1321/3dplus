@@ -26,11 +26,15 @@ import urllib.request
 EAR = 'http://localhost:8765/ear'
 FRAZY = '/tmp/frazy'
 # «копи копи» в конце фразы (как «приём» в рации):
-# приложение уже отправило фразу, слова Плюсу не нужны
-KAPI = re.compile(
-    r'(?:[\s,.!?…—-]*\b(?:капи|копи|капі|копі|кэпи|капе'
-    r'|копе|капий|копий|копия|copy|coppy|kopi|kapi'
-    r'|cappy|capi)\b){1,2}[\s.!?…]*$', re.I)
+# приложение уже отправило фразу, слова Плюсу не нужны.
+# Два слова подряд в конце срезаем всегда (в речи так не
+# бывает), одно — только если приложение отметило stop.
+KOPI = (r'(?:капи|копи|капі|копі|кэпи|капе|копе|капий'
+        r'|копий|копия|copy|coppy|kopi|kapi|cappy|capi)')
+KAPI = re.compile(r'(?:[\s,.!?…—-]*\b' + KOPI
+                  + r'\b){1,2}[\s.!?…]*$', re.I)
+KAPI2 = re.compile(r'(?:[\s,.!?…—-]*\b' + KOPI
+                   + r'\b){2}[\s.!?…]*$', re.I)
 PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
 ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
@@ -171,8 +175,8 @@ def handle(e, sluh):
               '| whisper %s %.1f с:'
               % (sluh.via, time.time() - t0),
               w, flush=True)
-        if w and e.get('stop'):
-            w = KAPI.sub('', w)
+        if w:
+            w = (KAPI if e.get('stop') else KAPI2).sub('', w)
         if w:
             t = w.strip(' .!?…').strip()
         elif not t:
