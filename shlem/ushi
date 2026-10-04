@@ -15,6 +15,7 @@
 import glob
 import json
 import os
+import re
 import select
 import subprocess
 import sys
@@ -24,6 +25,12 @@ import urllib.request
 
 EAR = 'http://localhost:8765/ear'
 FRAZY = '/tmp/frazy'
+# «копи копи» в конце фразы (как «приём» в рации):
+# приложение уже отправило фразу, слова Плюсу не нужны
+KAPI = re.compile(
+    r'(?:[\s,.!?…—-]*\b(?:капи|копи|капі|копі|кэпи|капе'
+    r'|копе|капий|копий|копия|copy|coppy|kopi|kapi'
+    r'|cappy|capi)\b){1,2}[\s.!?…]*$', re.I)
 PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
 ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
@@ -164,6 +171,8 @@ def handle(e, sluh):
               '| whisper %s %.1f с:'
               % (sluh.via, time.time() - t0),
               w, flush=True)
+        if w and e.get('stop'):
+            w = KAPI.sub('', w)
         if w:
             t = w.strip(' .!?…').strip()
         elif not t:
