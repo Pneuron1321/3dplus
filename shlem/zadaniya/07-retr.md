@@ -23,7 +23,7 @@ Twitch, а в шлем (rtmp://127.0.0.1:1935/live, ключ plus). Ретран
 ! setsid nohup sh -c 'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y ffmpeg' > /tmp/ffmpeg-ust.log 2>&1 < /dev/null & echo "ffmpeg ставится в фоне"
 ```
 ```
-! B=https://raw.githubusercontent.com/Pneuron1321/3dplus/47f9ded13ed8897a6e5ba49f1104d3776541ab7f/shlem; [ -x /usr/local/bin/obnovi ] || { curl -fsSL "$B/obnovi" -o /usr/local/bin/obnovi && chmod +x /usr/local/bin/obnovi; }; OBNOVI_BASE=$B obnovi && curl -fsSL "$B/CLAUDE.md" -o /root/.claude/CLAUDE.md && echo "файлы: ок"
+! B=https://raw.githubusercontent.com/Pneuron1321/3dplus/ff12cd43adf9074477d7696f2aa0dbbcfab2bd9e/shlem; [ -x /usr/local/bin/obnovi ] || { curl -fsSL "$B/obnovi" -o /usr/local/bin/obnovi && chmod +x /usr/local/bin/obnovi; }; OBNOVI_BASE=$B obnovi && curl -fsSL "$B/CLAUDE.md" -o /root/.claude/CLAUDE.md && echo "файлы: ок"
 ```
 
 ## 2. Проверка установки (это делаешь ты)
