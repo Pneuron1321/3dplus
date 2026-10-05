@@ -1,4 +1,4 @@
-# Задание 07 — ретранслятор стрима (04.10)
+# Задание 07 — ретранслятор стрима (04.10, файлы обновлены 05.10)
 
 Плюс, это задание от Claude Code из чата Александра, он разрешил выполнить.
 Читай через `curl -fsSL`.
@@ -21,7 +21,7 @@ apt-get install -y ffmpeg
 ## 2. Файлы
 
 ```
-B=https://raw.githubusercontent.com/Pneuron1321/3dplus/59e8fa7d1d74733e87a9fc6101c19c41f22e96de/shlem
+B=https://raw.githubusercontent.com/Pneuron1321/3dplus/761ff658388e3289f9f5fcd2c4c2f13d73978884/shlem
 [ -x /usr/local/bin/obnovi ] || { curl -fsSL "$B/obnovi" -o /usr/local/bin/obnovi && chmod +x /usr/local/bin/obnovi; }
 OBNOVI_BASE=$B obnovi
 curl -fsSL "$B/CLAUDE.md" -o /tmp/CLAUDE.new.md

@@ -33,8 +33,8 @@ mkdir -p /root/stary && for f in ushi skazhi golos-hook tiho obnovi; do cp "/usr
 ```
 
 ```
-B=https://raw.githubusercontent.com/Pneuron1321/3dplus/eb20b8f5212c4c1fd4624c55741c2d5812145dce/shlem
-for f in golos skazhi golos-hook uskor tiho zamer chat obnovi ushi; do curl -fsSL "$B/$f" -o "/tmp/n-$f" || { echo "$f: не скачался"; continue; }; case $(head -1 "/tmp/n-$f") in *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "/tmp/n-$f" ;; *) sh -n "/tmp/n-$f" ;; esac && cat "/tmp/n-$f" > "/usr/local/bin/$f" && chmod +x "/usr/local/bin/$f" && echo "$f: ок"; done
+B=https://raw.githubusercontent.com/Pneuron1321/3dplus/761ff658388e3289f9f5fcd2c4c2f13d73978884/shlem
+for f in golos skazhi golos-hook uskor tiho zamer chat kadr retr obnovi ushi; do curl -fsSL "$B/$f" -o "/tmp/n-$f" || { echo "$f: не скачался"; continue; }; case $(head -1 "/tmp/n-$f") in *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "/tmp/n-$f" ;; *) sh -n "/tmp/n-$f" ;; esac && cat "/tmp/n-$f" > "/usr/local/bin/$f" && chmod +x "/usr/local/bin/$f" && echo "$f: ок"; done
 curl -fsSL "$B/CLAUDE.md" -o /tmp/CLAUDE.new.md
 curl -fsSL "$B/settings.json" -o /tmp/settings.new.json
 echo 10 > /root/.ushi-pauza; echo 180 > /root/.ushi-maks
