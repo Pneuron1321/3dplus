@@ -75,6 +75,12 @@ def vremya(put):
 # ---------- текст для уха ----------
 
 EMODZI = re.compile('[\U0001F000-\U0001FAFF☀-➿️‍]')
+KODY = [(re.compile(r'\bплюс[\s,.!-]+тихо\b', re.I), 'команда тихо'),
+        (re.compile(r'\bплюс[\s,.!-]+плюс\b', re.I), 'двойной плюс'),
+        (re.compile(r'\bзум[\s,.!-]+зум\b', re.I), 'двойной зум'),
+        (re.compile(r'\b(?:копи|капи|copy)[\s,.!-]+(?:копи|капи|copy)\b', re.I), 'двойное копи'),
+        (re.compile(r'\bplus[\s,.!-]+plus\b', re.I), 'double plus'),
+        (re.compile(r'\bzoom[\s,.!-]+zoom\b', re.I), 'double zoom')]
 
 
 def dlya_uha(t, predel=1500):
@@ -89,6 +95,10 @@ def dlya_uha(t, predel=1500):
     t = re.sub(r'https?://\S+', ' ', t)
     t = re.sub(r'(?<![\w.])(?:~|\.{1,2})?/[\w.\-/]+', ' ', t)     # пути /root/view.jpg, ~/x
     t = t.replace('→', ' — ').replace('✓', ' ').replace('✗', ' ')
+    # Кодовые фразы Ава не произносит буквально: микрофон услышал бы её саму, и
+    # уши разбудили бы Плюса её голосом. Смысл остаётся понятным.
+    for shablon, zamena in KODY:
+        t = shablon.sub(zamena, t)
     t = EMODZI.sub('', t)
     stroki = []
     for s in t.split('\n'):
@@ -403,7 +413,9 @@ class Golos:
 
     def bystree(self, granica):
         with self.cv:
-            for k in self.q:
+            for i, k in enumerate(self.q):
+                if i == 0 and self.igrok:
+                    continue               # звучащий доиграет как есть — не синтезировать зря
                 if k.t < granica:
                     k.bystro = True
             self.cv.notify_all()
@@ -575,6 +587,8 @@ def nuzhen_drugoy_python():
         return None
     if line.startswith('#!'):
         py = line[2:].strip().split()[0]
+        if 'python' not in os.path.basename(py):
+            return None                       # не Python (обёртка) — останемся сами
         # Python из pipx — ссылка на тот же системный python3, но запущенный по
         # своему пути он видит свою папку пакетов. Поэтому сравниваем пути как
         # есть, без раскрытия ссылок (realpath дал бы «тот же» — и демон молча

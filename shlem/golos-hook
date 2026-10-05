@@ -15,6 +15,6 @@ v=hook
 cat > "$Q/$n.$v.tmp" && mv "$Q/$n.$v.tmp" "$Q/$n.$v"
 [ $v = hook ] && printf '%s\thook\t%s\t\n' "${n%??????}" "$n" >> /tmp/zamer.log
 if flock -n /tmp/golos-demon.lock true; then
-  setsid nohup /usr/local/bin/golos >> /tmp/golos.log 2>&1 < /dev/null &
+  setsid nohup ${GOLOS_BIN:-/usr/local/bin/golos} >> /tmp/golos.log 2>&1 < /dev/null &
 fi
 exit 0
