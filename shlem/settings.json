@@ -76,6 +76,10 @@
       "Bash(golos proba:*)",
       "Bash(chat)",
       "Bash(chat:*)"
+    ],
+    "additionalDirectories": [
+      "/root",
+      "/tmp"
     ]
   }
 }

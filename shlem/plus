@@ -15,4 +15,8 @@ fi
 if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
   setsid nohup /usr/local/bin/ushi > /tmp/ushi.log 2>&1 < /dev/null &
 fi
-exec tmux -u new-session -A -s plus claude
+# Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
+# «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
+D=/root/plus
+mkdir -p "$D"
+exec tmux -u new-session -A -s plus -c "$D" claude
