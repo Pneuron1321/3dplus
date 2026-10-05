@@ -112,17 +112,68 @@ def keys(*args):
 
 
 TMUX = threading.Lock()   # голос и чат пишут по очереди
+# Вопрос Claude Code на экране («Do you want to proceed?
+# ❯ 1. Yes»): фраза и Enter, вписанные вслепую, ответят
+# на него «да» — голосом Александра или пачкой чата.
+# Узнаём его по низу экрана tmux.
+DIALOG = re.compile(r'❯ *\d+\.|^ *\d+\. +(?:Yes|No)\b|'
+                    r'Do you want to (?:proceed|make|create|'
+                    r'allow|run)', re.M)
+ZHDUT = []          # фразы голосом, пока экран занят
+ZHDAT_MAKS = 120    # с: дольше — устарела, не вписываем
+
+
+def ekran_zanyat():
+    r = subprocess.run(['tmux', 'capture-pane', '-p',
+                        '-t', 'plus'],
+                       capture_output=True, text=True)
+    niz = r.stdout.rstrip().splitlines()[-25:]
+    return bool(DIALOG.search('\n'.join(niz)))
 
 
 def v_plus(text, metka='(голосом) '):
     """Вписать фразу в Claude и нажать Enter —
     одним вызовом tmux (меньше ждать). «;» в конце
-    tmux счёл бы разделителем команд — убираем."""
+    tmux счёл бы разделителем команд — убираем.
+    На экране вопрос Claude Code — не вписываем
+    (False): Enter ответил бы на него."""
     text = text.rstrip(' ;')
     with TMUX:
+        if ekran_zanyat():
+            return False
         subprocess.run(['tmux', 'send-keys', '-t', 'plus',
                         '-l', metka + text, ';',
                         'send-keys', '-t', 'plus', 'Enter'])
+    return True
+
+
+def golosom(text):
+    """Фраза Александра: вписать, а если на экране
+    вопрос — сказать об этом, фраза ждёт (dognat)."""
+    if v_plus(text):
+        return True
+    if not ZHDUT:
+        say('На экране вопрос разрешения. Ответь в окне '
+            'Termux — фраза подождёт.')
+    ZHDUT.append((time.time(), text))
+    del ZHDUT[:-5]
+    print(time.strftime('%H:%M:%S'),
+          'на экране вопрос — фраза ждёт', flush=True)
+    return False
+
+
+def dognat():
+    """Экран свободен — вписать ждущие фразы по
+    порядку; старше ZHDAT_MAKS — не вписываем."""
+    while ZHDUT:
+        t, text = ZHDUT[0]
+        if time.time() - t > ZHDAT_MAKS:
+            print(time.strftime('%H:%M:%S'), 'фраза '
+                  'устарела, не вписываю:', text[:60],
+                  flush=True)
+        elif not v_plus(text):
+            return
+        ZHDUT.pop(0)
 
 
 def golos_zhiv():
@@ -269,11 +320,15 @@ def pauza():
 
 def compact(kind):
     if kind == 'go':
+        if ekran_zanyat():
+            say('На экране вопрос разрешения — сначала '
+                'ответь на него.')
+            return
         say('Сжимаю контекст.')
         keys('-l', COMPACT)
         keys('Enter')
     else:
-        v_plus('компакт: подготовка')
+        golosom('компакт: подготовка')
 
 
 def zoom(kind):
@@ -281,8 +336,8 @@ def zoom(kind):
     r = subprocess.run(['kadr', arg],
                        capture_output=True, text=True)
     if r.returncode == 0:
-        v_plus(what + ' уже в /root/view.jpg — '
-               'открой и скажи, что там важно')
+        golosom(what + ' уже в /root/view.jpg — '
+                'открой и скажи, что там важно')
     else:
         say(r.stdout.strip() or 'Кадр не получился.')
 
@@ -343,8 +398,8 @@ def handle(e, sluh):
                                     'compact plus'):
         compact('go')
     elif kind == 'text' and t:
-        v_plus(t)
-        metka('vpisal', e['id'])
+        if golosom(t):
+            metka('vpisal', e['id'])
 
 
 # ---------- чат Twitch ----------
@@ -484,15 +539,20 @@ class Chat(threading.Thread):
                           CHAT_CHAS, 'в час — жду', flush=True)
                 self.srochno = False
                 return False
-            if not self.alive():
-                return False
+            if not self.alive() or ekran_zanyat():
+                return False      # вопрос на экране: ждём
             pachka, self.novye = self.novye[-12:], []
             self.srochno, self.otdano = False, now
             self.otdachi.append(now)
         t = ' · '.join('%s: «%s»' % (k, x.replace('«', '"')
                                       .replace('»', '"'))
                        for k, x in pachka)
-        v_plus(t[:900], CHAT_METKA)
+        if not v_plus(t[:900], CHAT_METKA):
+            with self.lock:   # вопрос появился только что
+                self.novye = pachka + self.novye
+                self.otdachi.pop()
+                self.srochno = True
+            return False
         print(time.strftime('%H:%M:%S'), 'чат → Плюсу:',
               len(pachka), flush=True)
         return True
@@ -562,7 +622,7 @@ def main():
     sluh = Sluh()
     last = None
     st, alive = stamp(), plus_alive()
-    sled = dict(alive=0, retr=0, golos=0, stamp=0)
+    sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0)
     vyzov = None       # Ава на паузе с этого времени
     Chat(plus_alive).start()
     while True:
@@ -575,6 +635,9 @@ def main():
         if now > sled['golos']:
             golos_zhiv()
             sled['golos'] = now + 30
+        if ZHDUT and now > sled['zhdut']:
+            dognat()           # вопрос на экране снят?
+            sled['zhdut'] = now + 1
         if now > sled['stamp']:
             sled['stamp'] = now + 3
             if stamp() != st:
