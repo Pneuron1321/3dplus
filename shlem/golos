@@ -45,14 +45,23 @@ VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
 PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
 BYSTREE = os.environ.get('GOLOS_BYSTREE', '+25%')
 KESH = os.environ.get('GOLOS_KESH', '/root/.cache/golos')   # короткие фразы — готовым звуком
+POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')      # последний ответ — «плюс плюс повтори»
+# синтез не вышел (нет сети) — Ава говорит это из кэша, а не молчит (не чаще раза в минуту)
+BEZ_SETI = 'Голос без сети. Ответ — в окне.'
 ZARANEE = ('Не расслышала.', 'Теперь в ухо.', 'Теперь вслух.', 'Сжимаю контекст.',
-           'Сейчас посмотрю.', 'Секунду.', 'Готово.')
+           'Сейчас посмотрю.', 'Секунду.', 'Готово.', BEZ_SETI, 'Ещё нечего повторить.')
 PAUZA_MAKS = 200          # с: пауза дольше — прерванное устарело, не договариваем
 VPERED = 2                # сколько кусков готовить заранее, пока звучит текущий
 
 
 def log(*a):
     print(time.strftime('%H:%M:%S'), *a, flush=True)
+
+
+def kesh(tekst, temp):
+    """Файл короткой фразы в кэше."""
+    return os.path.join(KESH, hashlib.sha1(('%s|%s|%s' % (VOICE, temp, tekst)).encode()).hexdigest()
+                        + '.mp3')
 
 
 def metka(imya, uid, dop=''):
@@ -310,6 +319,7 @@ class Golos:
         self.rezhim = self.chitat_rezhim()
         self.skazano = []          # сказанное в этом ходе: вступление не повторять хуком Stop
         self.pozzhe = []           # вступления, которых ещё нет в журнале: (когда, попытка, raw)
+        self.bez_seti_t = 0.0      # когда последний раз говорили «голос без сети»
 
     # --- приём ---
     def chitat_rezhim(self):
@@ -346,6 +356,8 @@ class Golos:
         except ValueError:
             return
         if t < self.st or t < self.start - 30 or os.path.exists(OFF):
+            if vid == 'hook':              # свидетелю zamer: молчит нарочно, не сломалась
+                metka('molchit', ns, 'выключена, оборвано или устарело')
             return                         # оборвали после, устарело или Ава молчит
         if vid == 'pre':
             _, tekst = iz_transkripta(raw)
@@ -358,8 +370,18 @@ class Golos:
                 self.pozzhe.append((time.time() + 0.25, popytka + 1, ns, raw))
             return
         if re.fullmatch(r'[\W_]*(?:тихо|молчу)?[\W_]*', tekst.lower()):
+            if vid == 'hook':
+                metka('molchit', ns, 'право молчать')
             return                         # право молчать: «тихо» на чат — не звук
+        if vid == 'hook':
+            try:                           # «плюс плюс повтори» — уши возьмут отсюда
+                open(POSL + '.tmp', 'w').write(tekst)
+                os.replace(POSL + '.tmp', POSL)
+            except OSError:
+                pass
         if vid in ('pre', 'hook') and klyuch in self.skazano:
+            if vid == 'hook':
+                metka('molchit', ns, 'уже сказано вступлением')
             return                         # уже сказано в этом ходе (вступление)
         self.skazano = (self.skazano + [klyuch])[-20:]
         ks = kuski(tekst)
@@ -451,6 +473,8 @@ class Golos:
             if end is None:
                 return
             igrok, self.igrok = self.igrok, None
+            if getattr(igrok, 'vne_ocheredi', False):
+                return                     # «голос без сети» — не кусок очереди
             with self.cv:
                 k = self.q[0] if self.q else None
             if end == 'done' or k is None:
@@ -477,6 +501,7 @@ class Golos:
             return                         # ещё готовится
         if put is False:
             self.vybrosit(lambda x: x is k)
+            self.bez_seti()
             return
         if k.pervyy:
             metka('zvuk', k.uid, self.rezhim)
@@ -520,8 +545,7 @@ class Golos:
         готовым файлом — без похода в сеть (сотни мс)."""
         if len(tekst) > 80:
             return self.sintez(tekst, temp, put)
-        f = os.path.join(KESH, hashlib.sha1(('%s|%s|%s' % (VOICE, temp, tekst)).encode()).hexdigest()
-                         + '.mp3')
+        f = kesh(tekst, temp)
         try:
             shutil.copyfile(f, put)
             os.utime(f)
@@ -540,6 +564,21 @@ class Golos:
         except OSError:
             pass
         return True
+
+    def bez_seti(self):
+        """Синтез не вышел: речь не умирает молча — «голос без сети» из кэша."""
+        if time.time() - self.bez_seti_t < 60 or not os.path.exists(kesh(BEZ_SETI, '+0%')):
+            return
+        self.bez_seti_t = time.time()
+        metka('bezseti', '-')
+        put = os.path.join(MP3, 'bez-seti.mp3')
+        try:
+            shutil.copyfile(kesh(BEZ_SETI, '+0%'), put)
+        except OSError:
+            return
+        log('синтез не вышел — сказала «голос без сети»')
+        self.igrok = self.Most(put, 'uho') if self.rezhim == 'uho' else self.Termux(put)
+        self.igrok.vne_ocheredi = True
 
     def progret(self):
         """Частые фразы ушей — в кэш заранее, в тишине."""

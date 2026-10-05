@@ -14,6 +14,7 @@
 # Обновили ushi, sluh, /root/.sluh-model,
 # .sluh-threads или .ushi-pauza — уши
 # перезапускаются сами.
+import fcntl
 import glob
 import json
 import os
@@ -45,6 +46,11 @@ PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
 MAKS = '/root/.ushi-maks'     # самая длинная фраза, с
 G_PAUZA = '/tmp/golos.pauza'  # голос: пауза на вызов
 G_DALSHE = '/tmp/golos.dalshe'  # голос: продолжить
+G_Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')    # очередь голоса-демона
+G_LOCK = os.environ.get('GOLOS_LOCK', '/tmp/golos-demon.lock')
+G_POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')   # последний ответ Плюса
+POVTORI = ('повтори', 'повтори пожалуйста', 'ещё раз', 'еще раз',
+           'повтори ещё раз', 'повтори еще раз')
 REZHIM = os.environ.get('GOLOS_REZHIM',
                         '/root/.golos-rezhim')  # uho|vsluh
 ZAMER = '/tmp/zamer.log'      # метки задержки (zamer)
@@ -102,8 +108,46 @@ def signal(put):
         pass
 
 
+def demon_zhiv():
+    """Голос-демон держит замок, пока жив."""
+    try:
+        f = open(G_LOCK, 'a')
+    except OSError:
+        return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return False
+    except OSError:
+        return True
+    finally:
+        f.close()
+
+
 def say(text):
+    """Фраза ушей — прямо в очередь демона: без запуска
+    Python (skazhi) на каждую фразу. Демона нет — skazhi
+    поднимет его или скажет по-старому."""
+    if demon_zhiv():
+        try:
+            os.makedirs(G_Q, exist_ok=True)
+            put = '%s/%d.txt' % (G_Q, time.time_ns())
+            open(put + '.tmp', 'w').write(text)
+            os.replace(put + '.tmp', put)
+            return
+        except OSError:
+            pass
     subprocess.run(['skazhi', text])
+
+
+def povtori():
+    """«Плюс плюс повтори» — последний ответ Плюса ещё раз,
+    без Claude."""
+    try:
+        t = open(G_POSL).read().strip()
+    except OSError:
+        t = ''
+    say(t or 'Ещё нечего повторить.')
 
 
 def keys(*args):
@@ -157,6 +201,7 @@ def golosom(text):
             'Termux — фраза подождёт.')
     ZHDUT.append((time.time(), text))
     del ZHDUT[:-5]
+    metka('vopros', '-')       # zamer: вопрос разрешения на экране
     print(time.strftime('%H:%M:%S'),
           'на экране вопрос — фраза ждёт', flush=True)
     return False
@@ -384,6 +429,8 @@ def handle(e, sluh):
     low = t.lower().strip(' .!?,…')
     if kind == 'text' and low in TIHO:
         subprocess.run(['tiho'])
+    elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
+        povtori()
     elif kind == 'rezhim':
         rezhim('uho' if t == 'uho' else 'vsluh')
     elif kind == 'text' and low in REZHIMY:
