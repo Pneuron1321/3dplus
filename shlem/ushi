@@ -586,7 +586,10 @@ def retr():
         return
     except (OSError, ValueError):
         pass
-    if subprocess.run(['sh', '-c', 'command -v ffmpeg'],
+    # ffmpeg мог стоять и без задания 07 — без retr уши
+    # упали бы на запуске
+    if subprocess.run(['sh', '-c', 'command -v ffmpeg && '
+                       'command -v retr'],
                       capture_output=True).returncode == 0:
         subprocess.run(['retr'], capture_output=True)
 
