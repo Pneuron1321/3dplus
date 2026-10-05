@@ -167,27 +167,54 @@ ZHDUT = []          # фразы голосом, пока экран занят
 ZHDAT_MAKS = 120    # с: дольше — устарела, не вписываем
 
 
-def ekran_zanyat():
+def ekran():
+    """Низ окна Плюса (tmux «plus»), 25 строк."""
     r = subprocess.run(['tmux', 'capture-pane', '-p',
                         '-t', 'plus'],
                        capture_output=True, text=True)
-    niz = r.stdout.rstrip().splitlines()[-25:]
-    return bool(DIALOG.search('\n'.join(niz)))
+    return '\n'.join(r.stdout.rstrip().splitlines()[-25:])
+
+
+def ekran_zanyat():
+    return bool(DIALOG.search(ekran()))
+
+
+def ne_otpravleno(niz, vpisano):
+    """Фраза ещё стоит в поле ввода: последняя строка
+    с «❯» (поле ввода — самое нижнее) начинается с неё.
+    Отправленная остаётся выше, а поле внизу пустое."""
+    stroki = [x for x in niz.splitlines()
+              if x.lstrip().startswith(('❯', '>'))]
+    if not stroki:
+        return False
+    posl = ' '.join(stroki[-1].lstrip()[1:].split())
+    nachalo = ' '.join(vpisano.split())[:20]
+    return bool(nachalo) and posl.startswith(nachalo)
 
 
 def v_plus(text, metka='(голосом) '):
-    """Вписать фразу в Claude и нажать Enter —
-    одним вызовом tmux (меньше ждать). «;» в конце
-    tmux счёл бы разделителем команд — убираем.
-    На экране вопрос Claude Code — не вписываем
+    """Вписать фразу в Claude и нажать Enter.
+    Enter — отдельно и с паузой: длинный текст Claude
+    Code принимает за вставку, и Enter сразу за ним
+    становится переносом строки, а не «отправить»
+    (05.10 в шлеме). Фраза осталась в поле — Enter ещё
+    раз. На экране вопрос Claude Code — не вписываем
     (False): Enter ответил бы на него."""
     text = text.rstrip(' ;')
     with TMUX:
         if ekran_zanyat():
             return False
         subprocess.run(['tmux', 'send-keys', '-t', 'plus',
-                        '-l', metka + text, ';',
-                        'send-keys', '-t', 'plus', 'Enter'])
+                        '-l', metka + text])
+        for _ in range(3):
+            time.sleep(0.3)
+            subprocess.run(['tmux', 'send-keys', '-t', 'plus',
+                            'Enter'])
+            time.sleep(0.4)
+            niz = ekran()
+            if DIALOG.search(niz) or \
+                    not ne_otpravleno(niz, metka + text):
+                break
     return True
 
 
