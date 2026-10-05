@@ -19,4 +19,6 @@ fi
 # «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
 D=/root/plus
 mkdir -p "$D"
-exec tmux -u new-session -A -s plus -c "$D" claude
+# Модель из settings.json на низком усилии — быстрый голос; трудное Плюс отдаёт
+# помощнику dumat (высокое усилие, /root/.claude/agents/dumat.md).
+exec tmux -u new-session -A -s plus -c "$D" claude --effort low

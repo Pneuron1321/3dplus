@@ -43,7 +43,10 @@ ZAMER = os.environ.get('GOLOS_ZAMER', '/tmp/zamer.log')
 MOST = os.environ.get('GOLOS_MOST', 'http://localhost:8765')
 VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
 PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
-BYSTREE = os.environ.get('GOLOS_BYSTREE', '+25%')
+# Темп Авы (решение Александра 05.10): обычная речь +15 % — это новые «100 %»;
+# ускорение на новую реплику — ещё +25 % от них: 1,15 × 1,25 ≈ +44 %.
+TEMP = os.environ.get('GOLOS_TEMP', '+15%')
+BYSTREE = os.environ.get('GOLOS_BYSTREE', '+44%')
 KESH = os.environ.get('GOLOS_KESH', '/root/.cache/golos')   # короткие фразы — готовым звуком
 POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')      # последний ответ — «плюс плюс повтори»
 # синтез не вышел (нет сети) — Ава говорит это из кэша, а не молчит (не чаще раза в минуту)
@@ -300,7 +303,7 @@ class Kusok:
 
     @property
     def temp(self):
-        return BYSTREE if self.bystro else '+0%'
+        return BYSTREE if self.bystro else TEMP
 
 
 class Golos:
@@ -524,7 +527,7 @@ class Golos:
                     else:
                         self.cv.wait(1)
                 k, temp = zadacha
-                pervyy = k.pervyy and temp == '+0%'
+                pervyy = k.pervyy and temp == TEMP
                 self.n += 1
                 put = os.path.join(MP3, '%d.mp3' % self.n)
             t0 = time.time()
@@ -567,13 +570,13 @@ class Golos:
 
     def bez_seti(self):
         """Синтез не вышел: речь не умирает молча — «голос без сети» из кэша."""
-        if time.time() - self.bez_seti_t < 60 or not os.path.exists(kesh(BEZ_SETI, '+0%')):
+        if time.time() - self.bez_seti_t < 60 or not os.path.exists(kesh(BEZ_SETI, TEMP)):
             return
         self.bez_seti_t = time.time()
         metka('bezseti', '-')
         put = os.path.join(MP3, 'bez-seti.mp3')
         try:
-            shutil.copyfile(kesh(BEZ_SETI, '+0%'), put)
+            shutil.copyfile(kesh(BEZ_SETI, TEMP), put)
         except OSError:
             return
         log('синтез не вышел — сказала «голос без сети»')
@@ -584,7 +587,7 @@ class Golos:
         """Частые фразы ушей — в кэш заранее, в тишине."""
         for t in ZARANEE:
             put = os.path.join(MP3, 'progrev.mp3')
-            self.gotovyy(t, '+0%', put)
+            self.gotovyy(t, TEMP, put)
             try:
                 os.remove(put)
             except OSError:
@@ -697,7 +700,7 @@ def proba(tekst):
     os.makedirs(MP3, exist_ok=True)
     put = os.path.join(MP3, 'proba.mp3')
     t0 = time.time()
-    ok = s(tekst, '+0%', put)
+    ok = s(tekst, TEMP, put)
     print('синтез: %s, %.2f с (%s)' % ('ок' if ok else 'НЕ ВЫШЕЛ', time.time() - t0,
                                         'в памяти' if s.mod else 'программа'))
     return 0 if ok else 1

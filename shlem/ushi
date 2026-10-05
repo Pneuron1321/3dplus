@@ -20,6 +20,7 @@ import json
 import os
 import re
 import select
+import shutil
 import socket
 import ssl
 import subprocess
@@ -218,15 +219,15 @@ def v_plus(text, metka='(голосом) '):
     return True
 
 
-def golosom(text):
+def golosom(text, pometka='(голосом) '):
     """Фраза Александра: вписать, а если на экране
     вопрос — сказать об этом, фраза ждёт (dognat)."""
-    if v_plus(text):
+    if v_plus(text, pometka):
         return True
     if not ZHDUT:
         say('На экране вопрос разрешения. Ответь в окне '
             'Termux — фраза подождёт.')
-    ZHDUT.append((time.time(), text))
+    ZHDUT.append((time.time(), text, pometka))
     del ZHDUT[:-5]
     metka('vopros', '-')       # zamer: вопрос разрешения на экране
     print(time.strftime('%H:%M:%S'),
@@ -238,14 +239,58 @@ def dognat():
     """Экран свободен — вписать ждущие фразы по
     порядку; старше ZHDAT_MAKS — не вписываем."""
     while ZHDUT:
-        t, text = ZHDUT[0]
+        t, text, pometka = ZHDUT[0]
         if time.time() - t > ZHDAT_MAKS:
             print(time.strftime('%H:%M:%S'), 'фраза '
                   'устарела, не вписываю:', text[:60],
                   flush=True)
-        elif not v_plus(text):
+        elif not v_plus(text, pometka):
             return
         ZHDUT.pop(0)
+
+
+# Взгляд (решение Александра 05.10): фраза начинается с
+# «посмотри», «глянь»… — уши сразу говорят «Сейчас
+# посмотрю» и прикладывают кадр момента вопроса (снят
+# на «плюс плюс»). Плюсу остаётся открыть файл: на одно
+# обращение к модели меньше (без решения звать kadr).
+VZGLYAD = re.compile(r'(?:посмотри|глянь|взгляни|смотри|'
+                     r'что (?:там )?на экране|что видишь|'
+                     r'видишь|прочитай|прочти|'
+                     r'что (?:там )?написано)\b')
+VIEW = os.environ.get('USHI_VIEW', '/root/view.jpg')
+KADR_VYZOV = os.environ.get('USHI_KADR_VYZOV',
+                            '/tmp/kadr-vyzov.jpg')
+S_KADROM = ('(голосом; кадр момента вопроса уже в '
+            '/root/view.jpg — открой его, kadr не нужен, '
+            '«Сейчас посмотрю» уже сказано) ')
+
+
+def kadr_vyzova():
+    """На «плюс плюс» — кадр этого момента, в фоне:
+    понадобится, если фраза окажется «посмотри…»."""
+    def snyat():
+        subprocess.run(['kadr'], capture_output=True,
+                       env=dict(os.environ, KADR_OUT=KADR_VYZOV))
+    threading.Thread(target=snyat, daemon=True).start()
+
+
+def vzglyad(text):
+    """«Посмотри…»: «Сейчас посмотрю» сразу, кадр
+    вызова → /root/view.jpg (нет свежего — kadr сейчас),
+    фраза — с пометкой, что кадр уже лежит."""
+    say('Сейчас посмотрю.')
+    est = False
+    try:
+        if time.time() - os.path.getmtime(KADR_VYZOV) < 120:
+            shutil.move(KADR_VYZOV, VIEW)
+            est = True
+    except OSError:
+        pass
+    if not est:
+        est = subprocess.run(['kadr'], capture_output=True
+                             ).returncode == 0
+    return golosom(text, S_KADROM if est else '(голосом) ')
 
 
 def golos_zhiv():
@@ -419,6 +464,7 @@ def handle(e, sluh):
     t = e.get('text', '').strip()
     if kind == 'wake':                  # раньше всего: Ава замолкает
         signal(G_PAUZA)
+        kadr_vyzova()
         metka('vyzov', e['id'], e.get('ms'))
     elif kind == 'tiho':
         subprocess.run(['tiho'])
@@ -471,6 +517,9 @@ def handle(e, sluh):
     elif kind == 'text' and low in ('компакт плюс',
                                     'compact plus'):
         compact('go')
+    elif kind == 'text' and VZGLYAD.match(low):
+        if vzglyad(t):
+            metka('vpisal', e['id'])
     elif kind == 'text' and t:
         if golosom(t):
             metka('vpisal', e['id'])

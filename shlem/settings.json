@@ -59,7 +59,7 @@
       }
     ]
   },
-  "model": "haiku",
+  "model": "sonnet",
   "permissions": {
     "allow": [
       "Bash(kadr)",
