@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# skazhi — сказать текст голосом Авы в шлеме. Текст — аргументами или со stdin.
-# Фразы идут по очереди: первая звучит, пока готовится следующая (меньше ждать).
-# Оборвать речь — tiho (Claude продолжает работать). Молчать — touch /root/.golos-off
-# Новая речь ждёт, пока договорит прежняя (Ава не перебивает сама себя);
-# tiho обрывает и звучащую, и ждущие.
+# skazhi — сказать текст голосом Авы. Текст — аргументами или со stdin.
+# Кладёт текст в очередь голоса-демона golos и сразу возвращается: Ава договорит
+# прежнее и скажет это, не перебивая себя. Демона нет — запускает; не поднялся
+# за 3 с — говорит сама, по-старому (edge-tts и play-audio, фразы по очереди).
+# Оборвать речь — tiho. Молчать — touch /root/.golos-off
 import fcntl, os, re, shutil, subprocess, sys, tempfile, threading, time, queue
 
 OFF = '/root/.golos-off'
@@ -50,10 +50,8 @@ def ochered(t0):
             return f            # замков нет — говорим без очереди
 
 
-def main():
-    if os.path.exists(OFF):
-        return 0
-    text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else sys.stdin.read()
+def stary(text):
+    """Как раньше, без демона: синтез программой edge-tts и play-audio."""
     parts = kuski(text)
     if not parts:
         return 0
@@ -97,6 +95,53 @@ def main():
             p.wait()
     shutil.rmtree(tmp, ignore_errors=True)
     return code
+
+
+Q = '/tmp/golos/q'
+DEMON = '/tmp/golos-demon.lock'
+GOLOS = os.environ.get('GOLOS_BIN', '/usr/local/bin/golos')
+
+
+def demon_zhiv():
+    """Демон держит замок, пока жив."""
+    try:
+        f = open(DEMON, 'a')
+    except OSError:
+        return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return False
+    except BlockingIOError:
+        return True
+    finally:
+        f.close()
+
+
+def main():
+    if os.path.exists(OFF):
+        return 0
+    text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else sys.stdin.read()
+    if not text.strip():
+        return 0
+    if os.path.exists(GOLOS):
+        os.makedirs(Q, exist_ok=True)
+        put = '%s/%d.txt' % (Q, time.time_ns())
+        open(put + '.tmp', 'w').write(text)
+        os.replace(put + '.tmp', put)
+        if demon_zhiv():
+            return 0
+        subprocess.Popen([GOLOS], stdin=subprocess.DEVNULL, stdout=open('/tmp/golos.log', 'a'),
+                         stderr=subprocess.STDOUT, start_new_session=True)
+        for _ in range(30):                        # демон поднимается — он и скажет
+            time.sleep(0.1)
+            if demon_zhiv():
+                return 0
+        try:
+            os.remove(put)                         # не поднялся — говорим сами
+        except OSError:
+            return 0                               # уже забрал
+    return stary(text)
 
 
 if __name__ == '__main__':

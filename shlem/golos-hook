@@ -1,31 +1,20 @@
-#!/usr/bin/env python3
-# golos-hook — хук Stop Claude Code: последний ответ Плюса звучит голосом Авы.
-# Код, ссылки и разметку голос пропускает. Молчать: touch /root/.golos-off
-import json, os, re, subprocess, sys
-
-def dlya_uha(t):
-    t = re.sub(r'`{3}.*?`{3}', ' ', t, flags=re.S)      # блоки кода не читаем
-    t = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', t)     # [текст](ссылка) → текст
-    t = re.sub(r'https?://\S+', ' ', t)
-    t = re.sub(r'^\s*([-•]|\d+\.)\s+', '', t, flags=re.M)
-    t = re.sub(r'[`*_#>|]', ' ', t)
-    t = re.sub(r'\s+', ' ', t).strip()
-    if len(t) > 1500:
-        t = t[:1500].rsplit('. ', 1)[0] + '.'
-    return t
-
-def main():
-    if os.path.exists('/root/.golos-off'):
-        return
-    try:
-        d = json.load(sys.stdin)
-    except ValueError:
-        return
-    t = dlya_uha(d.get('last_assistant_message') or '')
-    if t:
-        subprocess.run([os.environ.get('GOLOS_SKAZHI', '/usr/local/bin/skazhi')], input=t.encode(), timeout=290)
-
-try:
-    main()
-except Exception:
-    pass
+#!/bin/sh
+# golos-hook — хук Stop Claude Code: ответ Плюса звучит голосом Авы.
+# Кладёт ответ (JSON хука) в очередь голоса-демона golos и сразу выходит:
+# golos сам уберёт код, ссылки и разметку и скажет по предложениям.
+# Молчать: touch /root/.golos-off. В «рации» хук молчит — там говорит поток.
+[ -n "$GOLOS_RACIYA" ] && exit 0
+[ -e /root/.golos-off ] && exit 0
+Q=/tmp/golos/q
+mkdir -p $Q
+n=$(date +%s%N)
+# golos-hook pre — хук PreToolUse: вступление перед инструментом («Сейчас
+# посмотрю») звучит сразу, пока инструмент работает; golos найдёт его в журнале.
+v=hook
+[ "$1" = pre ] && v=pre
+cat > "$Q/$n.$v.tmp" && mv "$Q/$n.$v.tmp" "$Q/$n.$v"
+[ $v = hook ] && printf '%s\thook\t%s\t\n' "${n%??????}" "$n" >> /tmp/zamer.log
+if flock -n /tmp/golos-demon.lock true; then
+  setsid nohup /usr/local/bin/golos >> /tmp/golos.log 2>&1 < /dev/null &
+fi
+exit 0

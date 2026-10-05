@@ -7,7 +7,7 @@ B=${OBNOVI_BASE:-https://raw.githubusercontent.com/Pneuron1321/3dplus/claude/ten
 D=${OBNOVI_DIR:-/usr/local/bin}
 T=$(mktemp -d)
 n=0
-for f in ushi sluh sluh-test kluch kadr retr skazhi tiho plus pamyat golos-hook obnovi; do
+for f in ushi sluh sluh-test kluch kadr retr golos skazhi tiho uskor zamer chat plus pamyat golos-hook obnovi; do
   if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f"; then echo "$f: не скачался"; continue; fi
   case $(head -1 "$T/$f") in
     *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$T/$f" ;;
