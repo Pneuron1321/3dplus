@@ -12,7 +12,7 @@ if [ "$1" = twitch ]; then
   case "$k" in live_?*) ;; *) echo "В буфере не ключ Twitch: он начинается с live_."; exit 1 ;; esac
   printf '%s\n' "$k" > /root/.twitch-key
   timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
-  echo "Ключ Twitch сохранён (${#k} знаков). Буфер очищен. Ретранслятор возьмёт его со следующего эфира."
+  echo "Ключ Twitch сохранён (${#k} знаков). Буфер очищен. Если стрим через ретранслятор уже идёт — через секунду он уйдёт на Twitch, канал в эфире."
   exit 0
 fi
 case "$k" in gsk_?*) ;; *) echo "В буфере не ключ Groq: он начинается с gsk_."; exit 1 ;; esac
