@@ -21,4 +21,6 @@ D=/root/plus
 mkdir -p "$D"
 # Модель из settings.json на низком усилии — быстрый голос; трудное Плюс отдаёт
 # помощнику dumat (высокое усилие, /root/.claude/agents/dumat.md).
-exec tmux -u new-session -A -s plus -c "$D" claude --effort low
+# Мышь в tmux: джойстик шлема листает вывод, а не историю отправленного
+# (без неё Termux превращает прокрутку в стрелки).
+exec tmux -u new-session -A -s plus -c "$D" claude --effort low \; set -g mouse on
