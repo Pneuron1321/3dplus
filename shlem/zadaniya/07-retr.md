@@ -15,15 +15,15 @@ Twitch, а в шлем (rtmp://127.0.0.1:1935/live, ключ plus). Ретран
 ## 1. Установка — её делает Александр
 
 Скачанный код тебе поставить не даст защита авто-режима (так было с
-заданием 08), поэтому ставит он — двумя строками в этом окне. Снимок тот же,
-что у голоса 0.6: порядок с ним не важен, старые файлы не встанут.
+заданием 08), поэтому ставит он — двумя строками в этом окне. Снимок — голос 0.6
+с правилом «сразу ответом»: порядок с 0.6 не важен, старые файлы не встанут.
 Скажи ему: «Вставь две строки из чата: ffmpeg и файлы».
 
 ```
 ! (DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg > /tmp/ffmpeg-ust.log 2>&1 &); echo "ffmpeg ставится в фоне"
 ```
 ```
-! B=https://raw.githubusercontent.com/Pneuron1321/3dplus/e5ad8a7b34b18216c08fbcff4afe76a34f65c6ae/shlem; [ -x /usr/local/bin/obnovi ] || { curl -fsSL "$B/obnovi" -o /usr/local/bin/obnovi && chmod +x /usr/local/bin/obnovi; }; OBNOVI_BASE=$B obnovi && curl -fsSL "$B/CLAUDE.md" -o /root/.claude/CLAUDE.md && echo "файлы: ок"
+! B=https://raw.githubusercontent.com/Pneuron1321/3dplus/ff5e13113893ff20310b296763cc17adbf89d5bd/shlem; [ -x /usr/local/bin/obnovi ] || { curl -fsSL "$B/obnovi" -o /usr/local/bin/obnovi && chmod +x /usr/local/bin/obnovi; }; OBNOVI_BASE=$B obnovi && curl -fsSL "$B/CLAUDE.md" -o /root/.claude/CLAUDE.md && echo "файлы: ок"
 ```
 
 ## 2. Проверка установки (это делаешь ты)
