@@ -30,7 +30,7 @@ mkdir -p /root/stary && for f in ushi skazhi golos-hook tiho obnovi; do cp "/usr
 ```
 
 ```
-B=https://raw.githubusercontent.com/Pneuron1321/3dplus/cd641e83ba4bbae97ed5e770e99f4abdae76f0fc/shlem
+B=https://raw.githubusercontent.com/Pneuron1321/3dplus/79eeb5887398661964bae120700c624520e07ef9/shlem
 for f in golos skazhi golos-hook uskor tiho zamer chat obnovi ushi; do curl -fsSL "$B/$f" -o "/tmp/n-$f" || { echo "$f: не скачался"; continue; }; case $(head -1 "/tmp/n-$f") in *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "/tmp/n-$f" ;; *) sh -n "/tmp/n-$f" ;; esac && cat "/tmp/n-$f" > "/usr/local/bin/$f" && chmod +x "/usr/local/bin/$f" && echo "$f: ок"; done
 curl -fsSL "$B/CLAUDE.md" -o /tmp/CLAUDE.new.md
 curl -fsSL "$B/settings.json" -o /tmp/settings.new.json
