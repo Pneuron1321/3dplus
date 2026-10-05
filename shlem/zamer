@@ -19,6 +19,9 @@ PARY = [('vpisal', 'prompt', 5000, False, 'фраза вписана в окно
         ('hook', ('golos', 'molchit'), 3000, True, 'ответ готов, голос его не взял за 3 с (демон жив?)'),
         ('golos', 'zvuk', 15000, True, 'голос взял ответ, звука не было 15 с (синтез, сеть, '
          'проигрыватель)')]
+# Уши жмут Enter отдельно и ставят «вписал» после проверки экрана, а хук
+# Claude ставит «принял» сразу по Enter — «принял» приходит раньше на 0,4–0,7 с.
+RANSHE = 3000
 
 
 def chitat():
@@ -46,6 +49,14 @@ def obmeny(metki):
         if m == 'fraza':
             cur = {'fraza': ms, 'id': uid}
             res.append(cur)
+        elif m == 'vpisal' and cur and cur.get('pechat') and len(res) > 1 \
+                and res[-2].get('id') == uid and 'prompt' not in res[-2] \
+                and ms - cur['prompt'] <= RANSHE:
+            fr = res.pop(-2)           # «принял» раньше «вписал» — это та же фраза
+            res.pop()
+            fr.update((k, v) for k, v in cur.items() if k != 'pechat')
+            fr['vpisal'], cur = ms, fr
+            res.append(fr)
         elif m in ('ushi', 'vpisal') and cur and cur.get('id') == uid:
             cur[m] = ms
         elif m == 'whisper' and cur and cur.get('id') == uid:
@@ -80,6 +91,8 @@ def svideteli(metki):
             if m != chto:
                 continue
             sled = [x for x in metki[i + 1:] if x[0] - ms <= okno]
+            if chto == 'vpisal':
+                sled += [x for x in metki[:i] if ms - x[0] <= RANSHE]
             if chto == 'golos' and any(x[1] == 'vyzov' for x in sled):
                 continue                       # «плюс плюс» — пауза законна
             if any(x[1] in zhdem and (not svoya or x[2] == uid) for x in sled):

@@ -151,7 +151,21 @@ def povtori():
     say(t or 'Ещё нечего повторить.')
 
 
+def iz_prosmotra():
+    """Окно Плюса пролистано вверх (tmux в режиме просмотра —
+    колесо, джойстик): набранное ушло бы в просмотр, а не в
+    Claude, и Enter закрыл бы просмотр вместо «отправить».
+    Сначала выйти."""
+    r = subprocess.run(['tmux', 'display-message', '-p', '-t',
+                        'plus', '#{pane_in_mode}'],
+                       capture_output=True, text=True)
+    if r.stdout.strip() == '1':
+        subprocess.run(['tmux', 'send-keys', '-t', 'plus', '-X',
+                        'cancel'])
+
+
 def keys(*args):
+    iz_prosmotra()
     subprocess.run(['tmux', 'send-keys', '-t', 'plus']
                    + list(args))
 
@@ -203,6 +217,7 @@ def v_plus(text, metka='(голосом) '):
     (False): Enter ответил бы на него."""
     text = text.rstrip(' ;')
     with TMUX:
+        iz_prosmotra()
         if ekran_zanyat():
             return False
         subprocess.run(['tmux', 'send-keys', '-t', 'plus',
