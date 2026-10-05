@@ -10,7 +10,10 @@
   посмотрю») звучит сразу;
 - режимы **«плюс плюс в ухо» / «плюс плюс вслух»** (по умолчанию вслух);
 - уши: ранний вызов, фильтр выдумок Whisper, **чат Twitch**, метки задержки
-  (`zamer`), пауза конца фразы 10 с, фраза до 3 минут.
+  (`zamer`), пауза конца фразы 10 с, фраза до 3 минут;
+- уши **не печатают в окно Claude, когда на экране вопрос разрешения**
+  («Do you want to proceed? 1. Yes»): Enter ответил бы «да» за Александра —
+  голосом или пачкой чата. Фраза ждёт, пока вопрос не снят, Ава говорит об этом.
 
 ## 1. Какое приложение стоит
 
@@ -30,7 +33,7 @@ mkdir -p /root/stary && for f in ushi skazhi golos-hook tiho obnovi; do cp "/usr
 ```
 
 ```
-B=https://raw.githubusercontent.com/Pneuron1321/3dplus/79eeb5887398661964bae120700c624520e07ef9/shlem
+B=https://raw.githubusercontent.com/Pneuron1321/3dplus/eb20b8f5212c4c1fd4624c55741c2d5812145dce/shlem
 for f in golos skazhi golos-hook uskor tiho zamer chat obnovi ushi; do curl -fsSL "$B/$f" -o "/tmp/n-$f" || { echo "$f: не скачался"; continue; }; case $(head -1 "/tmp/n-$f") in *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "/tmp/n-$f" ;; *) sh -n "/tmp/n-$f" ;; esac && cat "/tmp/n-$f" > "/usr/local/bin/$f" && chmod +x "/usr/local/bin/$f" && echo "$f: ок"; done
 curl -fsSL "$B/CLAUDE.md" -o /tmp/CLAUDE.new.md
 curl -fsSL "$B/settings.json" -o /tmp/settings.new.json
@@ -75,6 +78,11 @@ tail -4 /tmp/ushi.log; tail -2 /tmp/golos.log; golos proba
    стриме); «плюс плюс вслух» — обратно.
 5. «Плюс плюс посмотри на экран» одним дыханием — без паузы после вызова.
 6. После нескольких фраз — `zamer`: где уходят секунды.
+7. Если на экране появится вопрос разрешения, а Александр в это время скажет
+   фразу — Ава должна сказать «На экране вопрос разрешения». Если вопрос
+   вместо этого ответился сам — уши не узнали вид вопроса этой версии Claude
+   Code: запиши в журнал последние 12 строк экрана (`tmux capture-pane -p -t
+   plus | tail -12`, без ключей и адресов) и скажи Александру.
 
 ## 6. Итог
 
