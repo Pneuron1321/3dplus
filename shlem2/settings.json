@@ -18,6 +18,7 @@
           {
             "type": "command",
             "command": "/usr/local/bin/uskor",
+            "async": true,
             "timeout": 5
           }
         ]
