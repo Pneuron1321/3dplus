@@ -15,7 +15,10 @@ for f in ushi sluh sluh-test kluch kadr retr efir golos skazhi tiho uskor zamer 
     *) sh -n "$T/$f" ;;
   esac || { echo "$f: с ошибкой — не ставлю"; continue; }
   cmp -s "$T/$f" "$D/$f" && continue
-  cat "$T/$f" > "$D/$f" && chmod +x "$D/$f" && echo "$f: обновлён" && n=$((n + 1))
+  # рядом и переименованием: файл подменяется целиком — работающий скрипт (и сам
+  # obnovi, 06.10: «Unterminated quoted string») дочитывает старый, а не новый с середины
+  cp "$T/$f" "$D/.$f.novyy" && chmod +x "$D/.$f.novyy" && mv -f "$D/.$f.novyy" "$D/$f" &&
+    echo "$f: обновлён" && n=$((n + 1))
 done
 rm -rf "$T"
 echo "Обновлено файлов: $n."
