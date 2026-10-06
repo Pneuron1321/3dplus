@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+# raciya — «рация»: мозг Плюса в фоновой сессии Claude Code, голос по фразам.
+# Живёт в окне tmux «plus» на месте Claude. «Плюс плюс рация» — уши ставят её
+# в окно (tmux respawn-pane), «плюс плюс окно» — в окне снова Claude, с тем же
+# разговором. Разговор один: рация продолжает его (--resume), окно потом видит
+# всё, что было в рации.
+#
+# Фоновая сессия — один живой процесс claude -p (stream-json): ответ приходит
+# кусками, и готовое предложение сразу уходит голосу (очередь golos), пока
+# пишется следующее. Хук Stop в рации молчит (GOLOS_RACIYA=1), говорит поток.
+# Фразы ушей приходят файлами в /tmp/raciya/q, набранное в окне — строкой ввода.
+# Вопросы разрешения в фоне показать некому: не разрешено — Плюс так и скажет.
+#
+#   raciya              — рация в этом окне (продолжает последний разговор Плюса)
+#   raciya vkl          — поставить рацию в окно tmux «plus» (так делают уши)
+#   raciya vykl         — вернуть в окно Claude (рация сама заменит себя на него)
+#   В окне рации: текст + Enter — Плюсу; /окно — вернуть окно Claude.
+import fcntl
+import glob
+import json
+import os
+import queue
+import re
+import subprocess
+import sys
+import threading
+import time
+
+PAPKA = os.environ.get('RACIYA_PAPKA', '/root/plus')            # папка Плюса (как в plus)
+PROEKT = os.environ.get('RACIYA_PROEKT', '/root/.claude/projects/-root-plus')   # его разговоры
+Q = os.environ.get('RACIYA_Q', '/tmp/raciya/q')                  # фразы ушей
+PID = os.environ.get('RACIYA_PID', '/tmp/raciya.pid')
+SESSIYA = os.environ.get('RACIYA_SESSIYA', '/tmp/raciya.sessiya')
+CLAUDE = os.environ.get('RACIYA_CLAUDE', 'claude')
+TMUX = os.environ.get('RACIYA_TMUX', 'tmux').split()
+G_Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')
+G_LOCK = os.environ.get('GOLOS_LOCK', '/tmp/golos-demon.lock')
+G_BIN = os.environ.get('GOLOS_BIN', '/usr/local/bin/golos')
+G_POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')
+G_STOP = os.environ.get('GOLOS_STOP', '/tmp/golos.stop')
+ZAMER = os.environ.get('GOLOS_ZAMER', '/tmp/zamer.log')
+ERR = os.environ.get('RACIYA_ERR', '/tmp/raciya.err')           # что claude -p сказал в stderr
+OKNO = '/окно'
+# Добавка к правилам Плюса на время рации (только этот процесс; окно её не видит).
+PRAVILO = ('Сейчас режим «рация»: Александр говорит голосом, твой ответ звучит по мере '
+           'того, как ты его пишешь. Вопросы разрешения показать некому: если действие '
+           'не разрешено, скажи об этом одной фразой — его можно сделать в окне '
+           '(«плюс плюс окно»).')
+SER, TUSK, SBROS = '\033[2m', '\033[1m', '\033[0m'
+
+
+def metka(imya, uid, dop=''):
+    """Метка для zamer: мс, что, чья реплика."""
+    try:
+        with open(ZAMER, 'a') as f:
+            f.write('%d\t%s\t%s\t%s\n' % (time.time() * 1000, imya, uid, dop))
+    except OSError:
+        pass
+
+
+def vremya(put):
+    try:
+        return float(open(put).read().strip() or 0)
+    except (OSError, ValueError):
+        return 0.0
+
+
+def zhiva():
+    """Рация работает: её процесс жив."""
+    try:
+        os.kill(int(open(PID).read()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def poslednyaya_sessiya():
+    """Последний разговор Плюса — самый свежий журнал в папке проекта."""
+    f = sorted(glob.glob(os.path.join(PROEKT, '*.jsonl')), key=os.path.getmtime)
+    return os.path.basename(f[-1])[:-6] if f else ''
+
+
+def polozhit(papka, imya, tekst):
+    os.makedirs(papka, exist_ok=True)
+    put = os.path.join(papka, imya)
+    with open(put + '.tmp', 'w') as f:
+        f.write(tekst)
+    os.replace(put + '.tmp', put)
+
+
+# ---------- резчик: поток текста → куски для голоса ----------
+
+GRAN = re.compile(r'[.!?…]+["»”)]*\s+|\n+')
+
+
+class Rezchik:
+    """Кусок — до конца предложения (или строки: пункт списка). Первый кусок
+    хода — до первой запятой, если она не в самом начале: первый звук раньше.
+    Блоки кода (```) не говорим и не режем пополам."""
+
+    def __init__(self):
+        self.novyy_hod()
+
+    def novyy_hod(self):
+        self.buf, self.kod, self.pervyy = '', False, True
+
+    def feed(self, t):
+        self.buf += t
+        return self.rezat(False)
+
+    def konec(self):
+        """Конец текстового блока (дальше инструмент или конец ответа)."""
+        return self.rezat(True)
+
+    def rezat(self, vse):
+        out = []
+        while True:
+            if self.kod:
+                i = self.buf.find('```')
+                if i < 0:
+                    hvost = None if vse else re.search(r'`{1,2}$', self.buf)
+                    self.buf = hvost.group(0) if hvost else ''   # может быть началом ```
+                    break
+                self.buf, self.kod = self.buf[i + 3:], False
+                continue
+            i = self.buf.find('```')
+            if i >= 0 or vse:
+                out.append(self.buf if i < 0 else self.buf[:i])   # до кода — целиком
+                if i < 0:
+                    self.buf = ''
+                    break
+                self.buf, self.kod = self.buf[i + 3:], True
+                continue
+            chast = self.buf
+            hvost = re.search(r'`{1,2}$', chast)       # может оказаться началом ```
+            if hvost:
+                chast = chast[:hvost.start()]
+            konec = None
+            for m in GRAN.finditer(chast):
+                konec = m.end()
+            if konec is None and self.pervyy:
+                z = chast.find(', ')
+                if 15 <= z <= 100:
+                    konec = z + 2
+            if konec:
+                out.append(chast[:konec])
+                self.buf = self.buf[konec:]
+            break
+        out = [x.strip() for x in out if re.search(r'\w', x)]
+        if out:
+            self.pervyy = False
+        return out
+
+
+# ---------- мозг: фоновая сессия ----------
+
+class Mozg:
+    """claude -p stream-json: события → очередь. Авто-режим не принят
+    (процесс сразу упал) — запускаем без него."""
+
+    def __init__(self, sessiya, sobytiya):
+        self.sessiya, self.sobytiya = sessiya, sobytiya
+        self.avto = os.environ.get('RACIYA_AVTO', '1') != '0'
+        self.p = None
+        self.zapusk()
+
+    def argumenty(self):
+        a = [CLAUDE, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
+             '--include-partial-messages', '--verbose', '--effort', 'low',
+             '--append-system-prompt', PRAVILO]
+        if self.avto:
+            a += ['--permission-mode', 'auto']
+        if self.sessiya:
+            a += ['--resume', self.sessiya]
+        return a
+
+    def zapusk(self):
+        self.t0, self.ozhil = time.time(), False
+        self.p = subprocess.Popen(self.argumenty(), cwd=PAPKA if os.path.isdir(PAPKA) else None,
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=open(ERR, 'a'), text=True, bufsize=1,
+                                  env=dict(os.environ, GOLOS_RACIYA='1'))
+        threading.Thread(target=self.chitat, args=(self.p,), daemon=True).start()
+
+    def chitat(self, p):
+        for line in p.stdout:
+            try:
+                self.sobytiya.put(('e', json.loads(line)))
+            except ValueError:
+                pass
+        p.wait()
+        self.sobytiya.put(('umer', p))
+
+    def poslat(self, tekst):
+        try:
+            self.p.stdin.write(json.dumps({'type': 'user', 'message': {
+                'role': 'user', 'content': tekst}}, ensure_ascii=False) + '\n')
+            self.p.stdin.flush()
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def stop(self):
+        if not self.p:
+            return
+        try:
+            self.p.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.p.wait(3)
+        except subprocess.TimeoutExpired:
+            self.p.terminate()
+            try:
+                self.p.wait(2)
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+
+
+class Raciya:
+    def __init__(self, sessiya):
+        self.sob = queue.Queue()
+        self.rez = Rezchik()
+        self.sessiya = sessiya
+        self.hod_t = 0.0           # когда начался ход (первое событие после прошлого результата)
+        self.skazano = []          # что ушло голосу в этом ходе — для «повтори»
+        self.pervyy_kusok = True
+        self.podpisan = False      # «Плюс:» в окне уже напечатано в этом ходе
+        self.bloki = {}            # индекс блока → тип (text, tool_use…)
+        self.zhdut = 0             # послано сообщений без результата
+        self.smerti = []
+        self.mozg = Mozg(sessiya, self.sob)
+
+    # --- окно ---
+    def pechat(self, t, end='\n'):
+        sys.stdout.write(t + end)
+        sys.stdout.flush()
+
+    def shapka(self):
+        self.pechat('%s━━ Рация · разговор %s ━━%s' % (TUSK, (self.sessiya or 'новый')[:8], SBROS))
+        self.pechat('%sГовори «плюс плюс …», как обычно. Набери текст и Enter — тоже Плюсу.\n'
+                    '«плюс плюс окно» или /окно — вернуть окно Claude с этим разговором.%s'
+                    % (SER, SBROS))
+
+    def vvod(self):
+        """Строка ввода окна: набранное — Плюсу."""
+        for line in sys.stdin:
+            t = line.strip()
+            if t:
+                self.sob.put(('vvod', t))
+
+    def ushi(self):
+        """Фразы ушей — файлами в Q (по имени: время)."""
+        while True:
+            try:
+                imena = sorted(x for x in os.listdir(Q) if not x.endswith('.tmp'))
+            except OSError:
+                imena = []
+            for imya in imena:
+                put = os.path.join(Q, imya)
+                try:
+                    t = open(put, encoding='utf-8', errors='replace').read().strip()
+                    os.remove(put)
+                except OSError:
+                    continue
+                if t:
+                    self.sob.put(('ushi', t))
+            time.sleep(0.1)
+
+    # --- голос ---
+    def golosu(self, kuski):
+        if not kuski or vremya(G_STOP) > self.hod_t:
+            return                 # «плюс тихо» в этом ходе — остаток не говорим
+        ns = time.time_ns()
+        if self.pervyy_kusok:
+            vid = 'potok0'
+            self.pervyy_kusok = False
+            metka('hook', ns)      # для zamer: «ответ пошёл» — время до первой фразы
+            self.demon()
+        else:
+            vid = 'potok'
+        polozhit(G_Q, '%d.%s' % (ns, vid), ' '.join(kuski))
+        self.skazano += kuski
+
+    def demon(self):
+        """Голос-демон не запущен — поднять (как golos-hook)."""
+        try:
+            f = open(G_LOCK, 'a')
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_UN)
+            f.close()
+        except OSError:
+            return                 # замок держат — демон жив
+        if os.path.exists(G_BIN):
+            subprocess.Popen([G_BIN], stdin=subprocess.DEVNULL, stdout=open('/tmp/golos.log', 'a'),
+                             stderr=subprocess.STDOUT, start_new_session=True)
+
+    def konec_hoda(self):
+        self.golosu(self.rez.konec())
+        if self.skazano:
+            try:                   # «плюс плюс повтори» — уши возьмут отсюда
+                polozhit(os.path.dirname(G_POSL) or '.', os.path.basename(G_POSL),
+                         ' '.join(self.skazano))
+            except OSError:
+                pass
+        self.rez.novyy_hod()
+        self.skazano, self.pervyy_kusok, self.bloki = [], True, {}
+        self.hod_t, self.podpisan = 0.0, False
+
+    # --- события мозга ---
+    def sobytie(self, e):
+        ty = e.get('type')
+        self.mozg.ozhil = True
+        if not self.hod_t and (ty in ('stream_event', 'assistant') or e.get('subtype') == 'init'):
+            self.hod_t = time.time()
+        if ty == 'system' and e.get('subtype') == 'init' and e.get('session_id'):
+            if e['session_id'] != self.sessiya:
+                self.sessiya = e['session_id']
+            try:
+                polozhit(os.path.dirname(SESSIYA), os.path.basename(SESSIYA), self.sessiya)
+            except OSError:
+                pass
+        elif ty == 'system' and e.get('subtype') == 'permission_denied':
+            self.pechat('\n%s  ✗ не разрешено: %s%s' % (SER, e.get('tool_name', '?'), SBROS))
+        elif ty == 'stream_event':
+            ev = e.get('event') or {}
+            et = ev.get('type')
+            if et == 'content_block_start':
+                self.bloki[ev.get('index')] = (ev.get('content_block') or {}).get('type')
+            elif et == 'content_block_delta' and (ev.get('delta') or {}).get('type') == 'text_delta':
+                t = ev['delta'].get('text', '')
+                if not self.podpisan:
+                    self.pechat('%sПлюс:%s ' % (TUSK, SBROS), end='')
+                    self.podpisan = True
+                self.pechat(t, end='')
+                self.golosu(self.rez.feed(t))
+            elif et == 'content_block_stop' and self.bloki.get(ev.get('index')) == 'text':
+                self.golosu(self.rez.konec())
+        elif ty == 'assistant':
+            for x in (e.get('message') or {}).get('content') or []:
+                if isinstance(x, dict) and x.get('type') == 'tool_use':
+                    vh = x.get('input') or {}
+                    chto = vh.get('command') or vh.get('file_path') or vh.get('description') or ''
+                    self.pechat('\n%s  · %s %s%s' % (SER, x.get('name'), str(chto)[:60], SBROS))
+        elif ty == 'result':
+            self.konec_hoda()
+            self.zhdut = max(0, self.zhdut - 1)
+            if e.get('is_error') or e.get('subtype') not in (None, 'success'):
+                self.pechat('\n%s  ✗ %s%s' % (SER, e.get('subtype') or 'ошибка', SBROS))
+            self.pechat('\n› ', end='')
+
+    def umer(self):
+        """Мозг упал. Сразу после запуска с авто-режимом — без него; часто — в окно."""
+        if self.mozg.avto and not self.mozg.ozhil and time.time() - self.mozg.t0 < 8:
+            self.mozg.avto = False
+            self.pechat('%s  (авто-режим в фоне не принят — без него)%s' % (SER, SBROS))
+            self.mozg.zapusk()
+            return
+        self.smerti = [t for t in self.smerti if time.time() - t < 60] + [time.time()]
+        if len(self.smerti) >= 3:
+            self.pechat('\n  Рация падает — возвращаю окно Claude.')
+            self.v_okno()
+        self.pechat('\n%s  (рация переподключается)%s' % (SER, SBROS))
+        if self.zhdut:
+            self.konec_hoda()
+            self.zhdut = 0
+        time.sleep(1)
+        self.mozg.sessiya = self.sessiya
+        self.mozg.zapusk()
+
+    def poslat(self, t, otkuda):
+        if t == OKNO:
+            self.v_okno()
+        if otkuda == 'ushi':
+            self.pechat('\n%sты:%s %s' % (TUSK, SBROS, re.sub(r'^\([^)]*\)\s*', '', t)[:300]))
+        self.zhdut += 1
+        if not self.mozg.poslat(t):
+            self.pechat('%s(не ушло — мозг перезапускается)%s' % (SER, SBROS))
+
+    def v_okno(self):
+        """Окно Claude с этим же разговором — на место рации, в этом же окне."""
+        self.mozg.stop()
+        try:
+            os.remove(PID)
+        except OSError:
+            pass
+        a = [CLAUDE, '--effort', 'low'] + (['--resume', self.sessiya] if self.sessiya else [])
+        env = {k: v for k, v in os.environ.items() if k != 'GOLOS_RACIYA'}
+        sys.stdout.write('\n')
+        sys.stdout.flush()
+        os.execvpe(a[0], a, env)
+
+    def run(self):
+        polozhit(os.path.dirname(PID), os.path.basename(PID), str(os.getpid()))
+        self.shapka()
+        self.pechat('› ', end='')
+        threading.Thread(target=self.vvod, daemon=True).start()
+        threading.Thread(target=self.ushi, daemon=True).start()
+        while True:
+            vid, x = self.sob.get()
+            if vid == 'e':
+                self.sobytie(x)
+            elif vid == 'umer':
+                if x is self.mozg.p:
+                    self.umer()
+            else:
+                self.poslat(x, vid)
+
+
+# ---------- переключение окна ----------
+
+def tmux(*a):
+    return subprocess.run(TMUX + list(a), capture_output=True, text=True).returncode == 0
+
+
+def vkl():
+    if zhiva():
+        print('рация уже включена')
+        return 0
+    try:
+        os.makedirs(Q, exist_ok=True)
+        for x in os.listdir(Q):    # старые фразы прошлой рации не повторяем
+            os.remove(os.path.join(Q, x))
+    except OSError:
+        pass
+    me = os.path.abspath(__file__)
+    if tmux('has-session', '-t', 'plus'):
+        ok = tmux('respawn-pane', '-k', '-t', 'plus', '-c', PAPKA, me)
+    else:
+        ok = tmux('new-session', '-d', '-s', 'plus', '-c', PAPKA, me, ';', 'set', '-g', 'mouse', 'on')
+    print('рация: ок' if ok else 'рация: tmux не принял')
+    return 0 if ok else 1
+
+
+def vykl():
+    if not zhiva():
+        print('окно и так открыто')
+        return 0
+    polozhit(Q, '%d.txt' % time.time_ns(), OKNO)
+    print('окно: ок')
+    return 0
+
+
+def main():
+    a = sys.argv[1:]
+    if a and a[0] == 'vkl':
+        return vkl()
+    if a and a[0] == 'vykl':
+        return vykl()
+    sessiya = a[1] if len(a) > 1 and a[0] == '--resume' else poslednyaya_sessiya()
+    Raciya(sessiya).run()
+
+
+if __name__ == '__main__':
+    sys.exit(main())

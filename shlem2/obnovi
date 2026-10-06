@@ -1,0 +1,21 @@
+#!/bin/sh
+# obnovi — свежие скрипты Плюса 2 из публичного зеркала (3dplus, папка shlem2) в
+# /usr/local/bin. Каждый файл сначала проверяется на синтаксис: битый не ставится.
+# CLAUDE.md и settings.json не трогает — их ставит Александр (защита авто-режима).
+# Уши (ushi) подхватывают новое сами через несколько секунд.
+# Папка shlem — версия 1.0, её «обнови» первой версии; вторая берёт только из shlem2.
+B=${OBNOVI_BASE:-https://raw.githubusercontent.com/Pneuron1321/3dplus/claude/tender-goodall-41rwsn/shlem2}
+D=${OBNOVI_DIR:-/usr/local/bin}
+T=$(mktemp -d)
+n=0
+for f in ushi sluh sluh-test kluch kadr retr golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya obnovi; do
+  if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f"; then echo "$f: не скачался"; continue; fi
+  case $(head -1 "$T/$f") in
+    *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$T/$f" ;;
+    *) sh -n "$T/$f" ;;
+  esac || { echo "$f: с ошибкой — не ставлю"; continue; }
+  cmp -s "$T/$f" "$D/$f" && continue
+  cat "$T/$f" > "$D/$f" && chmod +x "$D/$f" && echo "$f: обновлён" && n=$((n + 1))
+done
+rm -rf "$T"
+echo "Обновлено файлов: $n."
