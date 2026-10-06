@@ -522,6 +522,22 @@ def zoom(kind):
         say(r.stdout.strip() or 'Кадр не получился.')
 
 
+def plenka(n, ms):
+    """«Чек чек» (7 кадров, ±1,5 с) и «зум чек» (13, ±3 с): плёнка момента
+    команды — Плюсу сразу, как «зум зум». В фоне: приложение ждёт кадры
+    «после», а уши за это время не должны глохнуть."""
+    imya = 'чек чек' if n == '7' else 'зум чек'
+
+    def idti():
+        r = subprocess.run(['kadr', 'plenka', str(int(ms or time.time() * 1000)), n],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            golosom('%s — %s Открой и скажи, что произошло.' % (imya, r.stdout.strip()))
+        else:
+            say(r.stdout.strip() or 'Плёнка не получилась.')
+    threading.Thread(target=idti, daemon=True).start()
+
+
 def handle(e, sluh):
     kind = e['kind']
     t = e.get('text', '').strip()
@@ -575,6 +591,8 @@ def handle(e, sluh):
         raciya(low in RACIYA)
     elif kind == 'zoom':
         zoom(t)
+    elif kind == 'plenka':
+        plenka('7' if t == '7' else '13', e.get('ms'))
     elif kind == 'compact':
         compact(t)
     elif kind == 'text' and low in ('компакт', 'compact'):
