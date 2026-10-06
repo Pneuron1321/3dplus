@@ -818,6 +818,43 @@ class Chat(threading.Thread):
         return True
 
 
+PAMYAT = os.environ.get('USHI_PAMYAT', '/tmp/pamyat.log')
+
+
+def pamyat_termux():
+    """Сколько памяти держит Плюс в Termux, по
+    процессам (VmRSS, МБ) — раз в 30 с в /tmp/pamyat.log.
+    06.10 Quest закрывал по памяти Termux, потом и
+    приложение 2: видно, кто сколько ест перед этим.
+    Приложение пишет своё — curl localhost:8766/pamyat."""
+    gr = {}
+    for d in os.listdir('/proc'):
+        if not d.isdigit():
+            continue
+        try:
+            st = open('/proc/%s/status' % d).read()
+        except OSError:
+            continue
+        n = re.search(r'^Name:\s*(\S+)', st, re.M)
+        r = re.search(r'^VmRSS:\s*(\d+)', st, re.M)
+        if n and r:
+            gr[n.group(1)] = gr.get(n.group(1), 0) + int(r.group(1))
+    top = sorted(gr.items(), key=lambda x: -x[1])[:6]
+    stroka = '%s termux %d МБ: %s\n' % (
+        time.strftime('%d.%m %H:%M:%S'), sum(gr.values()) // 1024,
+        ', '.join('%s %d' % (k, v // 1024) for k, v in top))
+    try:
+        if os.path.getsize(PAMYAT) > 400000:
+            t = open(PAMYAT).read()
+            open(PAMYAT, 'w').write(t[len(t) // 2:])
+    except OSError:
+        pass
+    try:
+        open(PAMYAT, 'a').write(stroka)
+    except OSError:
+        pass
+
+
 def zhdat_claude(maks=60):
     """Плюса подняли после убийства: ждём, пока Claude
     готов принять фразу — в окне строка ввода «❯»."""
@@ -896,7 +933,8 @@ def main():
     sluh = Sluh()
     last = None
     st, alive = stamp(), plus_alive()
-    sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0)
+    sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0,
+                pamyat=0)
     vyzov = None       # Ава на паузе с этого времени
     podyom = 0.0       # когда подняли после убийства
     Chat(plus_alive).start()
@@ -910,6 +948,12 @@ def main():
         if now > sled['golos']:
             golos_zhiv()
             sled['golos'] = now + 30
+        if now > sled['pamyat']:
+            sled['pamyat'] = now + 30
+            try:
+                pamyat_termux()
+            except Exception:
+                pass
         if ZHDUT and now > sled['zhdut']:
             dognat()           # вопрос на экране снят?
             sled['zhdut'] = now + 1

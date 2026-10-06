@@ -7,6 +7,7 @@
 #   efir 720      — начать в 720p, 4500 кбит/с (если сеть не тянет)
 #   efir stop     — закончить
 #   efir status   — как идёт
+#   efir mic 4    — голос в эфире громче/тише (0,5–8, обычно 3; приложение запомнит)
 U=${EFIR_URL:-http://localhost:8766}
 KEY=${EFIR_KEY:-/root/.twitch-key}
 
@@ -21,8 +22,9 @@ except ValueError:
     print("Эфир: непонятный ответ приложения."); sys.exit(1)
 s, o = d.get("state"), d.get("oshibka") or ""
 if s == "efir":
-    print("Эфир идёт: %s с, %s кбит/с (цель %s), %s, звук: %s; потеряно кадров: %s."
-          % (d.get("sec"), d.get("kbps"), d.get("tsel_kbps"), d.get("razmer"), d.get("zvuk"), d.get("drops")))
+    print("Эфир идёт: %s с, %s кбит/с (цель %s), %s, звук: %s, голос ×%s; потеряно кадров: %s."
+          % (d.get("sec"), d.get("kbps"), d.get("tsel_kbps"), d.get("razmer"), d.get("zvuk"),
+             d.get("mic"), d.get("drops")))
 elif s == "podklyuchayus":
     print("Эфир: подключаюсь к Twitch… " + o)
 elif s == "obryv":
@@ -37,6 +39,12 @@ case "$1" in
     curl -s --max-time 15 "$U/efir/stop" > /dev/null
     skazat ;;
   status|s)
+    skazat ;;
+  mic)
+    case "$2" in ''|*[!0-9.]*) echo "efir mic 4 — число от 0.5 до 8 (обычно 3)."; exit 1 ;; esac
+    curl -s --max-time 5 "$U/efir/mic?g=$2" > /dev/null || {
+      echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+    echo "Голос в эфире: ×$2 (приложение запомнило)."
     skazat ;;
   ''|720|1080)
     s=$(curl -s --max-time 3 "$U/status") || {
