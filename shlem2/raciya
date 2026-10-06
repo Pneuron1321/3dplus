@@ -201,20 +201,20 @@ class Mozg:
             return False
 
     def stop(self):
+        """Сразу SIGTERM, не ждать, пока закроется сам: в шлеме переход в окно
+        шёл 4–5 с (06.10). Журнал разговора уже записан — ход не теряется."""
         if not self.p:
             return
         try:
             self.p.stdin.close()
         except OSError:
             pass
+        self.p.terminate()
         try:
-            self.p.wait(3)
+            self.p.wait(1.5)
         except subprocess.TimeoutExpired:
-            self.p.terminate()
-            try:
-                self.p.wait(2)
-            except subprocess.TimeoutExpired:
-                self.p.kill()
+            self.p.kill()
+            self.p.wait()
 
 
 class Raciya:

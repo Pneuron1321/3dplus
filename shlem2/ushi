@@ -58,8 +58,10 @@ ZAMER = '/tmp/zamer.log'      # метки задержки (zamer)
 # Рация (raciya): мозг Плюса в фоновой сессии — фразы ей файлами, не в окно.
 RACIYA_Q = os.environ.get('RACIYA_Q', '/tmp/raciya/q')
 RACIYA_PID = os.environ.get('RACIYA_PID', '/tmp/raciya.pid')
-RACIYA = ('рация', 'рацию', 'режим рация', 'включи рацию', 'radio')
-OKNO = ('окно', 'режим окно', 'выключи рацию', 'window')
+# «реклама», «радио» — так Whisper слышал «рацию» в шлеме (06.10)
+RACIYA = ('рация', 'рацию', 'рации', 'режим рация', 'включи рацию', 'реклама',
+          'радио', 'radio')
+OKNO = ('окно', 'окна', 'режим окно', 'выключи рацию', 'window')
 REZHIMY = {'в ухо': 'uho', 'ухо': 'uho', 'вухо': 'uho',
            'in ear': 'uho', 'ear': 'uho',
            'вслух': 'vsluh', 'в слух': 'vsluh',
@@ -181,8 +183,10 @@ def raciya(vkl):
         say('Рация уже включена.' if vkl else 'Окно и так открыто.')
         return
     say('Рация.' if vkl else 'Окно.')
-    r = subprocess.run(['raciya', 'vkl' if vkl else 'vykl'],
-                       capture_output=True, text=True)
+    if not vkl:                # сразу в очередь рации: без запуска Python
+        v_raciyu('/окно')
+        return
+    r = subprocess.run(['raciya', 'vkl'], capture_output=True, text=True)
     print(time.strftime('%H:%M:%S'), 'рация:',
           (r.stdout or r.stderr).strip()[:80], flush=True)
 
