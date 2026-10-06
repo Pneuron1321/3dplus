@@ -55,6 +55,11 @@ POVTORI = ('повтори', 'повтори пожалуйста', 'ещё ра
 REZHIM = os.environ.get('GOLOS_REZHIM',
                         '/root/.golos-rezhim')  # uho|vsluh
 ZAMER = '/tmp/zamer.log'      # метки задержки (zamer)
+# Рация (raciya): мозг Плюса в фоновой сессии — фразы ей файлами, не в окно.
+RACIYA_Q = os.environ.get('RACIYA_Q', '/tmp/raciya/q')
+RACIYA_PID = os.environ.get('RACIYA_PID', '/tmp/raciya.pid')
+RACIYA = ('рация', 'рацию', 'режим рация', 'включи рацию', 'radio')
+OKNO = ('окно', 'режим окно', 'выключи рацию', 'window')
 REZHIMY = {'в ухо': 'uho', 'ухо': 'uho', 'вухо': 'uho',
            'in ear': 'uho', 'ear': 'uho',
            'вслух': 'vsluh', 'в слух': 'vsluh',
@@ -151,6 +156,37 @@ def povtori():
     say(t or 'Ещё нечего повторить.')
 
 
+def raciya_zhiva():
+    """Рация включена: её процесс жив."""
+    try:
+        os.kill(int(open(RACIYA_PID).read()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def v_raciyu(text):
+    """Фраза — в рацию (файлом, порядок по имени)."""
+    os.makedirs(RACIYA_Q, exist_ok=True)
+    put = '%s/%d.txt' % (RACIYA_Q, time.time_ns())
+    open(put + '.tmp', 'w').write(text)
+    os.replace(put + '.tmp', put)
+
+
+def raciya(vkl):
+    """«Плюс плюс рация» / «окно»: рация встаёт в окно
+    Плюса на место Claude или Claude возвращается туда с
+    тем же разговором (переключает сама raciya)."""
+    if vkl == raciya_zhiva():
+        say('Рация уже включена.' if vkl else 'Окно и так открыто.')
+        return
+    say('Рация.' if vkl else 'Окно.')
+    r = subprocess.run(['raciya', 'vkl' if vkl else 'vykl'],
+                       capture_output=True, text=True)
+    print(time.strftime('%H:%M:%S'), 'рация:',
+          (r.stdout or r.stderr).strip()[:80], flush=True)
+
+
 def iz_prosmotra():
     """Окно Плюса пролистано вверх (tmux в режиме просмотра —
     колесо, джойстик): набранное ушло бы в просмотр, а не в
@@ -191,6 +227,8 @@ def ekran():
 
 
 def ekran_zanyat():
+    if raciya_zhiva():
+        return False           # в рации вопросов на экране нет
     return bool(DIALOG.search(ekran()))
 
 
@@ -216,6 +254,9 @@ def v_plus(text, metka='(голосом) '):
     раз. На экране вопрос Claude Code — не вписываем
     (False): Enter ответил бы на него."""
     text = text.rstrip(' ;')
+    if raciya_zhiva():
+        v_raciyu(metka + text)
+        return True
     with TMUX:
         iz_prosmotra()
         if ekran_zanyat():
@@ -457,6 +498,9 @@ def compact(kind):
                 'ответь на него.')
             return
         say('Сжимаю контекст.')
+        if raciya_zhiva():
+            v_raciyu(COMPACT)
+            return
         keys('-l', COMPACT)
         keys('Enter')
     else:
@@ -523,6 +567,8 @@ def handle(e, sluh):
         rezhim('uho' if t == 'uho' else 'vsluh')
     elif kind == 'text' and low in REZHIMY:
         rezhim(REZHIMY[low])
+    elif kind == 'text' and low in RACIYA + OKNO:
+        raciya(low in RACIYA)
     elif kind == 'zoom':
         zoom(t)
     elif kind == 'compact':
