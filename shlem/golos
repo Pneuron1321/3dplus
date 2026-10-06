@@ -3,8 +3,7 @@
 # реплики звучат по очереди, Ава не перебивает сама себя.
 #
 # Реплики кладут skazhi и golos-hook файлами в /tmp/golos/q (порядок — по имени:
-# время в наносекундах). Рация (raciya) кладёт ответ по фразам, пока он пишется:
-# «.potok0» — первая фраза хода (метки zamer, первый кусок до запятой), «.potok» — дальше. Управление — файлы со временем (date +%s.%N):
+# время в наносекундах). Управление — файлы со временем (date +%s.%N):
 #   /tmp/golos.stop   — tiho: оборвать всё, что звучит и ждёт;
 #   /tmp/golos.uskor  — Александр сказал новое: остаток прежних реплик — на 25 %
 #                       быстрее (звучащий кусок доигрывает как есть);
@@ -52,7 +51,7 @@ KESH = os.environ.get('GOLOS_KESH', '/root/.cache/golos')   # короткие �
 POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')      # последний ответ — «плюс плюс повтори»
 # синтез не вышел (нет сети) — Ава говорит это из кэша, а не молчит (не чаще раза в минуту)
 BEZ_SETI = 'Голос без сети. Ответ — в окне.'
-ZARANEE = ('Не расслышала.', 'Теперь в ухо.', 'Теперь вслух.', 'Сжимаю контекст.', 'Рация.', 'Окно.',
+ZARANEE = ('Не расслышала.', 'Теперь в ухо.', 'Теперь вслух.', 'Сжимаю контекст.',
            'Сейчас посмотрю.', 'Секунду.', 'Готово.', BEZ_SETI, 'Ещё нечего повторить.')
 PAUZA_MAKS = 200          # с: пауза дольше — прерванное устарело, не договариваем
 VPERED = 2                # сколько кусков готовить заранее, пока звучит текущий
@@ -359,9 +358,8 @@ class Golos:
             t = int(ns) / 1e9
         except ValueError:
             return
-        glavnyy = vid in ('hook', 'potok0')   # начало ответа: метки zamer
         if t < self.st or t < self.start - 30 or os.path.exists(OFF):
-            if glavnyy:                    # свидетелю zamer: молчит нарочно, не сломалась
+            if vid == 'hook':              # свидетелю zamer: молчит нарочно, не сломалась
                 metka('molchit', ns, 'выключена, оборвано или устарело')
             return                         # оборвали после, устарело или Ава молчит
         if vid == 'pre':
@@ -375,7 +373,7 @@ class Golos:
                 self.pozzhe.append((time.time() + 0.25, popytka + 1, ns, raw))
             return
         if re.fullmatch(r'[\W_]*(?:тихо|молчу)?[\W_]*', tekst.lower()):
-            if glavnyy:
+            if vid == 'hook':
                 metka('molchit', ns, 'право молчать')
             return                         # право молчать: «тихо» на чат — не звук
         if vid == 'hook':
@@ -389,13 +387,11 @@ class Golos:
                 metka('molchit', ns, 'уже сказано вступлением')
             return                         # уже сказано в этом ходе (вступление)
         self.skazano = (self.skazano + [klyuch])[-20:]
-        dalshe = vid == 'potok'            # продолжение ответа рации: не начало
-        ks = kuski(tekst, pervyy=0 if dalshe else 100)
-        if not dalshe:
-            metka('golos', ns, '%d кусков' % len(ks))
+        ks = kuski(tekst)
+        metka('golos', ns, '%d кусков' % len(ks))
         with self.cv:
             for i, k in enumerate(ks):
-                self.q.append(Kusok(k, ns, t, i == 0 and not dalshe))
+                self.q.append(Kusok(k, ns, t, i == 0))
             self.cv.notify_all()
 
     # --- управление ---
