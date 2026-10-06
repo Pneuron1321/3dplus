@@ -538,19 +538,40 @@ def plenka(n, ms):
     threading.Thread(target=idti, daemon=True).start()
 
 
+VYZOV_MS = [0]      # момент последнего вызова — к нему плёнка «чек чек плюс»
+
+
+def chek_plus(vopros, ms, uid):
+    """«Чек чек плюс …»: плёнка 7 кадров вокруг команды и 1,5 с речи после
+    неё — Плюсу вместе: картинка момента и вопрос к ней."""
+    def idti():
+        r = subprocess.run(['kadr', 'plenka', str(int(ms or time.time() * 1000)), '7'],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            say(r.stdout.strip() or 'Плёнка не получилась.')
+            return
+        v = ('Вопрос Александра: «%s». Открой и ответь.' % vopros if vopros
+             else 'Вопроса не было — открой и скажи, что произошло.')
+        if golosom('чек чек плюс — %s %s' % (r.stdout.strip(), v)):
+            metka('vpisal', uid)
+    threading.Thread(target=idti, daemon=True).start()
+
+
 def handle(e, sluh):
     kind = e['kind']
     t = e.get('text', '').strip()
     if kind == 'wake':                  # раньше всего: Ава замолкает
+        VYZOV_MS[0] = e.get('ms') or int(time.time() * 1000)
         signal(G_PAUZA)
         kadr_vyzova()
         metka('vyzov', e['id'], e.get('ms'))
     elif kind == 'tiho':
         subprocess.run(['tiho'])
-    if kind == 'text':
+    chek = kind == 'chek'           # «чек чек плюс»: плёнка уйдёт и без слов
+    if kind in ('text', 'chek'):
         metka('fraza', e['id'], e.get('ms'))
         metka('ushi', e['id'])
-    if kind == 'text' and e.get('audio'):
+    if kind in ('text', 'chek') and e.get('audio'):
         t0 = time.time()
         wav = fetch(e['id'])
         rech = rechi_net(wav) if wav else 99.0
@@ -568,18 +589,23 @@ def handle(e, sluh):
                 and not GALLYU.search(t):
             print(time.strftime('%H:%M:%S'),
                   'выдумка Whisper — не отправляю', flush=True)
-            return
+            if not chek:
+                return
+            w, t = None, ''
         if w:
             t = w.strip(' .!?…').strip()
         elif rech < 0.25 and not t:
             print(time.strftime('%H:%M:%S'),
                   'речи нет — не отправляю', flush=True)
-            return
-        elif not t:
+            if not chek:
+                return
+        elif not t and not chek:
             say('Не расслышала.')
     print(time.strftime('%H:%M:%S'), kind, t, flush=True)
     low = t.lower().strip(' .!?,…')
-    if kind == 'text' and low in TIHO:
+    if chek:
+        chek_plus(t, VYZOV_MS[0], e['id'])
+    elif kind == 'text' and low in TIHO:
         subprocess.run(['tiho'])
     elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
         povtori()
@@ -885,7 +911,7 @@ def main():
             if kind == 'wake':
                 vyzov = time.time()
             handle(e, sluh)
-            if kind == 'text':
+            if kind in ('text', 'chek'):
                 signal(G_DALSHE)     # Ава договаривает
                 vyzov = None
         except Exception as x:   # мост выключен — ждём
