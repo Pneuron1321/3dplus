@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # raciya — «рация»: мозг Плюса в фоновой сессии Claude Code, голос по фразам.
-# Живёт в окне tmux «plus» на месте Claude. «Плюс плюс рация» — уши ставят её
-# в окно (tmux respawn-pane), «плюс плюс окно» — в окне снова Claude, с тем же
-# разговором. Разговор один: рация продолжает его (--resume), окно потом видит
-# всё, что было в рации.
+# Живёт во второй вкладке tmux «plus»; окно Claude в первой остаётся живым и
+# ждёт. «Плюс плюс рация» — уши открывают вкладку рации, «плюс плюс окно» — рация
+# закрывается, а окно Claude подгружает разговор (/resume) без нового запуска:
+# запуск Claude Code в шлеме шёл ~12 с (06.10). Разговор один: рация продолжает
+# его (--resume), окно потом видит всё, что было в рации. Открытое без дела окно
+# в журнал разговора не пишет (проверено на живом Claude Code).
 #
 # Фоновая сессия — один живой процесс claude -p (stream-json): ответ приходит
 # кусками, и готовое предложение сразу уходит голосу (очередь golos), пока
@@ -12,8 +14,8 @@
 # Вопросы разрешения в фоне показать некому: не разрешено — Плюс так и скажет.
 #
 #   raciya              — рация в этом окне (продолжает последний разговор Плюса)
-#   raciya vkl          — поставить рацию в окно tmux «plus» (так делают уши)
-#   raciya vykl         — вернуть в окно Claude (рация сама заменит себя на него)
+#   raciya vkl          — открыть рацию вкладкой в tmux «plus» (так делают уши)
+#   raciya vykl         — вернуть окно Claude (рация закроется сама)
 #   В окне рации: текст + Enter — Плюсу; /окно — вернуть окно Claude.
 import fcntl
 import glob
@@ -31,6 +33,7 @@ PROEKT = os.environ.get('RACIYA_PROEKT', '/root/.claude/projects/-root-plus')   
 Q = os.environ.get('RACIYA_Q', '/tmp/raciya/q')                  # фразы ушей
 PID = os.environ.get('RACIYA_PID', '/tmp/raciya.pid')
 SESSIYA = os.environ.get('RACIYA_SESSIYA', '/tmp/raciya.sessiya')
+OKNO_ID = os.environ.get('RACIYA_OKNO', '/tmp/raciya.okno')     # вкладка tmux с окном Claude
 CLAUDE = os.environ.get('RACIYA_CLAUDE', 'claude')
 TMUX = os.environ.get('RACIYA_TMUX', 'tmux').split()
 G_Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')
@@ -378,12 +381,28 @@ class Raciya:
             self.pechat('%s(не ушло — мозг перезапускается)%s' % (SER, SBROS))
 
     def v_okno(self):
-        """Окно Claude с этим же разговором — на место рации, в этом же окне."""
+        """Окно Claude с этим же разговором. Живо во вкладке — переключиться и
+        подгрузить разговор (/resume id), вкладка рации закроется вместе с ней.
+        Окна нет — Claude запускается здесь же."""
         self.mozg.stop()
         try:
             os.remove(PID)
         except OSError:
             pass
+        okno = chitat(OKNO_ID)
+        try:
+            os.remove(OKNO_ID)
+        except OSError:
+            pass
+        if okno and okno in tmux_vyvod('list-windows', '-t', 'plus', '-F', '#{window_id}').split():
+            tmux('select-window', '-t', okno)
+            if tmux_vyvod('display-message', '-p', '-t', okno, '#{pane_in_mode}').strip() == '1':
+                tmux('send-keys', '-t', okno, '-X', 'cancel')      # окно было пролистано
+            if self.sessiya:
+                tmux('send-keys', '-t', okno, '-l', '/resume ' + self.sessiya)
+                time.sleep(0.3)            # Enter отдельно: иначе Claude Code примет его за перенос
+                tmux('send-keys', '-t', okno, 'Enter')
+            sys.exit(0)
         a = [CLAUDE, '--effort', 'low'] + (['--resume', self.sessiya] if self.sessiya else [])
         env = {k: v for k, v in os.environ.items() if k != 'GOLOS_RACIYA'}
         sys.stdout.write('\n')
@@ -413,6 +432,17 @@ def tmux(*a):
     return subprocess.run(TMUX + list(a), capture_output=True, text=True).returncode == 0
 
 
+def tmux_vyvod(*a):
+    return subprocess.run(TMUX + list(a), capture_output=True, text=True).stdout
+
+
+def chitat(put):
+    try:
+        return open(put).read().strip()
+    except OSError:
+        return ''
+
+
 def vkl():
     if zhiva():
         print('рация уже включена')
@@ -425,7 +455,10 @@ def vkl():
         pass
     me = os.path.abspath(__file__)
     if tmux('has-session', '-t', 'plus'):
-        ok = tmux('respawn-pane', '-k', '-t', 'plus', '-c', PAPKA, me)
+        okno = tmux_vyvod('display-message', '-p', '-t', 'plus', '#{window_id}').strip()
+        if okno:                   # окно Claude остаётся жить в своей вкладке
+            polozhit(os.path.dirname(OKNO_ID), os.path.basename(OKNO_ID), okno)
+        ok = tmux('new-window', '-t', 'plus', '-n', 'raciya', '-c', PAPKA, me)
     else:
         ok = tmux('new-session', '-d', '-s', 'plus', '-c', PAPKA, me, ';', 'set', '-g', 'mouse', 'on')
     print('рация: ок' if ok else 'рация: tmux не принял')
