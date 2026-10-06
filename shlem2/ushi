@@ -818,6 +818,17 @@ class Chat(threading.Thread):
         return True
 
 
+def zhdat_claude(maks=60):
+    """Плюса подняли после убийства: ждём, пока Claude
+    готов принять фразу — в окне строка ввода «❯»."""
+    t = time.time()
+    while time.time() - t < maks:
+        if plus_alive() and '❯' in ekran():
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def plus_alive():
     """Claude Плюса работает (tmux «plus») — приложение
     тогда не запускает его заново, а только открывает
@@ -887,6 +898,7 @@ def main():
     st, alive = stamp(), plus_alive()
     sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0)
     vyzov = None       # Ава на паузе с этого времени
+    podyom = 0.0       # когда подняли после убийства
     Chat(plus_alive).start()
     while True:
         now = time.time()
@@ -917,6 +929,16 @@ def main():
             if last is None:
                 last = get(EAR)['id']   # старое не повторяем
                 pauza()
+                # подняли после убийства (plus --s N):
+                # фразы с вызова N — когда Claude готов
+                s0 = int(os.environ.get('USHI_S') or 0)
+                if 0 < s0 <= last:
+                    print(time.strftime('%H:%M:%S'),
+                          'подъём: жду Claude, фразы с',
+                          s0, flush=True)
+                    zhdat_claude()
+                    last = s0 - 1
+                    podyom = time.time()
             t0 = time.time()
             # wait=3: новое приложение держит запрос,
             # пока не услышит, — без опроса раз в 0,4 с
@@ -936,6 +958,9 @@ def main():
                     time.sleep(0.4)  # старое приложение
                 continue
             last = e['id']
+            if kind == 'wake' and time.time() - podyom < 120 \
+                    and time.time() * 1000 - (e.get('ms') or 0) > 5000:
+                continue    # старый вызов из подъёма: Ава и так молчит
             if kind == 'wake':
                 vyzov = time.time()
             handle(e, sluh)

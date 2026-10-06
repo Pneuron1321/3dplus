@@ -1,0 +1,60 @@
+#!/bin/sh
+# efir — эфир на Twitch прямо из приложения Quest Claude Bridge 2, вместе с глазами
+# Плюса (BeamXR и ретранслятор не нужны; Termux тоже — эфир переживёт его убийство).
+# Ключ Twitch — из /root/.twitch-key (кладёт `kluch twitch`): передаётся приложению
+# внутри шлема (localhost, телом запроса) и нигде не печатается.
+#   efir          — начать: 1080p, 30 к/с, 6000 кбит/с
+#   efir 720      — начать в 720p, 4500 кбит/с (если сеть не тянет)
+#   efir stop     — закончить
+#   efir status   — как идёт
+U=${EFIR_URL:-http://localhost:8766}
+KEY=${EFIR_KEY:-/root/.twitch-key}
+
+skazat() {
+  j=$(curl -s --max-time 5 "$U/efir") || {
+    echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; return 1; }
+  printf '%s' "$j" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Эфир: непонятный ответ приложения."); sys.exit(1)
+s, o = d.get("state"), d.get("oshibka") or ""
+if s == "efir":
+    print("Эфир идёт: %s с, %s кбит/с (цель %s), %s, звук: %s; потеряно кадров: %s."
+          % (d.get("sec"), d.get("kbps"), d.get("tsel_kbps"), d.get("razmer"), d.get("zvuk"), d.get("drops")))
+elif s == "podklyuchayus":
+    print("Эфир: подключаюсь к Twitch… " + o)
+elif s == "obryv":
+    print("Эфир: обрыв, переподключаюсь… " + o)
+else:
+    print("Эфир выключен." + (" " + o if o else ""))
+'
+}
+
+case "$1" in
+  stop)
+    curl -s --max-time 15 "$U/efir/stop" > /dev/null
+    skazat ;;
+  status|s)
+    skazat ;;
+  ''|720|1080)
+    s=$(curl -s --max-time 3 "$U/status") || {
+      echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+    case "$s" in *'"capturing":true'*) ;; *)
+      echo "Захват не идёт: в Quest Claude Bridge 2 — «Начать захват» → «Разрешить»."; exit 1 ;; esac
+    [ -s "$KEY" ] || { echo "Нет ключа Twitch: в Ubuntu Плюса — kluch twitch."; exit 1; }
+    r=$(curl -s --max-time 5 --data-binary @"$KEY" "$U/efir/key")
+    case "$r" in *'"key":true'*) ;; *)
+      echo "Приложение не приняло ключ (нужно приложение 2.1; ключ не похож на ключ Twitch?)."; exit 1 ;; esac
+    q=; [ "$1" = 720 ] && q='?size=720&kbps=4500'
+    curl -s --max-time 20 "$U/efir/start$q" > /dev/null
+    i=0
+    while [ $i -lt 12 ]; do
+      sleep 1; i=$((i + 1))
+      case "$(curl -s --max-time 3 "$U/efir")" in *'"state":"efir"'*|*'"state":"off"'*) break ;; esac
+    done
+    skazat ;;
+  *)
+    echo "efir — начать эфир, efir 720 — полегче, efir stop — закончить, efir status — как идёт." ;;
+esac

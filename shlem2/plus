@@ -3,7 +3,17 @@
 # Уши вписывают услышанное в эту сессию. Выйти из Claude — /exit, как обычно.
 # Уши обновили (ushi или sluh новее запущенных) — перезапускает их сам.
 # -u и UTF-8: без них tmux меняет кириллицу на «_».
+# plus --continue --s N — подъём после убийства (приложение 2 по «плюс плюс», когда
+# Плюс пропал): тот же разговор, уши берут фразы с события N, когда Claude готов.
 export LANG=C.UTF-8
+CONT=; S=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --continue) CONT=--continue ;;
+    --s) S=$2; shift ;;
+  esac
+  shift
+done
 P=$(cat /tmp/ushi.pid 2> /dev/null)
 if [ -n "$P" ] && kill -0 "$P" 2> /dev/null; then
   for f in /usr/local/bin/ushi /usr/local/bin/sluh; do
@@ -13,7 +23,10 @@ if [ -n "$P" ] && kill -0 "$P" 2> /dev/null; then
   done
 fi
 if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
-  setsid nohup /usr/local/bin/ushi > /tmp/ushi.log 2>&1 < /dev/null &
+  # журнал дописываем (видно, что было до убийства), но не больше ~1 МБ
+  [ "$(stat -c %s /tmp/ushi.log 2> /dev/null || echo 0)" -gt 1000000 ] && \
+    tail -c 300000 /tmp/ushi.log > /tmp/ushi.log.1 && mv /tmp/ushi.log.1 /tmp/ushi.log
+  USHI_S=$S setsid nohup /usr/local/bin/ushi >> /tmp/ushi.log 2>&1 < /dev/null &
 fi
 # Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
 # «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
@@ -23,4 +36,4 @@ mkdir -p "$D"
 # помощнику dumat (высокое усилие, /root/.claude/agents/dumat.md).
 # Мышь в tmux: джойстик шлема листает вывод, а не историю отправленного
 # (без неё Termux превращает прокрутку в стрелки).
-exec tmux -u new-session -A -s plus -c "$D" claude --effort low \; set -g mouse on
+exec tmux -u new-session -A -s plus -c "$D" claude $CONT --effort low \; set -g mouse on
