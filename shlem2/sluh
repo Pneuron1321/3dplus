@@ -10,6 +10,10 @@ large-v3, ~1 с, точность диктовки. Нет ключа,
 Модель: SLUH_MODEL или файл /root/.sluh-model,
 иначе small. large-v3-turbo — точнее, медленнее.
 Потоки: SLUH_THREADS или /root/.sluh-threads, иначе 4.
+Локальная модель — запасная: с ключом Groq она
+грузится, только когда облако не ответило (~0,5 ГБ
+памяти; держать её всегда — шлем в игре по Meta
+убивал Termux с Плюсом). Без ключа — сразу.
 """
 import json
 import os
@@ -20,8 +24,6 @@ import urllib.request
 import uuid
 import wave
 
-import numpy as np
-from faster_whisper import WhisperModel
 
 LANGS = ('ru', 'uk', 'en')
 GROQ = os.environ.get(
@@ -49,16 +51,26 @@ def threads():
         return 4
 
 
-model = WhisperModel(
-    model_name() or 'small',
-    device='cpu', compute_type='int8',
-    cpu_threads=threads())
-print(json.dumps({'ready': True}), flush=True)
+_model = []
+
+
+def model():
+    """Локальная модель — при первой нужде."""
+    if not _model:
+        from faster_whisper import WhisperModel
+        log('загружаю локальную модель',
+            model_name() or 'small')
+        _model.append(WhisperModel(
+            model_name() or 'small',
+            device='cpu', compute_type='int8',
+            cpu_threads=threads()))
+    return _model[0]
 
 
 def load(path):
     # WAV 16 кГц 16 бит → float32, без PyAV:
     # свежий PyAV ломал faster-whisper 1.2
+    import numpy as np
     with wave.open(path, 'rb') as w:
         pcm = w.readframes(w.getnframes())
     a = np.frombuffer(pcm, dtype=np.int16)
@@ -66,7 +78,7 @@ def load(path):
 
 
 def run(audio, lang=None):
-    return model.transcribe(
+    return model().transcribe(
         audio, beam_size=2, vad_filter=True,
         language=lang,
         condition_on_previous_text=False)
@@ -147,6 +159,10 @@ def hear(path):
     text = ' '.join(s.text.strip() for s in segs)
     return text.strip(), lang
 
+
+if not groq_key():
+    model()                  # без облака — модель сразу
+print(json.dumps({'ready': True}), flush=True)
 
 for line in sys.stdin:
     path = line.strip()
