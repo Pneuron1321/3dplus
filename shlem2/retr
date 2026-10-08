@@ -9,13 +9,16 @@
 # отправщик читает ту же трубу. Не UDP: в шлеме UDP терял куски, битый кадр звука
 # ронял отправщик, и Twitch видел новый эфир (05.10). Звук отправщик кодирует сам:
 # битый кадр звука — пропуск, а не падение.
-# retr — запустить (если ещё не запущен); retr stop; retr status.
+# retr — запустить (если ещё не запущен) и держать запущенным (уши поднимают его, пока лежит
+# /root/.retr-vkl); retr stop — остановить насовсем; retr status. Ретранслятор занимает порт
+# 1935 — тот же, что у камеры телефона в приложении 2: пока он работает, камера не подключится.
 # Ключ Twitch — секрет: не печатать командные строки ffmpeg (ps, pgrep -a).
 IN=${RETR_IN:-rtmp://127.0.0.1:1935/live/plus}
 JPG=${RETR_JPG:-/tmp/strim.jpg}
 KEY=${RETR_KEY:-/root/.twitch-key}
 TW=${RETR_TWITCH:-rtmp://live.twitch.tv/app}
 PID=${RETR_PID:-/tmp/retr.pid}
+VKL=${RETR_VKL:-/root/.retr-vkl}
 LOG=${RETR_LOG:-/tmp/retr.log}
 
 zhiv() { P=$(cat "$PID" 2> /dev/null) && [ -n "$P" ] && kill -0 $P 2> /dev/null; }
@@ -44,8 +47,9 @@ case "$1" in
       fi
     done ;;
   stop)
+    rm -f "$VKL"
     zhiv && kill -- -$(cat "$PID") 2> /dev/null
-    rm -f "$PID"; sleep 2; echo "Ретранслятор остановлен." ;;
+    rm -f "$PID"; sleep 2; echo "Ретранслятор остановлен и уши его больше не поднимают (порт 1935 свободен для камеры)." ;;
   status)
     if zhiv; then
       a=-1; [ -f "$JPG" ] && a=$(( $(date +%s) - $(stat -c %Y "$JPG") ))
@@ -54,6 +58,7 @@ case "$1" in
       [ -s "$KEY" ] && echo "На Twitch: ключ есть." || echo "На Twitch: ключа нет (kluch twitch) — только глаза Плюса."
     else echo "Ретранслятор не запущен (retr)."; fi ;;
   *)
+    : > "$VKL"
     zhiv && { echo "Ретранслятор уже работает."; exit 0; }
     command -v ffmpeg > /dev/null || { echo "Нет ffmpeg: apt install -y ffmpeg"; exit 1; }
     setsid sh -c "echo \$\$ > '$PID'; '$0' priem | '$0' twitch" >> "$LOG" 2>&1 < /dev/null &
