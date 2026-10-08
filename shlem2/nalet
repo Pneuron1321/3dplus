@@ -1,0 +1,45 @@
+#!/bin/sh
+# nalet — налёт эфира и лицо Плюса в правом верхнем углу эфира (приложение 2.2.2).
+# Налёт — как часы у пилота: 1 коин в минуту, капает только пока идёт эфир.
+#   nalet                — сколько всего и за этот эфир
+#   nalet nachalo 123.45 — перенести налёт (например, из студии): всего станет столько
+#   nalet skryt | pokazat         — убрать / вернуть налёт в эфире
+#   nalet lico skryt | pokazat    — убрать / вернуть лицо Плюса в эфире
+U=${NALET_URL:-http://localhost:8766}
+
+molchit() { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+
+skazat() {
+  printf '%s' "$1" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Налёт: непонятный ответ приложения."); sys.exit(1)
+if d.get("oshibka"):
+    print("Налёт: " + d["oshibka"]); sys.exit(1)
+s = "Налёт: всего %s" % d.get("vsego")
+if d.get("v_efire"):
+    s += ", за этот эфир +%s" % d.get("za_efir")
+s += "."
+skryto = [n for n, k in (("налёт", "pokaz"), ("лицо", "lico")) if d.get(k) is False]
+if skryto:
+    s += " В эфире скрыто: " + ", ".join(skryto) + "."
+print(s)
+'
+}
+
+case "$1" in
+  ''|status|s) q= ;;
+  nachalo)
+    case "$2" in ''|*[!0-9.,]*) echo "nalet nachalo 123.45 — сколько коинов уже налетал."; exit 1 ;; esac
+    q="/upr?koiny=$(printf '%s' "$2" | tr , .)" ;;
+  skryt) q="/upr?pokaz=0" ;;
+  pokazat) q="/upr?pokaz=1" ;;
+  lico)
+    case "$2" in skryt) q="/upr?lico=0" ;; pokazat) q="/upr?lico=1" ;;
+      *) echo "nalet lico skryt | nalet lico pokazat"; exit 1 ;; esac ;;
+  *) echo "nalet — сколько; nalet nachalo 123.45; nalet skryt|pokazat; nalet lico skryt|pokazat."; exit 1 ;;
+esac
+j=$(curl -s --max-time 5 "$U/nalet$q") || molchit
+skazat "$j"
