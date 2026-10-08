@@ -1,0 +1,35 @@
+#!/bin/sh
+# radar — радар в левом нижнем углу эфира (приложение 2.2.4): роза ветров по живому компасу
+# шлема — куда Александр смотрит в настоящем мире. Без магнитометра север — куда смотрел, когда
+# начался эфир; «север здесь» — переставить.
+#   radar                 — что с радаром и компасом
+#   radar sever           — север там, куда смотришь сейчас
+#   radar skryt | pokazat — убрать / вернуть радар в эфире
+U=${RADAR_URL:-http://localhost:8766}
+
+case "$1" in
+  ''|status|s) q= ;;
+  sever) q="/upr?sever=1" ;;
+  skryt) q="/upr?radar=0" ;;
+  pokazat) q="/upr?radar=1" ;;
+  *) echo "radar — что с радаром; radar sever — север здесь; radar skryt|pokazat."; exit 1 ;;
+esac
+j=$(curl -s --max-time 5 "$U/nalet$q") || {
+  echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+printf '%s' "$j" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Радар: непонятный ответ приложения."); sys.exit(1)
+if d.get("oshibka"):
+    print("Радар: " + d["oshibka"]); sys.exit(1)
+k = d.get("kompas")
+kak = {"absolute": "компас настоящий (магнитный север)",
+       "relative": "компас без магнитометра — север там, куда смотрел в начале эфира (radar sever — переставить)",
+       }.get(k, "компаса нет — датчики шлема: " + (d.get("datchiki") or "не видны"))
+s = "Радар: " + ("в эфире" if d.get("radar") else "скрыт") + "; " + kak
+if k in ("absolute", "relative") and d.get("v_efire"):
+    s += "; курс " + str(d.get("kurs"))
+print(s + ".")
+'
