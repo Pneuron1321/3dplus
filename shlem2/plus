@@ -28,6 +28,11 @@ if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
     tail -c 300000 /tmp/ushi.log > /tmp/ushi.log.1 && mv /tmp/ushi.log.1 /tmp/ushi.log
   USHI_S=$S setsid nohup /usr/local/bin/ushi >> /tmp/ushi.log 2>&1 < /dev/null &
 fi
+# Автопросмотр игры (obzor): частоту задал Александр — смотрит дальше (второй не запустится: замок).
+case "$(cat /root/.obzor-min 2> /dev/null)" in
+  ''|0|*[!0-9]*) ;;
+  *) setsid nohup /usr/local/bin/obzor demon >> /tmp/obzor-demon.log 2>&1 < /dev/null & ;;
+esac
 # Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
 # «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
 D=/root/plus

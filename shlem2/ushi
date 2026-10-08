@@ -578,6 +578,21 @@ def chek_plus(vopros, ms, uid):
     threading.Thread(target=idti, daemon=True).start()
 
 
+TITR = os.environ.get('USHI_TITR', '/usr/local/bin/titr')
+
+
+def titr_ya(t):
+    """Фраза Александра — субтитром в эфир (titr переводит и шлёт в фоне; без эфира — молча)."""
+    if not os.path.exists(TITR):
+        return
+    try:
+        subprocess.Popen([TITR, 'ya', '--', t], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        pass
+
+
 def handle(e, sluh):
     kind = e['kind']
     t = e.get('text', '').strip()
@@ -630,6 +645,8 @@ def handle(e, sluh):
         elif not t and not chek:
             say('Не расслышала.')
     print(time.strftime('%H:%M:%S'), kind, t, flush=True)
+    if kind in ('text', 'chek') and t:
+        titr_ya(t)                      # субтитр эфира: что сказал Александр (по-английски)
     low = t.lower().strip(' .!?,…')
     if chek:
         chek_plus(t, VYZOV_MS[0], e['id'])

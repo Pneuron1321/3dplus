@@ -45,6 +45,7 @@ ZAMER = os.environ.get('GOLOS_ZAMER', '/tmp/zamer.log')
 MOST = os.environ.get('GOLOS_MOST', 'http://localhost:8766')   # приложение 2 (1.0 — 8765)
 VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
 PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
+TITR = os.environ.get('GOLOS_TITR', '/usr/local/bin/titr')     # субтитры эфира (приложение 2.2.7)
 # Темп Авы (решение Александра 05.10): обычная речь +15 % — это новые «100 %»;
 # ускорение на новую реплику — ещё +25 % от них: 1,15 × 1,25 ≈ +44 %.
 TEMP = os.environ.get('GOLOS_TEMP', '+15%')
@@ -239,6 +240,22 @@ class Sintez:
 
 
 # ---------- проигрыватели ----------
+
+def titr_plus(tekst, put):
+    """Кусок звучит вслух — субтитр по-английски внизу кадра эфира (titr переводит и шлёт сам,
+    в фоне: голос не ждёт). Нет titr или эфира — ничего."""
+    if not os.path.exists(TITR):
+        return
+    try:
+        sek = ['--sek', '%.1f' % (os.path.getsize(put) / 6000.0 + 0.8)]
+    except OSError:
+        sek = []
+    try:
+        subprocess.Popen([TITR, 'plus'] + sek + ['--', tekst], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
+
 
 class Rot:
     """Рот лица Плюса в эфире (приложение 2.2.6): play-audio Termux приложение не слышит —
@@ -559,6 +576,7 @@ class Golos:
             self.igrok = self.Most(put, 'uho')
         else:
             self.igrok = self.Termux(put)
+            titr_plus(k.tekst, put)        # субтитр — только вслух: «в ухо» зрители не слышат
 
     def gotovit(self):
         """Поток синтеза: готовит первые куски очереди в их нынешнем темпе."""
