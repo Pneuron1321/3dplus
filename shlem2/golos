@@ -21,6 +21,7 @@ import fcntl
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -239,14 +240,54 @@ class Sintez:
 
 # ---------- проигрыватели ----------
 
+class Rot:
+    """Рот лица Плюса в эфире (приложение 2.2.6): play-audio Termux приложение не слышит —
+    говорим ему сами: «звучу N с» (GET /say/rot?sek=N) и «замолчала» (sek=0). Один поток с
+    очередью: «замолчала» прежнего куска не обгонит «звучу» следующего. Приложения нет — молча."""
+    q = queue.Queue()
+    potok = None
+    lock = threading.Lock()
+
+    @classmethod
+    def skazat(cls, sek):
+        with cls.lock:
+            if cls.potok is None:
+                cls.potok = threading.Thread(target=cls.run, daemon=True)
+                cls.potok.start()
+        cls.q.put(sek)
+
+    @classmethod
+    def run(cls):
+        while True:
+            sek = cls.q.get()
+            try:
+                urllib.request.urlopen('%s/say/rot?sek=%.1f' % (MOST, sek), timeout=1).read()
+            except Exception:
+                pass
+
+
 class Termux:
     """play-audio Termux: звук идёт в общий микс — его пишет и стрим."""
 
     def __init__(self, put):
         self.p = subprocess.Popen([PLAY, put], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:                               # edge-tts: 48 кбит/с — 6000 байт на секунду звука
+            dl = os.path.getsize(put) / 6000.0
+        except OSError:
+            dl = 5.0
+        self.rot = True
+        Rot.skazat(min(60.0, dl + 1.5))    # запас: «замолчала» потеряется — рот встанет сам
+
+    def molchu(self):
+        if self.rot:
+            self.rot = False
+            Rot.skazat(0)
 
     def konec(self):
-        return None if self.p.poll() is None else 'done'   # код play-audio не важен: дальше
+        if self.p.poll() is None:
+            return None
+        self.molchu()
+        return 'done'                      # код play-audio не важен: дальше
 
     def stop(self):
         if self.p.poll() is None:
@@ -255,6 +296,7 @@ class Termux:
                 self.p.wait(2)
             except subprocess.TimeoutExpired:
                 self.p.kill()
+        self.molchu()
 
 
 class Most:
