@@ -4,7 +4,7 @@
 `claude -p --model haiku`: основная модель Плюса (Sonnet) не меняется, подтверждений не нужно —
 у просмотра только чтение одного кадра, без хуков (голос молчит) и без CLAUDE.md; сессия не
 сохраняется (plus --continue её не подхватит). Один взгляд — около 4 тысяч токенов Haiku.
-Смотрит только пока идёт эфир. Частоту задаёт Александр; по умолчанию выключен.
+Смотрит только пока идёт эфир. По умолчанию — раз в 5 минут (Александр 08.10); `obzor vykl` — выключить.
   obzor                 — включён ли, как часто, последние наблюдения
   obzor kazhdye N       — раз в N минут (1–60), пока идёт эфир
   obzor vykl            — выключить
@@ -26,6 +26,7 @@ LOCK = os.environ.get('OBZOR_LOCK', '/tmp/obzor.lock')
 CLAUDE = os.environ.get('OBZOR_CLAUDE', 'claude')
 MODEL = os.environ.get('OBZOR_MODEL', 'haiku')
 SEK_V_MIN = float(os.environ.get('OBZOR_SEK_V_MIN', 60))  # в проверке — быстрее
+PO_UMOLCHANIYU = 5                                          # минут, пока Александр не задал другое
 ZADANIE = (
     'Ты смотришь кадр VR-игры, которую стримит Александр (шлем Quest 3), — для его соведущего '
     'Плюса. Прочитай файл кадра инструментом Read. Ответь ОДНОЙ строкой: ИНТЕРЕС|БОЙ|ЧТО. '
@@ -52,9 +53,12 @@ def efir_idyot():
 
 
 def kazhdye():
+    """Раз в сколько минут смотреть: файла нет — по умолчанию (Александр 08.10: раз в 5 минут)."""
     try:
         return max(0, min(60, int(open(CONF).read().strip())))
-    except (OSError, ValueError):
+    except OSError:
+        return PO_UMOLCHANIYU
+    except ValueError:
         return 0
 
 

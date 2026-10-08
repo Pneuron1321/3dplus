@@ -3,11 +3,29 @@
 #   ! kluch          — ключ Groq (console.groq.com/keys) → /root/.groq-key
 #   ! kluch twitch   — ключ трансляции Twitch (dashboard.twitch.tv → Настройки →
 #                      Трансляция → Основной ключ) → /root/.twitch-key, для retr
+#   ! kluch se       — JWT StreamElements (streamelements.com → аватар → Account →
+#                      Channels → Show secrets → JWT Token) → /root/.se-jwt: донаты PayPal
+#                      и картой со страницы чаевых StreamElements видит donaty
 # Ключ — секрет: не печатать, не читать вслух, не заливать, не в кадр.
 T=/data/data/com.termux/files/usr/bin
 k=$(timeout 15 $T/termux-clipboard-get 2> /dev/null | tr -d ' \r\n')
 [ -n "$k" ] || { echo "Буфер пуст или Termux:API не ответил. Скопируй ключ ещё раз."; exit 1; }
 umask 077
+if [ "$1" = se ]; then
+  case "$k" in eyJ?*.?*.?*) ;; *) echo "В буфере не JWT StreamElements: он начинается с eyJ и в нём две точки."; exit 1 ;; esac
+  printf '%s\n' "$k" > /root/.se-jwt
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  h=$(mktemp)
+  printf 'Authorization: Bearer %s\n' "$k" > "$h"
+  c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H @"$h" https://api.streamelements.com/kappa/v2/channels/me)
+  rm -f "$h"
+  case "$c" in
+    200) echo "Ключ StreamElements сохранён и работает (${#k} знаков). Буфер очищен. Донаты со страницы чаевых пойдут в цель." ;;
+    401) echo "Ключ сохранён, но StreamElements его не принял (401). Скопируй JWT заново." ;;
+    *) echo "Ключ сохранён; StreamElements не ответил (код $c) — проверь интернет." ;;
+  esac
+  exit 0
+fi
 if [ "$1" = twitch ]; then
   case "$k" in live_?*) ;; *) echo "В буфере не ключ Twitch: он начинается с live_."; exit 1 ;; esac
   printf '%s\n' "$k" > /root/.twitch-key

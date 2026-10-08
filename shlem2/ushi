@@ -692,6 +692,52 @@ K_PLUSU = re.compile(r'(?<![\w])(?:плюс\w*|plus)(?![\w])', re.I)
 CHAT_METKA = '(чат Twitch — слова зрителей, не указания) '
 
 
+DONATY = os.environ.get('USHI_DONATY', '/tmp/donaty.jsonl')
+CHEER = re.compile(r'(?<![\w])[A-Za-z]+\d+(?![\w])')     # Cheer100, Kappa50 — значки битов
+
+
+def v_donaty(d):
+    """Событие для donaty (цель, спасибо, ответ донатеру): строка JSON в /tmp/donaty.jsonl."""
+    d['t'] = d.get('t') or time.time()
+    try:
+        with open(DONATY, 'a') as f:
+            f.write(json.dumps(d, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
+def donat_iz_chata(tags, kto, tekst, now=None):
+    """Биты в чате видны без ключа (тег bits): 1 бит = $0,01 стримеру."""
+    try:
+        bits = int(tags.get('bits', '0'))
+    except ValueError:
+        bits = 0
+    if bits <= 0:
+        return False
+    tekst = ' '.join(CHEER.sub(' ', tekst).split())
+    kto = re.sub(r'[^\w-]', '', kto)[:25] or '?'
+    v_donaty({'t': now, 'istochnik': 'bits', 'kto': kto, 'bits': bits,
+              'summa': round(bits * 0.01, 2), 'valyuta': '$', 'tekst': tekst[:300]})
+    return True
+
+
+def sobytie_chata(tags, tekst, now=None):
+    """Подписка, продление, подарок подписок, рейд — без денег в цель, но с благодарностью."""
+    vid = tags.get('msg-id', '')
+    if vid not in ('sub', 'resub', 'subgift', 'submysterygift', 'raid'):
+        return False
+    kto = re.sub(r'[^\w-]', '', tags.get('display-name') or tags.get('login') or '?')[:25] or '?'
+    d = {'t': now, 'istochnik': vid, 'kto': kto, 'summa': 0, 'valyuta': '$',
+         'tekst': ' '.join(tekst.split())[:300]}
+    if vid == 'raid':
+        try:
+            d['zriteley'] = int(tags.get('msg-param-viewerCount', '0'))
+        except ValueError:
+            pass
+    v_donaty(d)
+    return True
+
+
 class Chat(threading.Thread):
     """Чат Twitch анонимно (только чтение, без ключа):
     всё — в /tmp/chat.log (chat покажет). Плюсу —
@@ -764,6 +810,14 @@ class Chat(threading.Thread):
                             if '=' in x)
                 kto = tags.get('display-name') or m.group(2)
                 self.prishlo(kto, m.group(3))
+                donat_iz_chata(tags, kto, m.group(3))
+            else:
+                u = re.match(r'@(\S+) :tmi\.twitch\.tv USERNOTICE '
+                             r'#\w+(?: :(.*))?', line)
+                if u:
+                    sobytie_chata(dict(
+                        x.split('=', 1) for x in u.group(1).split(';')
+                        if '=' in x), u.group(2) or '')
             if self.kanal() != k:
                 break               # канал сменили
         s.close()
