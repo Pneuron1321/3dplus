@@ -7,11 +7,19 @@
   2) Плюс благодарит донатера по нику и отвечает ему на его языке — голосом ТОЛЬКО в эфир
      (зрители слышат, Александр в шлеме — нет; решение 06.10) и субтитром; сообщение читает
      через фильтр: без ссылок, до 120 знаков, без грубого, с порога суммы;
-  3) вызов в сообщении («вызов…», «challenge…») — в очередь вызовов соведущего.
+  3) вызов в сообщении («вызов…», «challenge…») — в очередь вызовов соведущего;
+  4) в книгу донатеров — топ-донатор в левом верхнем углу эфира (2.3.0): кто дал больше всех за всё
+     время (или за вечер — `donaty top vecher`), сумма — в валюте цели.
 Текст зрителя видит только отдельный Haiku без инструментов (`claude -p --tools ""`), не Плюс.
-  donaty              — что пришло за вечер
-  donaty porog 0.5    — с какой суммы ($) читать сообщение и отвечать голосом
-  donaty demon        — сам цикл (запускает plus)"""
+  donaty                      — что пришло за вечер и кто топ
+  donaty porog 0.5            — с какой суммы ($) читать сообщение и отвечать голосом
+  donaty top                  — кто топ-донатор (и тройка лучших)
+  donaty top vsyo | vecher    — топ за всё время (обычно) / только за этот вечер
+  donaty top skryt | pokazat  — убрать / вернуть плашку топ-донатора
+  donaty top sbros            — книгу донатеров с нуля
+  donaty dobavit НИК СУММА [ВАЛЮТА] — донат мимо Twitch и StreamElements (наличными, переводом):
+                                в цель и в книгу, без голоса
+  donaty demon                — сам цикл (запускает plus)"""
 import base64
 import fcntl
 import json
@@ -35,6 +43,10 @@ SE_URL = os.environ.get('DONATY_SE_URL', 'https://api.streamelements.com/kappa/v
 POROG = os.environ.get('DONATY_POROG', '/root/.donaty-porog')
 VYZOVY = os.environ.get('DONATY_VYZOVY', '/root/.vedushchiy/vyzovy-donat.jsonl')
 LOCK = os.environ.get('DONATY_LOCK', '/tmp/donaty.lock')
+KNIGA = os.environ.get('DONATY_KNIGA', '/root/.donaty/donatory.json')     # топ-донатор: кто сколько, в $
+TOP_REZHIM = os.environ.get('DONATY_TOP_REZHIM', '/root/.donaty/top-rezhim')
+TOP_RAZ = float(os.environ.get('DONATY_TOP_RAZ', 120))     # сверять плашку с книгой (приложение могли перезапустить)
+ANONIM = {'', '?', 'anonymous', 'ananonymouscheerer', 'anonym', 'аноним'}
 DIR = os.environ.get('DONATY_DIR', '/tmp/donaty')
 CLAUDE = os.environ.get('DONATY_CLAUDE', 'claude')
 TITR = os.environ.get('DONATY_TITR', '/usr/local/bin/titr')
@@ -156,6 +168,95 @@ def v_efir(tekst):
             pass
 
 
+# ---------- книга донатеров и топ-донатор ----------
+
+def kniga():
+    """{ник в нижнем регистре: {"imya": как написан, "usd": всего в $}}. Нет книги — из записей вечера."""
+    try:
+        return json.load(open(KNIGA))
+    except (OSError, ValueError):
+        pass
+    k = {}
+    try:
+        for l in open(VECHER):
+            try:
+                z = json.loads(l)
+            except ValueError:
+                continue
+            if float(z.get('summa') or 0) > 0:
+                v_knigu(k, z.get('kto', ''), v_dollarah(float(z['summa']), z.get('valyuta') or '$'))
+    except OSError:
+        pass
+    return k
+
+
+def v_knigu(k, kto, usd):
+    kto = re.sub(r'[^\w-]', '', kto or '')[:25]
+    if kto.lower() in ANONIM or usd <= 0:
+        return False
+    z = k.setdefault(kto.lower(), {'imya': kto, 'usd': 0.0})
+    z['usd'] = round(z['usd'] + usd, 2)
+    return True
+
+
+def sohranit_knigu(k):
+    os.makedirs(os.path.dirname(KNIGA), exist_ok=True)
+    tmp = KNIGA + '.tmp'
+    json.dump(k, open(tmp, 'w'), ensure_ascii=False)
+    os.replace(tmp, KNIGA)
+
+
+def top_rezhim():
+    try:
+        return 'vecher' if open(TOP_REZHIM).read().strip() == 'vecher' else 'vsyo'
+    except OSError:
+        return 'vsyo'
+
+
+def luchshie(n=3):
+    """[(ник, $)] по убыванию: за всё время — книга, за вечер — записи последних 12 часов."""
+    if top_rezhim() == 'vecher':
+        k = {}
+        try:
+            for l in open(VECHER):
+                try:
+                    z = json.loads(l)
+                except ValueError:
+                    continue
+                if time.time() - z.get('t', 0) < 12 * 3600 and float(z.get('summa') or 0) > 0:
+                    v_knigu(k, z.get('kto', ''), v_dollarah(float(z['summa']), z.get('valyuta') or '$'))
+        except OSError:
+            pass
+    else:
+        k = kniga()
+    return sorted(((z['imya'], z['usd']) for z in k.values()), key=lambda x: -x[1])[:n]
+
+
+def obnovit_top():
+    """Топ-донатор — в приложение (/top/upr), сумма в валюте цели. Показ (скрыт/виден) не трогает."""
+    l = luchshie(1)
+    try:
+        if not l:
+            get('/top/upr?sbros=1')
+            return None
+        imya, usd = l[0]
+        try:
+            vc = json.loads(get('/cel')).get('valyuta') or '$'
+        except Exception:
+            vc = '$'
+        k = DOLLAR.get(vc.upper() if len(vc) > 1 else vc)
+        summa, valyuta = (usd / k, vc) if k else (usd, '$')
+        get('/top/upr?' + urllib.parse.urlencode({'imya': imya, 'summa': '%.2f' % summa, 'valyuta': valyuta},
+                                                 quote_via=urllib.parse.quote))
+        obnovit_top.molchu = False
+        return imya, round(summa, 2), valyuta
+    except Exception as e:
+        if not getattr(obnovit_top, 'molchu', False):        # захват не идёт — сказать раз, не каждые 2 минуты
+            log('топ-донатор не ушёл в приложение:', type(e).__name__)
+        obnovit_top.molchu = True
+        return None
+
+
 def obrabotat(d):
     """Один донат или событие: цель, спасибо и ответ (только в эфир), вызов — в очередь соведущего."""
     ist, kto = d.get('istochnik', '?'), re.sub(r'[^\w-]', '', d.get('kto') or '?')[:25] or '?'
@@ -164,6 +265,10 @@ def obrabotat(d):
     rech = None
     if summa > 0:
         zapis['v_cel'] = v_cel(summa, valyuta)
+        k = kniga()
+        if v_knigu(k, kto, v_dollarah(summa, valyuta)):
+            sohranit_knigu(k)
+        obnovit_top()
         summa_t = ('%d bits' % d['bits']) if ist == 'bits' else '%s %s' % (('%.2f' % summa).rstrip('0').rstrip('.'), valyuta)
         if v_dollarah(summa, valyuta) >= porog():
             soobshchenie = chistyy(d.get('tekst', ''))
@@ -276,9 +381,12 @@ def demon():
         return 0
     log('запущен')
     mt = os.path.getmtime(__file__)
-    sled_se = 0.0
+    sled_se = sled_top = 0.0
     while True:
         obnovilsya(mt)
+        if time.time() >= sled_top:                          # приложение перезапускали — плашка снова верная
+            obnovit_top()
+            sled_top = time.time() + TOP_RAZ
         for d in iz_chata():
             obrabotat(d)
         if time.time() >= sled_se:
@@ -313,8 +421,57 @@ def main(a):
         open(POROG, 'w').write(str(v))
         print('Отвечаю голосом и читаю сообщение с $%s.' % a[1])
         return 0
+    if a and a[0] == 'top':
+        if len(a) == 2 and a[1] in ('vsyo', 'vecher'):
+            os.makedirs(os.path.dirname(TOP_REZHIM), exist_ok=True)
+            open(TOP_REZHIM, 'w').write(a[1])
+            obnovit_top()
+            print('Топ-донатор — %s.' % ('за всё время' if a[1] == 'vsyo' else 'за этот вечер'))
+            return 0
+        if len(a) == 2 and a[1] in ('skryt', 'pokazat'):
+            try:
+                get('/top/upr?pokaz=%d' % (a[1] == 'pokazat'))
+            except Exception:
+                print('Приложение не ответило — захват идёт?')
+                return 1
+            print('Плашка топ-донатора %s.' % ('убрана' if a[1] == 'skryt' else 'снова в эфире'))
+            return 0
+        if len(a) == 2 and a[1] == 'sbros':
+            sohranit_knigu({})
+            obnovit_top()
+            print('Книга донатеров с нуля: топ-донатора нет.')
+            return 0
+        l = luchshie(3)
+        if not l:
+            print('Топ-донатора пока нет (%s).' % ('за вечер' if top_rezhim() == 'vecher' else 'за всё время'))
+            return 0
+        print('Топ-донатор (%s): %s.' % ('за вечер' if top_rezhim() == 'vecher' else 'за всё время',
+                                         ', '.join('%s — $%.2f' % x for x in l)))
+        return 0
+    if a and a[0] == 'dobavit' and len(a) in (3, 4):
+        kto = re.sub(r'[^\w-]', '', a[1])[:25]
+        try:
+            summa = float(a[2].replace(',', '.'))
+        except ValueError:
+            summa = 0
+        if not kto or summa <= 0:
+            print('donaty dobavit НИК СУММА [ВАЛЮТА] — например: donaty dobavit Dima 20 $')
+            return 1
+        valyuta = a[3] if len(a) == 4 else '$'
+        zapis = {'t': time.time(), 'istochnik': 'vruchnuyu', 'kto': kto, 'summa': summa, 'valyuta': valyuta,
+                 'v_cel': v_cel(summa, valyuta)}
+        k = kniga()
+        v_knigu(k, kto, v_dollarah(summa, valyuta))
+        sohranit_knigu(k)
+        with open(VECHER, 'a') as f:
+            f.write(json.dumps(zapis, ensure_ascii=False) + '\n')
+        t = obnovit_top()
+        print('Донат %s %s от %s — в цель%s и в книгу. Топ: %s.' % (
+            a[2], valyuta, kto, ' (+%s)' % zapis['v_cel'] if zapis['v_cel'] is not None else ' (приложение не ответило)',
+            '%s, %s' % (t[0], t[1]) if t else '—'))
+        return 0
     if a and a[0] not in ('status', 's'):
-        print('donaty — что пришло за вечер; donaty porog 0.5 — с какой суммы ($) отвечать голосом.')
+        print('donaty — что пришло; porog 0.5; top [vsyo|vecher|skryt|pokazat|sbros]; dobavit НИК СУММА [ВАЛЮТА].')
         return 1
     try:
         zapisi = [json.loads(l) for l in open(VECHER) if l.strip()]
@@ -325,6 +482,9 @@ def main(a):
     vsego = sum(v_dollarah(z['summa'], z.get('valyuta', '$')) for z in dengi)
     print('Донаты за вечер: %d, около $%.2f; StreamElements (PayPal): %s.' % (
         len(dengi), vsego, 'подключён' if se_klyuch()[0] else 'нет ключа (! kluch se)'))
+    l = luchshie(1)
+    if l:
+        print('Топ-донатор (%s): %s — $%.2f.' % ('за вечер' if top_rezhim() == 'vecher' else 'за всё время', l[0][0], l[0][1]))
     for z in zapisi[-5:]:
         print('  %s %s %s %s' % (time.strftime('%H:%M', time.localtime(z['t'])), z['istochnik'], z['kto'],
                                  ('%.2f %s' % (z['summa'], z.get('valyuta', ''))) if z.get('summa') else ''))
