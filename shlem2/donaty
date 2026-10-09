@@ -275,8 +275,10 @@ def demon():
     except BlockingIOError:
         return 0
     log('запущен')
+    mt = os.path.getmtime(__file__)
     sled_se = 0.0
     while True:
+        obnovilsya(mt)
         for d in iz_chata():
             obrabotat(d)
         if time.time() >= sled_se:
@@ -284,6 +286,19 @@ def demon():
                 obrabotat(d)
             sled_se = time.time() + SE_RAZ
         time.sleep(TAKT)
+
+
+def obnovilsya(mt):
+    """obnovi положил новую версию — перезапуститься ею (замок отпускается сам: exec закрывает файл;
+    что уже обработано — в файлах, не в памяти)."""
+    try:
+        if os.path.getmtime(__file__) == mt or time.time() - os.path.getmtime(__file__) < 5:
+            return
+        compile(open(__file__, encoding='utf-8').read(), __file__, 'exec')
+    except (OSError, SyntaxError, ValueError):
+        return
+    log('новая версия — перезапускаюсь')
+    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
 
 
 def main(a):

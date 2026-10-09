@@ -6,6 +6,9 @@
 #   ! kluch se       — JWT StreamElements (streamelements.com → аватар → Account →
 #                      Channels → Show secrets → JWT Token) → /root/.se-jwt: донаты PayPal
 #                      и картой со страницы чаевых StreamElements видит donaty
+#   ! kluch twitch-id     — Client ID приложения Twitch (dev.twitch.tv → Your Console →
+#   ! kluch twitch-secret — Applications → Manage) и его секрет (New Secret): сколько
+#                      зрителей смотрят эфир (zriteli). Секрет — /root/.twitch-app-secret
 # Ключ — секрет: не печатать, не читать вслух, не заливать, не в кадр.
 T=/data/data/com.termux/files/usr/bin
 k=$(timeout 15 $T/termux-clipboard-get 2> /dev/null | tr -d ' \r\n')
@@ -24,6 +27,21 @@ if [ "$1" = se ]; then
     401) echo "Ключ сохранён, но StreamElements его не принял (401). Скопируй JWT заново." ;;
     *) echo "Ключ сохранён; StreamElements не ответил (код $c) — проверь интернет." ;;
   esac
+  exit 0
+fi
+if [ "$1" = twitch-id ] || [ "$1" = twitch-secret ]; then
+  case "$k" in *[!a-z0-9]*|'') echo "В буфере не ${1#twitch-} приложения Twitch: там только строчные латинские буквы и цифры (около 30)."; exit 1 ;; esac
+  [ ${#k} -ge 20 ] && [ ${#k} -le 40 ] || { echo "В буфере не ${1#twitch-} приложения Twitch: длина ${#k}, а должно быть около 30."; exit 1; }
+  if [ "$1" = twitch-id ]; then
+    printf '%s\n' "$k" > /root/.twitch-app-id
+    echo "Client ID сохранён. Теперь в той же странице — New Secret, скопировать и ! kluch twitch-secret."
+    exit 0
+  fi
+  printf '%s\n' "$k" > /root/.twitch-app-secret
+  rm -f /root/.twitch-app-token
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  echo "Секрет сохранён (${#k} знаков). Буфер очищен."
+  /usr/local/bin/zriteli klyuch
   exit 0
 fi
 if [ "$1" = twitch ]; then

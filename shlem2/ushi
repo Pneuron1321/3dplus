@@ -721,6 +721,28 @@ def donat_iz_chata(tags, kto, tekst, now=None):
     return True
 
 
+ZRITELI = os.environ.get('USHI_ZRITELI', '/tmp/zriteli.jsonl')
+
+
+def zritel_iz_chata(line, k, now=None):
+    """Зашёл / вышел из чата (Twitch шлёт JOIN и PART по возможности membership, без ключа:
+    зрители со входом в Twitch, пачками раз в ~10 с). Себя (justinfan) и хозяина канала не пишем.
+    Кому что сказать — решает zriteli."""
+    m = re.match(r':(\w+)!\S+ (JOIN|PART) #(\w+)$', line)
+    if not m or m.group(1).lower().startswith('justinfan') or m.group(1).lower() == k:
+        return False
+    try:
+        with open(ZRITELI, 'a') as f:
+            f.write(json.dumps({'t': now or time.time(), 'kto': m.group(1).lower(),
+                                'chto': 'join' if m.group(2) == 'JOIN' else 'part'}) + '\n')
+        if os.path.getsize(ZRITELI) > 256 * 1024:              # не растёт вечно
+            hvost = open(ZRITELI).readlines()[-1000:]
+            open(ZRITELI, 'w').writelines(hvost)
+    except OSError:
+        pass
+    return True
+
+
 def sobytie_chata(tags, tekst, now=None):
     """Подписка, продление, подарок подписок, рейд — без денег в цель, но с благодарностью."""
     vid = tags.get('msg-id', '')
@@ -790,8 +812,8 @@ class Chat(threading.Thread):
         f = s.makefile('r', encoding='utf-8',
                        errors='replace', newline='\r\n')
         s.sendall(('PASS SCHMOOPIIE\r\nNICK justinfan%d'
-                   '\r\nCAP REQ :twitch.tv/tags\r\n'
-                   'JOIN #%s\r\n' % (
+                   '\r\nCAP REQ :twitch.tv/tags twitch.tv/membership'
+                   '\r\nJOIN #%s\r\n' % (
                        int(time.time()) % 90000 + 10000,
                        k)).encode())
         print(time.strftime('%H:%M:%S'), 'чат: слушаю #'
@@ -818,6 +840,8 @@ class Chat(threading.Thread):
                     sobytie_chata(dict(
                         x.split('=', 1) for x in u.group(1).split(';')
                         if '=' in x), u.group(2) or '')
+                else:
+                    zritel_iz_chata(line, k)
             if self.kanal() != k:
                 break               # канал сменили
         s.close()
@@ -937,13 +961,21 @@ def zhdat_claude(maks=60):
     return False
 
 
+PLUS_PAUZA = os.environ.get('USHI_PLUS_PAUZA', '/tmp/plus-pauza')
+
+
 def plus_alive():
     """Claude Плюса работает (tmux «plus») — приложение
     тогда не запускает его заново, а только открывает
-    Termux."""
-    return subprocess.run(
-        ['tmux', 'has-session', '-t', 'plus'],
-        capture_output=True).returncode == 0
+    Termux. После /exit plus 10 с ждёт и поднимает Claude
+    сам (2.2.9) — это тоже «жив»: второй Плюс не нужен."""
+    if subprocess.run(['tmux', 'has-session', '-t', 'plus'],
+                      capture_output=True).returncode == 0:
+        return True
+    try:
+        return time.time() - os.path.getmtime(PLUS_PAUZA) < 20
+    except OSError:
+        return False
 
 
 STRIM = '/tmp/strim.jpg'      # кадр ретранслятора (retr)
