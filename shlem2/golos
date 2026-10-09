@@ -58,6 +58,7 @@ ZARANEE = ('Не расслышала.', 'Теперь в ухо.', 'Тепер�
            'Сейчас посмотрю.', 'Секунду.', 'Готово.', BEZ_SETI, 'Ещё нечего повторить.')
 PAUZA_MAKS = 200          # с: пауза дольше — прерванное устарело, не договариваем
 VPERED = 2                # сколько кусков готовить заранее, пока звучит текущий
+DOSLUH = ('hook', 'potok0', 'potok', 'ved')   # после чего уши слушают секунду без «плюс плюс»
 
 
 def log(*a):
@@ -260,7 +261,8 @@ def titr_plus(tekst, put):
 class Rot:
     """Рот лица Плюса в эфире (приложение 2.2.6): play-audio Termux приложение не слышит —
     говорим ему сами: «звучу N с» (GET /say/rot?sek=N) и «замолчала» (sek=0). Один поток с
-    очередью: «замолчала» прежнего куска не обгонит «звучу» следующего. Приложения нет — молча."""
+    очередью: «замолчала» прежнего куска не обгонит «звучу» следующего. Приложения нет — молча.
+    Тем же потоком — «договорила ответ, слушай секунду» (/ear/dosluh, 2.3.1): после «замолчала»."""
     q = queue.Queue()
     potok = None
     lock = threading.Lock()
@@ -274,11 +276,16 @@ class Rot:
         cls.q.put(sek)
 
     @classmethod
+    def dosluh(cls):
+        cls.skazat('/ear/dosluh')
+
+    @classmethod
     def run(cls):
         while True:
             sek = cls.q.get()
+            put = sek if isinstance(sek, str) else '/say/rot?sek=%.1f' % sek
             try:
-                urllib.request.urlopen('%s/say/rot?sek=%.1f' % (MOST, sek), timeout=1).read()
+                urllib.request.urlopen(MOST + put, timeout=1).read()
             except Exception:
                 pass
 
@@ -356,8 +363,9 @@ def most_umeet():
 # ---------- демон ----------
 
 class Kusok:
-    def __init__(self, tekst, uid, t, pervyy):
+    def __init__(self, tekst, uid, t, pervyy, dosluh=False):
         self.tekst, self.uid, self.t, self.pervyy = tekst, uid, t, pervyy
+        self.dosluh = dosluh      # последний кусок ответа: доиграл — уши слушают ещё секунду
         self.bystro = False
         self.mp3 = {}             # темп → путь, или False — не вышел
 
@@ -367,9 +375,10 @@ class Kusok:
 
 
 class Golos:
-    def __init__(self, sintez=None, termux=Termux, most=Most):
+    def __init__(self, sintez=None, termux=Termux, most=Most, dosluh=None):
         self.sintez = sintez or Sintez()
         self.Termux, self.Most = termux, most
+        self.dosluh = dosluh or Rot.dosluh
         self.q = []
         self.cv = threading.Condition()
         self.igrok = None          # звучащий кусок: проигрыватель
@@ -383,6 +392,7 @@ class Golos:
         self.skazano = []          # сказанное в этом ходе: вступление не повторять хуком Stop
         self.pozzhe = []           # вступления, которых ещё нет в журнале: (когда, попытка, raw)
         self.bez_seti_t = 0.0      # когда последний раз говорили «голос без сети»
+        self.zhdu_dosluh = False   # доиграл ответ: замолчит совсем — уши слушают секунду
 
     # --- приём ---
     def chitat_rezhim(self):
@@ -452,9 +462,13 @@ class Golos:
         ks = kuski(tekst, pervyy=0 if dalshe else 100)
         if not dalshe:
             metka('golos', ns, '%d кусков' % len(ks))
+        # Ответ Александру (хук Stop, рация) и реплика соведущего (skazhi от vedushchiy — «.ved»):
+        # договорила — уши ещё секунду слушают без «плюс плюс» (Александр 09.10). Вступление перед
+        # инструментом, приветствие зрителям, «не расслышала» — нет.
+        dosluh = vid in DOSLUH
         with self.cv:
             for i, k in enumerate(ks):
-                self.q.append(Kusok(k, ns, t, i == 0 and not dalshe))
+                self.q.append(Kusok(k, ns, t, i == 0 and not dalshe, dosluh and i == len(ks) - 1))
             self.cv.notify_all()
 
     # --- управление ---
@@ -465,6 +479,7 @@ class Golos:
             self.stop_igrok()
             self.vybrosit(lambda k: k.t < st)
             self.vnesh, self.dl = 0.0, max(self.dl, st)   # «тихо» снимает и паузу
+            self.zhdu_dosluh = False       # оборвал сам — секунду не слушаем
             log('тихо')
         us = vremya(USKOR)
         if us > self.us:
@@ -546,6 +561,7 @@ class Golos:
             if end == 'done' or k is None:
                 if k is not None:
                     self.vybrosit(lambda x: x is k)
+                    self.zhdu_dosluh = self.zhdu_dosluh or k.dosluh
             elif end == 'stopped':
                 self.vnesh = time.time()   # мост оборвал сам — это вызов, ждём «дальше»
                 self.bystree(self.vnesh)
@@ -555,11 +571,15 @@ class Golos:
                 uid = k.uid
                 self.vybrosit(lambda x: x.uid == uid)   # реплику не мучаем кусками
         if self.pauza() or os.path.exists(OFF):
+            self.zhdu_dosluh = False       # Александр позвал сам — его фразу слушают уши
             if os.path.exists(OFF) and self.q:
                 self.vybrosit(lambda k: True)
             return
         with self.cv:
             if not self.q:
+                if self.zhdu_dosluh:       # договорила всё после ответа — слушай секунду
+                    self.zhdu_dosluh = False
+                    self.dosluh()
                 return
             k = self.q[0]
             put = k.mp3.get(k.temp)

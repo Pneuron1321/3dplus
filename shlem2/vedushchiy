@@ -291,7 +291,8 @@ def skazat(tekst, vid=''):
     """Голосом Плюса — через голос-демон (как её обычная речь): рот, субтитры — сами."""
     try:
         subprocess.run([SKAZHI, tekst], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=10)
+                       stderr=subprocess.DEVNULL, timeout=10,
+                       env=dict(os.environ, SKAZHI_VID='ved'))   # договорит — уши слушают секунду
     except Exception as e:
         log('skazhi:', type(e).__name__)
     try:

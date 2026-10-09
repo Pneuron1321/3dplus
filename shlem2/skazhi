@@ -126,7 +126,11 @@ def main():
         return 0
     if os.path.exists(GOLOS):
         os.makedirs(Q, exist_ok=True)
-        put = '%s/%d.txt' % (Q, time.time_ns())
+        # чья реплика: SKAZHI_VID=ved — соведущий (после неё уши слушают секунду без «плюс плюс»)
+        vid = os.environ.get('SKAZHI_VID', 'txt')
+        if not re.fullmatch(r'[a-z0-9]{1,8}', vid):
+            vid = 'txt'
+        put = '%s/%d.%s' % (Q, time.time_ns(), vid)
         open(put + '.tmp', 'w').write(text)
         os.replace(put + '.tmp', put)
         if demon_zhiv():

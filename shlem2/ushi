@@ -45,6 +45,17 @@ KAPI2 = re.compile(r'(?:(?:[\s,.!?…—-]*\b' + KOPI
                    r'[\s.!?…]*$', re.I)
 PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
 MAKS = '/root/.ushi-maks'     # самая длинная фраза, с
+# Секунда после ответа Плюса (2.3.1): сколько слушать
+# без «плюс плюс» (0 — не слушать) и порог громкости
+# (дБ ниже полной шкалы: меньше — нужен громче голос).
+DOSLUH = os.environ.get('USHI_DOSLUH', '/root/.ushi-dosluh')
+DOSLUH_DB = os.environ.get('USHI_DOSLUH_DB',
+                           '/root/.ushi-dosluh-db')
+NASTROYKI = ((PAUZA, 'pause', float), (MAKS, 'max', float),
+             (DOSLUH, 'dosluh', float), (DOSLUH_DB, 'db', int))
+# Фраза в секунду после ответа — Плюс знает, что это
+# ответ на её слова (или на реплику соведущего).
+POSLE = '(голосом, сразу после твоих слов) '
 G_PAUZA = '/tmp/golos.pauza'  # голос: пауза на вызов
 G_DALSHE = '/tmp/golos.dalshe'  # голос: продолжить
 G_Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')    # очередь голоса-демона
@@ -498,13 +509,13 @@ def fetch(event_id):
 
 
 def pauza():
-    """Пауза конца фразы и самая длинная фраза
-    (PAUZA, MAKS) — приложение (0.3.7+) забывает их
-    при перезапуске."""
+    """Пауза конца фразы, самая длинная фраза и секунда
+    после ответа (NASTROYKI) — приложение забывает их
+    при перезапуске; поменяли файл — шлём снова."""
     q = []
-    for f, k in ((PAUZA, 'pause'), (MAKS, 'max')):
+    for f, k, tip in NASTROYKI:
         try:
-            q.append('%s=%s' % (k, float(open(f).read())))
+            q.append('%s=%s' % (k, tip(float(open(f).read()))))
         except (OSError, ValueError):
             pass
     if q:
@@ -593,9 +604,22 @@ def titr_ya(t):
         pass
 
 
+def nastroyki_st():
+    """Когда менялись файлы настроек ушей."""
+    st = []
+    for f, _, _ in NASTROYKI:
+        try:
+            st.append(os.path.getmtime(f))
+        except OSError:
+            st.append(0)
+    return st
+
+
 def handle(e, sluh):
     kind = e['kind']
     t = e.get('text', '').strip()
+    # заговорил в секунду после ответа Плюса, без «плюс плюс»
+    dosluh = kind == 'text' and e.get('how') == 'dosluh'
     if kind == 'wake':                  # раньше всего: Ава замолкает
         VYZOV_MS[0] = e.get('ms') or int(time.time() * 1000)
         signal(G_PAUZA)
@@ -622,12 +646,21 @@ def handle(e, sluh):
               w, '| речь %.1f с' % rech_f
               + (' | вызов %s, слова вызова %.2f с'
                  % (e.get('how') or '?', lead)
-                 if lead else ''), flush=True)
+                 if lead else '')
+              + (' | после ответа' if dosluh else ''), flush=True)
         metka('whisper', e['id'],
               dop='%s %.2f' % (sluh.via, time.time() - t0))
         if w:
             w = (KAPI if e.get('stop') else KAPI2).sub('', w)
             w = bez_vyzova(w, lead)
+        if dosluh and (rech_f < 0.4 or
+                       not w and len(t.split()) < 2):
+            # без вызова шум и игра похожи на речь —
+            # берём только явные слова, молча
+            print(time.strftime('%H:%M:%S'),
+                  'после ответа речи нет — не отправляю',
+                  flush=True)
+            return
         if w and GALLYU.search(w) and len(w.split()) <= 8 \
                 and not GALLYU.search(t):
             print(time.strftime('%H:%M:%S'),
@@ -675,7 +708,7 @@ def handle(e, sluh):
         if vzglyad(t):
             metka('vpisal', e['id'])
     elif kind == 'text' and t:
-        if golosom(t):
+        if golosom(t, POSLE if dosluh else '(голосом) '):
             metka('vpisal', e['id'])
 
 
@@ -1045,6 +1078,7 @@ def main():
     sluh = Sluh()
     last = None
     st, alive = stamp(), plus_alive()
+    nst = nastroyki_st()
     sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0,
                 pamyat=0)
     vyzov = None       # Ава на паузе с этого времени
@@ -1071,6 +1105,9 @@ def main():
             sled['zhdut'] = now + 1
         if now > sled['stamp']:
             sled['stamp'] = now + 3
+            if last is not None and nastroyki_st() != nst:
+                nst = nastroyki_st()
+                pauza()        # Плюс поменял настройку ушей
             if stamp() != st:
                 st = stamp()
                 if obnovleny(st):
