@@ -1,0 +1,66 @@
+#!/bin/sh
+# kluch — ключ из буфера обмена шлема в файл, не показывая его.
+#   ! kluch          — ключ Groq (console.groq.com/keys) → /root/.groq-key
+#   ! kluch twitch   — ключ трансляции Twitch (dashboard.twitch.tv → Настройки →
+#                      Трансляция → Основной ключ) → /root/.twitch-key, для retr
+#   ! kluch se       — JWT StreamElements (streamelements.com → аватар → Account →
+#                      Channels → Show secrets → JWT Token) → /root/.se-jwt: донаты PayPal
+#                      и картой со страницы чаевых StreamElements видит donaty
+#   ! kluch twitch-id     — Client ID приложения Twitch (dev.twitch.tv → Your Console →
+#   ! kluch twitch-secret — Applications → Manage) и его секрет (New Secret): сколько
+#                      зрителей смотрят эфир (zriteli). Секрет — /root/.twitch-app-secret
+# Ключ — секрет: не печатать, не читать вслух, не заливать, не в кадр.
+T=/data/data/com.termux/files/usr/bin
+k=$(timeout 15 $T/termux-clipboard-get 2> /dev/null | tr -d ' \r\n')
+[ -n "$k" ] || { echo "Буфер пуст или Termux:API не ответил. Скопируй ключ ещё раз."; exit 1; }
+umask 077
+if [ "$1" = se ]; then
+  case "$k" in eyJ?*.?*.?*) ;; *) echo "В буфере не JWT StreamElements: он начинается с eyJ и в нём две точки."; exit 1 ;; esac
+  printf '%s\n' "$k" > /root/.se-jwt
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  h=$(mktemp)
+  printf 'Authorization: Bearer %s\n' "$k" > "$h"
+  c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H @"$h" https://api.streamelements.com/kappa/v2/channels/me)
+  rm -f "$h"
+  case "$c" in
+    200) echo "Ключ StreamElements сохранён и работает (${#k} знаков). Буфер очищен. Донаты со страницы чаевых пойдут в цель." ;;
+    401) echo "Ключ сохранён, но StreamElements его не принял (401). Скопируй JWT заново." ;;
+    *) echo "Ключ сохранён; StreamElements не ответил (код $c) — проверь интернет." ;;
+  esac
+  exit 0
+fi
+if [ "$1" = twitch-id ] || [ "$1" = twitch-secret ]; then
+  case "$k" in *[!a-z0-9]*|'') echo "В буфере не ${1#twitch-} приложения Twitch: там только строчные латинские буквы и цифры (около 30)."; exit 1 ;; esac
+  [ ${#k} -ge 20 ] && [ ${#k} -le 40 ] || { echo "В буфере не ${1#twitch-} приложения Twitch: длина ${#k}, а должно быть около 30."; exit 1; }
+  if [ "$1" = twitch-id ]; then
+    printf '%s\n' "$k" > /root/.twitch-app-id
+    echo "Client ID сохранён. Теперь в той же странице — New Secret, скопировать и ! kluch twitch-secret."
+    exit 0
+  fi
+  printf '%s\n' "$k" > /root/.twitch-app-secret
+  rm -f /root/.twitch-app-token
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  echo "Секрет сохранён (${#k} знаков). Буфер очищен."
+  /usr/local/bin/zriteli klyuch
+  exit 0
+fi
+if [ "$1" = twitch ]; then
+  case "$k" in live_?*) ;; *) echo "В буфере не ключ Twitch: он начинается с live_."; exit 1 ;; esac
+  printf '%s\n' "$k" > /root/.twitch-key
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  echo "Ключ Twitch сохранён (${#k} знаков). Буфер очищен. Если стрим через ретранслятор уже идёт — через секунду он уйдёт на Twitch, канал в эфире."
+  exit 0
+fi
+case "$k" in gsk_?*) ;; *) echo "В буфере не ключ Groq: он начинается с gsk_."; exit 1 ;; esac
+printf '%s\n' "$k" > /root/.groq-key
+timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null   # стереть ключ из буфера
+h=$(mktemp)
+printf 'Authorization: Bearer %s\n' "$k" > "$h"
+c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H @"$h" https://api.groq.com/openai/v1/models)
+rm -f "$h"
+case "$c" in
+  200) echo "Ключ сохранён и работает (${#k} знаков). Буфер очищен." ;;
+  401) echo "Ключ сохранён, но Groq его не принял (401). Скопируй ключ заново." ;;
+  403) echo "Ключ сохранён, но Groq отказал (403): возможно, страна недоступна." ;;
+  *) echo "Ключ сохранён; Groq не ответил (код $c) — проверь интернет." ;;
+esac

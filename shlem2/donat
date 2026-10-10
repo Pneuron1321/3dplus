@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""donat — цель доната в эфире (приложение 2.2.7): полоса слева вверху «GOAL New mic  €23 / €100».
+Правит Плюс во время эфира; подписи в эфире по-английски — название цели пиши по-английски.
+  donat                      — какая цель и сколько собрано
+  donat cel 100 [на что…]    — цель: сумма и на что (коротко, по-английски)
+  donat +5 | donat -5        — прибавить / убавить собранное
+  donat sobrano 23           — собрано ровно столько
+  donat valyuta € | $ | UAH  — валюта
+  donat skryt | pokazat      — убрать / вернуть полосу
+  donat sbros                — убрать цель совсем"""
+import json
+import os
+import re
+import sys
+import urllib.parse
+import urllib.request
+
+U = os.environ.get('DONAT_URL', 'http://localhost:8766')
+
+
+def zapros(q=None):
+    put = '/cel' if q is None else '/cel/upr?' + urllib.parse.urlencode(q, quote_via=urllib.parse.quote)
+    with urllib.request.urlopen(U + put, timeout=5) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
+def skazat(d):
+    if not d.get('summa'):
+        return 'Цели доната нет (donat cel 100 New mic — поставить).'
+    imya = d.get('imya') or 'без названия'
+    s = 'Цель доната: %s — %s' % (imya, d.get('tekst'))
+    s += ', собрано %d %%' % round(100 * float(d.get('dolya') or 0))
+    return s + ('.' if d.get('vidna') else '; полоса скрыта (donat pokazat).')
+
+
+def main(a):
+    q = None
+    if a and re.fullmatch(r'[+-]\d+([.,]\d+)?', a[0]):
+        q = {'plus': a[0].lstrip('+')}
+    elif a and a[0] == 'cel' and len(a) >= 2 and re.fullmatch(r'\d+([.,]\d+)?', a[1]):
+        q = {'summa': a[1]}
+        if len(a) > 2:
+            q['imya'] = ' '.join(a[2:])
+        q['pokaz'] = '1'
+    elif a and a[0] == 'sobrano' and len(a) == 2:
+        q = {'sobrano': a[1]}
+    elif a and a[0] == 'valyuta' and len(a) == 2:
+        q = {'valyuta': a[1]}
+    elif a and a[0] in ('skryt', 'pokazat'):
+        q = {'pokaz': '0' if a[0] == 'skryt' else '1'}
+    elif a and a[0] == 'sbros':
+        q = {'sbros': '1'}
+    elif a and a[0] not in ('status', 's'):
+        print(__doc__.split('\n', 2)[2])
+        return 1
+    try:
+        d = zapros(q)
+    except Exception:
+        print('Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват».')
+        return 1
+    print(skazat(d))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

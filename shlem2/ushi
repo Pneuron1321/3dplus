@@ -1,0 +1,1169 @@
+#!/usr/bin/env python3
+# ushi — уши Плюса в Ubuntu. Берёт услышанное
+# quest-bridge (/ear) и вписывает фразу в Claude
+# (tmux-сессия «plus»). «Плюс плюс» ставит Аву
+# на паузу, после фразы она договаривает (+25 %);
+# «тихо» глушит её. «В ухо» / «вслух» — режим
+# голоса. «Зум зум» — сам берёт кадр.
+# «Компакт» — подготовка, «компакт плюс» — сжатие.
+# Фразу точнее распознаёт Whisper (sluh), если
+# он поставлен; иначе — текст Vosk из приложения.
+# Запускает plus; лог — /tmp/ushi.log (время
+# Whisper на фразу). Последние 10 фраз — в
+# /tmp/frazy: sluh-test сравнит на них модели.
+# Обновили ushi, sluh, /root/.sluh-model,
+# .sluh-threads или .ushi-pauza — уши
+# перезапускаются сами.
+import fcntl
+import glob
+import json
+import os
+import re
+import select
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+
+EAR = os.environ.get('USHI_EAR', 'http://localhost:8766/ear')   # приложение 2 (1.0 — 8765)
+FRAZY = '/tmp/frazy'
+# «копи копи» в конце фразы (как «приём» в рации):
+# приложение уже отправило фразу, слова Плюсу не нужны.
+# Два слова подряд в конце срезаем всегда (в речи так не
+# бывает), одно — только если приложение отметило stop;
+# «копик», «копейку» — быстрое «копи копи» одним словом.
+KOPI = (r'(?:капи|копи|капі|копі|кэпи|капе|копе|капий'
+        r'|копий|копия|copy|coppy|kopi|kapi|cappy|capi)')
+KAPI = re.compile(r'(?:[\s,.!?…—-]*\b' + KOPI
+                  + r'\b){1,2}[\s.!?…]*$', re.I)
+KAPI2 = re.compile(r'(?:(?:[\s,.!?…—-]*\b' + KOPI
+                   + r'\b){2}|[\s,.!?…—-]*\b(?:копик|копейку)\b)'
+                   r'[\s.!?…]*$', re.I)
+PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
+MAKS = '/root/.ushi-maks'     # самая длинная фраза, с
+# Секунда после ответа Плюса (2.3.1): сколько слушать
+# без «плюс плюс» (0 — не слушать) и порог громкости
+# (дБ ниже полной шкалы: меньше — нужен громче голос).
+DOSLUH = os.environ.get('USHI_DOSLUH', '/root/.ushi-dosluh')
+DOSLUH_DB = os.environ.get('USHI_DOSLUH_DB',
+                           '/root/.ushi-dosluh-db')
+NASTROYKI = ((PAUZA, 'pause', float), (MAKS, 'max', float),
+             (DOSLUH, 'dosluh', float), (DOSLUH_DB, 'db', int))
+# Фраза в секунду после ответа — Плюс знает, что это
+# ответ на её слова (или на реплику соведущего).
+POSLE = '(голосом, сразу после твоих слов) '
+G_PAUZA = '/tmp/golos.pauza'  # голос: пауза на вызов
+G_DALSHE = '/tmp/golos.dalshe'  # голос: продолжить
+G_Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')    # очередь голоса-демона
+G_LOCK = os.environ.get('GOLOS_LOCK', '/tmp/golos-demon.lock')
+G_POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')   # последний ответ Плюса
+POVTORI = ('повтори', 'повтори пожалуйста', 'ещё раз', 'еще раз',
+           'повтори ещё раз', 'повтори еще раз')
+REZHIM = os.environ.get('GOLOS_REZHIM',
+                        '/root/.golos-rezhim')  # uho|vsluh
+ZAMER = '/tmp/zamer.log'      # метки задержки (zamer)
+# Рация (raciya): мозг Плюса в фоновой сессии — фразы ей файлами, не в окно.
+RACIYA_Q = os.environ.get('RACIYA_Q', '/tmp/raciya/q')
+RACIYA_PID = os.environ.get('RACIYA_PID', '/tmp/raciya.pid')
+# «реклама», «радио» — так Whisper слышал «рацию» в шлеме (06.10)
+RACIYA = ('рация', 'рацию', 'рации', 'режим рация', 'включи рацию', 'реклама',
+          'радио', 'radio')
+OKNO = ('окно', 'окна', 'режим окно', 'выключи рацию', 'window')
+REZHIMY = {'в ухо': 'uho', 'ухо': 'uho', 'вухо': 'uho',
+           'in ear': 'uho', 'ear': 'uho',
+           'вслух': 'vsluh', 'в слух': 'vsluh',
+           'aloud': 'vsluh', 'out loud': 'vsluh'}
+# Выдумки Whisper на тишине и шуме (из субтитров,
+# на которых его учили). Короткая фраза целиком из
+# них — не Александр: Плюсу не отправляем.
+GALLYU = re.compile(
+    r'субтитр|корректор|продолжение следует|'
+    r'спасибо за (?:просмотр|внимание)|'
+    r'подписывайтесь|ставьте лайк|dimatorzok|'
+    r'диматорзок|диматург|thanks? (?:you )?for '
+    r'watching|amara\.org|дякую за перегляд|'
+    r'музыка|аплодисменты', re.I)
+PLUS2 = re.compile(r'^\s*(?:плюс|plus)[\s,.!-]+'
+                   r'(?:плюс|plus)\b[\s,.!-]*', re.I)
+# Приложение 2 отдаёт Whisper звук с начала слов
+# вызова (lead > 0): слитно «плюс плюсокно» конец
+# вызова у Vosk попадал внутрь «окно». Тогда «плюс
+# плюс» в тексте есть всегда — срезаем и с мусором
+# до них (хвост Авы, шорох — до 20 знаков), и
+# «плюсплюс», «++», «люс плюс»; одно «плюс» — тоже.
+PLUS_T = r'(?:п?люс|plus|\+)'
+PLUS_LEAD = re.compile(r'^.{0,20}?' + PLUS_T + r'[\s,.!-]*'
+                       + PLUS_T + r'(?!\w)[\s,.!?…-]*',
+                       re.I | re.S)
+PLUS1 = re.compile(r'^\s*' + PLUS_T + r'(?!\w)[\s,.!?…-]*',
+                   re.I)
+
+
+def bez_vyzova(w, lead):
+    """Текст Whisper без слов вызова в начале."""
+    if not lead:
+        return PLUS2.sub('', w)
+    w2 = PLUS_LEAD.sub('', w, count=1)
+    return w2 if w2 != w else PLUS1.sub('', w, count=1)
+ME = os.path.abspath(__file__)
+TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
+COMPACT = (
+    '/compact Сохрани: что делаем сейчас, '
+    'принятые решения, открытые задачи, '
+    'договорённости о голосе, глазах и фразах, '
+    'всё из /root/pamyat.md. Выкинь: описания '
+    'старых кадров, вывод команд, повторы.')
+ZOOM = {
+    'x2': ('x2', 'зум зум — кадр вдвое крупнее'),
+    'x4': ('x4', 'зум зум зум — кадр вчетверо крупнее'),
+    'centr': ('centr', 'зум зум центр — центр вида'),
+}
+
+
+def get(url, timeout=3):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
+def metka(imya, uid, ms=None, dop=''):
+    """Метка задержки для zamer: мс, что, чья фраза."""
+    try:
+        with open(ZAMER, 'a') as f:
+            f.write('%d\t%s\t%s\t%s\n' % (
+                ms or time.time() * 1000, imya, uid, dop))
+    except OSError:
+        pass
+
+
+def signal(put):
+    """Голосу: пауза или «дальше» (время в файл)."""
+    try:
+        open(put, 'w').write('%.6f' % time.time())
+    except OSError:
+        pass
+
+
+def demon_zhiv():
+    """Голос-демон держит замок, пока жив."""
+    try:
+        f = open(G_LOCK, 'a')
+    except OSError:
+        return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return False
+    except OSError:
+        return True
+    finally:
+        f.close()
+
+
+def say(text):
+    """Фраза ушей — прямо в очередь демона: без запуска
+    Python (skazhi) на каждую фразу. Демона нет — skazhi
+    поднимет его или скажет по-старому."""
+    if demon_zhiv():
+        try:
+            os.makedirs(G_Q, exist_ok=True)
+            put = '%s/%d.txt' % (G_Q, time.time_ns())
+            open(put + '.tmp', 'w').write(text)
+            os.replace(put + '.tmp', put)
+            return
+        except OSError:
+            pass
+    subprocess.run(['skazhi', text])
+
+
+def povtori():
+    """«Плюс плюс повтори» — последний ответ Плюса ещё раз,
+    без Claude."""
+    try:
+        t = open(G_POSL).read().strip()
+    except OSError:
+        t = ''
+    say(t or 'Ещё нечего повторить.')
+
+
+def raciya_zhiva():
+    """Рация включена: её процесс жив."""
+    try:
+        os.kill(int(open(RACIYA_PID).read()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def v_raciyu(text):
+    """Фраза — в рацию (файлом, порядок по имени)."""
+    os.makedirs(RACIYA_Q, exist_ok=True)
+    put = '%s/%d.txt' % (RACIYA_Q, time.time_ns())
+    open(put + '.tmp', 'w').write(text)
+    os.replace(put + '.tmp', put)
+
+
+def raciya(vkl):
+    """«Плюс плюс рация» / «окно»: рация встаёт в окно
+    Плюса на место Claude или Claude возвращается туда с
+    тем же разговором (переключает сама raciya)."""
+    if vkl == raciya_zhiva():
+        say('Рация уже включена.' if vkl else 'Окно и так открыто.')
+        return
+    say('Рация.' if vkl else 'Окно.')
+    if not vkl:                # сразу в очередь рации: без запуска Python
+        v_raciyu('/окно')
+        return
+    r = subprocess.run(['raciya', 'vkl'], capture_output=True, text=True)
+    print(time.strftime('%H:%M:%S'), 'рация:',
+          (r.stdout or r.stderr).strip()[:80], flush=True)
+
+
+def iz_prosmotra():
+    """Окно Плюса пролистано вверх (tmux в режиме просмотра —
+    колесо, джойстик): набранное ушло бы в просмотр, а не в
+    Claude, и Enter закрыл бы просмотр вместо «отправить».
+    Сначала выйти."""
+    r = subprocess.run(['tmux', 'display-message', '-p', '-t',
+                        'plus', '#{pane_in_mode}'],
+                       capture_output=True, text=True)
+    if r.stdout.strip() == '1':
+        subprocess.run(['tmux', 'send-keys', '-t', 'plus', '-X',
+                        'cancel'])
+
+
+def keys(*args):
+    iz_prosmotra()
+    subprocess.run(['tmux', 'send-keys', '-t', 'plus']
+                   + list(args))
+
+
+TMUX = threading.Lock()   # голос и чат пишут по очереди
+# Вопрос Claude Code на экране («Do you want to proceed?
+# ❯ 1. Yes»): фраза и Enter, вписанные вслепую, ответят
+# на него «да» — голосом Александра или пачкой чата.
+# Узнаём его по низу экрана tmux.
+DIALOG = re.compile(r'❯ *\d+\.|^ *\d+\. +(?:Yes|No)\b|'
+                    r'Do you want to (?:proceed|make|create|'
+                    r'allow|run)', re.M)
+ZHDUT = []          # фразы голосом, пока экран занят
+ZHDAT_MAKS = 120    # с: дольше — устарела, не вписываем
+
+
+def ekran():
+    """Низ окна Плюса (tmux «plus»), 25 строк."""
+    r = subprocess.run(['tmux', 'capture-pane', '-p',
+                        '-t', 'plus'],
+                       capture_output=True, text=True)
+    return '\n'.join(r.stdout.rstrip().splitlines()[-25:])
+
+
+def ekran_zanyat():
+    if raciya_zhiva():
+        return False           # в рации вопросов на экране нет
+    return bool(DIALOG.search(ekran()))
+
+
+def ne_otpravleno(niz, vpisano):
+    """Фраза ещё стоит в поле ввода: последняя строка
+    с «❯» (поле ввода — самое нижнее) начинается с неё.
+    Отправленная остаётся выше, а поле внизу пустое."""
+    stroki = [x for x in niz.splitlines()
+              if x.lstrip().startswith(('❯', '>'))]
+    if not stroki:
+        return False
+    posl = ' '.join(stroki[-1].lstrip()[1:].split())
+    nachalo = ' '.join(vpisano.split())[:20]
+    return bool(nachalo) and posl.startswith(nachalo)
+
+
+def v_plus(text, metka='(голосом) '):
+    """Вписать фразу в Claude и нажать Enter.
+    Enter — отдельно и с паузой: длинный текст Claude
+    Code принимает за вставку, и Enter сразу за ним
+    становится переносом строки, а не «отправить»
+    (05.10 в шлеме). Фраза осталась в поле — Enter ещё
+    раз. На экране вопрос Claude Code — не вписываем
+    (False): Enter ответил бы на него."""
+    text = text.rstrip(' ;')
+    if raciya_zhiva():
+        v_raciyu(metka + text)
+        return True
+    with TMUX:
+        iz_prosmotra()
+        if ekran_zanyat():
+            return False
+        subprocess.run(['tmux', 'send-keys', '-t', 'plus',
+                        '-l', metka + text])
+        for _ in range(3):
+            time.sleep(0.3)
+            subprocess.run(['tmux', 'send-keys', '-t', 'plus',
+                            'Enter'])
+            time.sleep(0.4)
+            niz = ekran()
+            if DIALOG.search(niz) or \
+                    not ne_otpravleno(niz, metka + text):
+                break
+    return True
+
+
+def golosom(text, pometka='(голосом) '):
+    """Фраза Александра: вписать, а если на экране
+    вопрос — сказать об этом, фраза ждёт (dognat)."""
+    if v_plus(text, pometka):
+        return True
+    if not ZHDUT:
+        say('На экране вопрос разрешения. Ответь в окне '
+            'Termux — фраза подождёт.')
+    ZHDUT.append((time.time(), text, pometka))
+    del ZHDUT[:-5]
+    metka('vopros', '-')       # zamer: вопрос разрешения на экране
+    print(time.strftime('%H:%M:%S'),
+          'на экране вопрос — фраза ждёт', flush=True)
+    return False
+
+
+def dognat():
+    """Экран свободен — вписать ждущие фразы по
+    порядку; старше ZHDAT_MAKS — не вписываем."""
+    while ZHDUT:
+        t, text, pometka = ZHDUT[0]
+        if time.time() - t > ZHDAT_MAKS:
+            print(time.strftime('%H:%M:%S'), 'фраза '
+                  'устарела, не вписываю:', text[:60],
+                  flush=True)
+        elif not v_plus(text, pometka):
+            return
+        ZHDUT.pop(0)
+
+
+# Взгляд (решение Александра 05.10): фраза начинается с
+# «посмотри», «глянь»… — уши сразу говорят «Сейчас
+# посмотрю» и прикладывают кадр момента вопроса (снят
+# на «плюс плюс»). Плюсу остаётся открыть файл: на одно
+# обращение к модели меньше (без решения звать kadr).
+VZGLYAD = re.compile(r'(?:посмотри|глянь|взгляни|смотри|'
+                     r'что (?:там )?на экране|что видишь|'
+                     r'видишь|прочитай|прочти|'
+                     r'что (?:там )?написано)\b')
+VIEW = os.environ.get('USHI_VIEW', '/root/view.jpg')
+KADR_VYZOV = os.environ.get('USHI_KADR_VYZOV',
+                            '/tmp/kadr-vyzov.jpg')
+S_KADROM = ('(голосом; кадр момента вопроса уже в '
+            '/root/view.jpg — открой его, kadr не нужен, '
+            '«Сейчас посмотрю» уже сказано) ')
+
+
+def kadr_vyzova():
+    """На «плюс плюс» — кадр этого момента, в фоне:
+    понадобится, если фраза окажется «посмотри…»."""
+    def snyat():
+        subprocess.run(['kadr'], capture_output=True,
+                       env=dict(os.environ, KADR_OUT=KADR_VYZOV))
+    threading.Thread(target=snyat, daemon=True).start()
+
+
+def vzglyad(text):
+    """«Посмотри…»: «Сейчас посмотрю» сразу, кадр
+    вызова → /root/view.jpg (нет свежего — kadr сейчас),
+    фраза — с пометкой, что кадр уже лежит."""
+    say('Сейчас посмотрю.')
+    est = False
+    try:
+        if time.time() - os.path.getmtime(KADR_VYZOV) < 120:
+            shutil.move(KADR_VYZOV, VIEW)
+            est = True
+    except OSError:
+        pass
+    if not est:
+        est = subprocess.run(['kadr'], capture_output=True
+                             ).returncode == 0
+    return golosom(text, S_KADROM if est else '(голосом) ')
+
+
+def golos_zhiv():
+    """Голос-демон держит синтез тёплым: первый
+    ответ без ожидания запуска."""
+    if not os.path.exists('/usr/local/bin/golos'):
+        return
+    r = subprocess.run(['flock', '-n',
+                        '/tmp/golos-demon.lock', 'true'],
+                       capture_output=True)
+    if r.returncode == 0:
+        subprocess.Popen(
+            ['/usr/local/bin/golos'],
+            stdin=subprocess.DEVNULL,
+            stdout=open('/tmp/golos.log', 'a'),
+            stderr=subprocess.STDOUT,
+            start_new_session=True)
+
+
+def most_igraet():
+    """Приложение умеет играть голос (0.5+)."""
+    try:
+        with urllib.request.urlopen(
+                EAR.rsplit('/', 1)[0] + '/say/status',
+                timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def rezhim(r):
+    """«Плюс плюс в ухо» / «вслух». В ухо — Аву
+    играет приложение со звуком «не записывать»:
+    стрим её не слышит. Право голоса в эфире даёт
+    Александр, поэтому только по его слову."""
+    if r == 'uho' and not most_igraet():
+        say('Режим в ухо требует новое приложение. '
+            'Пока говорю вслух.')
+        return
+    open(REZHIM, 'w').write(r)
+    say('Теперь в ухо.' if r == 'uho' else
+        'Теперь вслух.')
+
+
+def rechi_net(wav, ot=0.0):
+    """Сколько секунд в фразе громче −40 дБ: шум
+    без речи Whisper превращает в выдумки.
+    ot — с какой секунды считать (после слов вызова)."""
+    try:
+        import array
+        import math
+        d = open(wav, 'rb').read()[44 + int(ot * 16000) * 2:]
+        a = array.array('h', d[:len(d) // 2 * 2])
+        step, golos = 480, 0           # 30 мс
+        for i in range(0, len(a) - step, step):
+            s = sum(x * x for x in a[i:i + step:4])
+            rms = math.sqrt(s / (step / 4)) or 1
+            if 20 * math.log10(rms / 32768) > -40:
+                golos += 1
+        return golos * 0.03
+    except Exception:
+        return 99.0
+
+
+class Sluh:
+    """Whisper в своём процессе: модель грузится
+    один раз (первый запуск — скачивание)."""
+    PY = os.environ.get(
+        'SLUH_PY', '/opt/sluh/bin/python')
+    SCRIPT = os.environ.get(
+        'SLUH_SCRIPT', '/usr/local/bin/sluh')
+
+    def __init__(self):
+        self.p, self.ready, self.via = None, False, ''
+        if os.path.exists(self.PY) and \
+                os.path.exists(self.SCRIPT):
+            self.p = subprocess.Popen(
+                [self.PY, self.SCRIPT],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=open('/tmp/sluh.log', 'a'),
+                text=True, bufsize=1)
+            threading.Thread(target=self._ready,
+                             daemon=True).start()
+
+    def _ready(self):
+        line = self.p.stdout.readline()
+        self.ready = '"ready"' in line
+        print(time.strftime('%H:%M:%S'), 'слух:',
+              'готов' if self.ready else 'не запустился',
+              flush=True)
+
+    def hear(self, wav, timeout=25):
+        if not wav or not self.ready or \
+                self.p.poll() is not None:
+            return None
+        try:
+            self.p.stdin.write(wav + '\n')
+            self.p.stdin.flush()
+            out = [self.p.stdout]
+            if not select.select(out, [], [], timeout)[0]:
+                return None
+            d = json.loads(self.p.stdout.readline())
+            self.via = d.get('via', '')
+            return d.get('text', '').strip()
+        except Exception:
+            return None
+
+
+def fetch(event_id):
+    """Скачать WAV фразы, хранить последние 10."""
+    os.makedirs(FRAZY, exist_ok=True)
+    wav = '%s/%d.wav' % (FRAZY, event_id)
+    url = '%s/wav?id=%d' % (EAR, event_id)
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            open(wav, 'wb').write(r.read())
+    except Exception:
+        return None
+    old = sorted(glob.glob(FRAZY + '/*.wav'),
+                 key=os.path.getmtime)[:-10]
+    for f in old:
+        os.remove(f)
+    return wav
+
+
+def pauza():
+    """Пауза конца фразы, самая длинная фраза и секунда
+    после ответа (NASTROYKI) — приложение забывает их
+    при перезапуске; поменяли файл — шлём снова."""
+    q = []
+    for f, k, tip in NASTROYKI:
+        try:
+            q.append('%s=%s' % (k, tip(float(open(f).read()))))
+        except (OSError, ValueError):
+            pass
+    if q:
+        try:
+            print(time.strftime('%H:%M:%S'), 'пауза:',
+                  get('%s/set?%s' % (EAR, '&'.join(q))),
+                  flush=True)
+        except Exception:
+            pass
+
+
+def compact(kind):
+    if kind == 'go':
+        if ekran_zanyat():
+            say('На экране вопрос разрешения — сначала '
+                'ответь на него.')
+            return
+        say('Сжимаю контекст.')
+        if raciya_zhiva():
+            v_raciyu(COMPACT)
+            return
+        keys('-l', COMPACT)
+        keys('Enter')
+    else:
+        golosom('компакт: подготовка')
+
+
+def zoom(kind):
+    arg, what = ZOOM.get(kind, ZOOM['x2'])
+    r = subprocess.run(['kadr', arg],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        golosom(what + ' уже в /root/view.jpg — '
+                'открой и скажи, что там важно')
+    else:
+        say(r.stdout.strip() or 'Кадр не получился.')
+
+
+def plenka(n, ms):
+    """«Чек чек» (7 кадров, ±1,5 с) и «зум чек» (13, ±3 с): плёнка момента
+    команды — Плюсу сразу, как «зум зум». В фоне: приложение ждёт кадры
+    «после», а уши за это время не должны глохнуть."""
+    imya = 'чек чек' if n == '7' else 'зум чек'
+
+    def idti():
+        r = subprocess.run(['kadr', 'plenka', str(int(ms or time.time() * 1000)), n],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            golosom('%s — %s Открой и скажи, что произошло.' % (imya, r.stdout.strip()))
+        else:
+            say(r.stdout.strip() or 'Плёнка не получилась.')
+    threading.Thread(target=idti, daemon=True).start()
+
+
+VYZOV_MS = [0]      # момент последнего вызова — к нему плёнка «чек чек плюс»
+
+
+def chek_plus(vopros, ms, uid):
+    """«Чек чек плюс …»: плёнка 7 кадров вокруг команды и 1,5 с речи после
+    неё — Плюсу вместе: картинка момента и вопрос к ней."""
+    def idti():
+        r = subprocess.run(['kadr', 'plenka', str(int(ms or time.time() * 1000)), '7'],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            say(r.stdout.strip() or 'Плёнка не получилась.')
+            return
+        v = ('Вопрос Александра: «%s». Открой и ответь.' % vopros if vopros
+             else 'Вопроса не было — открой и скажи, что произошло.')
+        if golosom('чек чек плюс — %s %s' % (r.stdout.strip(), v)):
+            metka('vpisal', uid)
+    threading.Thread(target=idti, daemon=True).start()
+
+
+TITR = os.environ.get('USHI_TITR', '/usr/local/bin/titr')
+
+
+def titr_ya(t):
+    """Фраза Александра — субтитром в эфир (titr переводит и шлёт в фоне; без эфира — молча)."""
+    if not os.path.exists(TITR):
+        return
+    try:
+        subprocess.Popen([TITR, 'ya', '--', t], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        pass
+
+
+def nastroyki_st():
+    """Когда менялись файлы настроек ушей."""
+    st = []
+    for f, _, _ in NASTROYKI:
+        try:
+            st.append(os.path.getmtime(f))
+        except OSError:
+            st.append(0)
+    return st
+
+
+def handle(e, sluh):
+    kind = e['kind']
+    t = e.get('text', '').strip()
+    # заговорил в секунду после ответа Плюса, без «плюс плюс»
+    dosluh = kind == 'text' and e.get('how') == 'dosluh'
+    if kind == 'wake':                  # раньше всего: Ава замолкает
+        VYZOV_MS[0] = e.get('ms') or int(time.time() * 1000)
+        signal(G_PAUZA)
+        kadr_vyzova()
+        metka('vyzov', e['id'], e.get('ms'))
+    elif kind == 'tiho':
+        subprocess.run(['tiho'])
+    chek = kind == 'chek'           # «чек чек плюс»: плёнка уйдёт и без слов
+    if kind in ('text', 'chek'):
+        metka('fraza', e['id'], e.get('ms'))
+        metka('ushi', e['id'])
+    if kind in ('text', 'chek') and e.get('audio'):
+        t0 = time.time()
+        wav = fetch(e['id'])
+        lead = (e.get('lead') or 0) / 1000.0  # слова вызова
+        rech = rechi_net(wav) if wav else 99.0
+        # речь самой фразы — без слов вызова
+        rech_f = rechi_net(wav, lead) if wav and lead \
+            else rech
+        w = sluh.hear(wav) if rech >= 0.25 else None
+        print(time.strftime('%H:%M:%S'), 'vosk:', t,
+              '| whisper %s %.1f с:'
+              % (sluh.via, time.time() - t0),
+              w, '| речь %.1f с' % rech_f
+              + (' | вызов %s, слова вызова %.2f с'
+                 % (e.get('how') or '?', lead)
+                 if lead else '')
+              + (' | после ответа' if dosluh else ''), flush=True)
+        metka('whisper', e['id'],
+              dop='%s %.2f' % (sluh.via, time.time() - t0))
+        if w:
+            w = (KAPI if e.get('stop') else KAPI2).sub('', w)
+            w = bez_vyzova(w, lead)
+        if dosluh and (rech_f < 0.4 or
+                       not w and len(t.split()) < 2):
+            # без вызова шум и игра похожи на речь —
+            # берём только явные слова, молча
+            print(time.strftime('%H:%M:%S'),
+                  'после ответа речи нет — не отправляю',
+                  flush=True)
+            return
+        if w and GALLYU.search(w) and len(w.split()) <= 8 \
+                and not GALLYU.search(t):
+            print(time.strftime('%H:%M:%S'),
+                  'выдумка Whisper — не отправляю', flush=True)
+            if not chek:
+                return
+            w, t = None, ''
+        if w:
+            t = w.strip(' .!?…').strip()
+        elif rech_f < 0.25 and not t:
+            print(time.strftime('%H:%M:%S'),
+                  'речи нет — не отправляю', flush=True)
+            if not chek:
+                return
+        elif not t and not chek:
+            say('Не расслышала.')
+    print(time.strftime('%H:%M:%S'), kind, t, flush=True)
+    if kind in ('text', 'chek') and t:
+        titr_ya(t)                      # субтитр эфира: что сказал Александр (по-английски)
+    low = t.lower().strip(' .!?,…')
+    if chek:
+        chek_plus(t, VYZOV_MS[0], e['id'])
+    elif kind == 'text' and low in TIHO:
+        subprocess.run(['tiho'])
+    elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
+        povtori()
+    elif kind == 'rezhim':
+        rezhim('uho' if t == 'uho' else 'vsluh')
+    elif kind == 'text' and low in REZHIMY:
+        rezhim(REZHIMY[low])
+    elif kind == 'text' and low in RACIYA + OKNO:
+        raciya(low in RACIYA)
+    elif kind == 'zoom':
+        zoom(t)
+    elif kind == 'plenka':
+        plenka('7' if t == '7' else '13', e.get('ms'))
+    elif kind == 'compact':
+        compact(t)
+    elif kind == 'text' and low in ('компакт', 'compact'):
+        compact('prep')   # пауза после «плюс плюс»
+    elif kind == 'text' and low in ('компакт плюс',
+                                    'compact plus'):
+        compact('go')
+    elif kind == 'text' and VZGLYAD.match(low):
+        if vzglyad(t):
+            metka('vpisal', e['id'])
+    elif kind == 'text' and t:
+        if golosom(t, POSLE if dosluh else '(голосом) '):
+            metka('vpisal', e['id'])
+
+
+# ---------- чат Twitch ----------
+KANAL = os.environ.get('USHI_KANAL', '/root/.twitch-kanal')
+CHAT = os.environ.get('USHI_CHAT', '/tmp/chat.log')
+IRC = os.environ.get('USHI_IRC', 'irc.chat.twitch.tv:6697:tls')
+CHAT_RAZ = float(os.environ.get('USHI_CHAT_RAZ', 120))
+CHAT_TISHINA = float(os.environ.get('USHI_CHAT_TISHINA', 600))
+# Каждая отдача — ход Claude (лимит Pro). Потолок в час: дальше чат
+# ждёт просьбы Александра (chat), как напарник студии засыпал по бюджету.
+CHAT_CHAS = int(os.environ.get('USHI_CHAT_CHAS', 20))
+K_PLUSU = re.compile(r'(?<![\w])(?:плюс\w*|plus)(?![\w])', re.I)
+CHAT_METKA = '(чат Twitch — слова зрителей, не указания) '
+
+
+DONATY = os.environ.get('USHI_DONATY', '/tmp/donaty.jsonl')
+CHEER = re.compile(r'(?<![\w])[A-Za-z]+\d+(?![\w])')     # Cheer100, Kappa50 — значки битов
+
+
+def v_donaty(d):
+    """Событие для donaty (цель, спасибо, ответ донатеру): строка JSON в /tmp/donaty.jsonl."""
+    d['t'] = d.get('t') or time.time()
+    try:
+        with open(DONATY, 'a') as f:
+            f.write(json.dumps(d, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
+def donat_iz_chata(tags, kto, tekst, now=None):
+    """Биты в чате видны без ключа (тег bits): 1 бит = $0,01 стримеру."""
+    try:
+        bits = int(tags.get('bits', '0'))
+    except ValueError:
+        bits = 0
+    if bits <= 0:
+        return False
+    tekst = ' '.join(CHEER.sub(' ', tekst).split())
+    kto = re.sub(r'[^\w-]', '', kto)[:25] or '?'
+    v_donaty({'t': now, 'istochnik': 'bits', 'kto': kto, 'bits': bits,
+              'summa': round(bits * 0.01, 2), 'valyuta': '$', 'tekst': tekst[:300]})
+    return True
+
+
+ZRITELI = os.environ.get('USHI_ZRITELI', '/tmp/zriteli.jsonl')
+
+
+def zritel_iz_chata(line, k, now=None):
+    """Зашёл / вышел из чата (Twitch шлёт JOIN и PART по возможности membership, без ключа:
+    зрители со входом в Twitch, пачками раз в ~10 с). Себя (justinfan) и хозяина канала не пишем.
+    Кому что сказать — решает zriteli."""
+    m = re.match(r':(\w+)!\S+ (JOIN|PART) #(\w+)$', line)
+    if not m or m.group(1).lower().startswith('justinfan') or m.group(1).lower() == k:
+        return False
+    try:
+        with open(ZRITELI, 'a') as f:
+            f.write(json.dumps({'t': now or time.time(), 'kto': m.group(1).lower(),
+                                'chto': 'join' if m.group(2) == 'JOIN' else 'part'}) + '\n')
+        if os.path.getsize(ZRITELI) > 256 * 1024:              # не растёт вечно
+            hvost = open(ZRITELI).readlines()[-1000:]
+            open(ZRITELI, 'w').writelines(hvost)
+    except OSError:
+        pass
+    return True
+
+
+def sobytie_chata(tags, tekst, now=None):
+    """Подписка, продление, подарок подписок, рейд — без денег в цель, но с благодарностью."""
+    vid = tags.get('msg-id', '')
+    if vid not in ('sub', 'resub', 'subgift', 'submysterygift', 'raid'):
+        return False
+    kto = re.sub(r'[^\w-]', '', tags.get('display-name') or tags.get('login') or '?')[:25] or '?'
+    d = {'t': now, 'istochnik': vid, 'kto': kto, 'summa': 0, 'valyuta': '$',
+         'tekst': ' '.join(tekst.split())[:300]}
+    if vid == 'raid':
+        try:
+            d['zriteley'] = int(tags.get('msg-param-viewerCount', '0'))
+        except ValueError:
+            pass
+    v_donaty(d)
+    return True
+
+
+class Chat(threading.Thread):
+    """Чат Twitch анонимно (только чтение, без ключа):
+    всё — в /tmp/chat.log (chat покажет). Плюсу —
+    сам: раз в 2 мин, если есть новое; сразу — если
+    в сообщении «плюс» или чат молчал 10 мин."""
+
+    def __init__(self, alive):
+        super().__init__(daemon=True)
+        self.alive = alive          # Claude Плюса жив?
+        self.novye, self.lock = [], threading.Lock()
+        self.posl = 0.0             # последнее сообщение
+        self.otdano = time.time()   # последняя отдача
+        self.srochno = False
+        self.otdachi = []           # времена отдач за последний час
+
+    def kanal(self):
+        try:
+            k = open(KANAL).read().strip().lstrip('#')
+            return k.lower() if re.fullmatch(r'\w{2,25}', k) \
+                else None
+        except OSError:
+            return None
+
+    def run(self):
+        threading.Thread(target=self.otdavat,
+                         daemon=True).start()
+        pauza_ = 5
+        while True:
+            k = self.kanal()
+            if not k:
+                time.sleep(30)
+                continue
+            try:
+                self.slushat(k)
+                pauza_ = 5
+            except Exception as x:
+                print(time.strftime('%H:%M:%S'), 'чат:',
+                      type(x).__name__, x, flush=True)
+            time.sleep(pauza_)
+            pauza_ = min(pauza_ * 2, 300)
+
+    def slushat(self, k):
+        host, port, vid = (IRC.split(':') + ['tls'])[:3]
+        s = socket.create_connection((host, int(port)),
+                                     timeout=30)
+        if vid == 'tls':
+            s = ssl.create_default_context().wrap_socket(
+                s, server_hostname=host)
+        s.settimeout(400)           # PING раз в ~5 мин
+        f = s.makefile('r', encoding='utf-8',
+                       errors='replace', newline='\r\n')
+        s.sendall(('PASS SCHMOOPIIE\r\nNICK justinfan%d'
+                   '\r\nCAP REQ :twitch.tv/tags twitch.tv/membership'
+                   '\r\nJOIN #%s\r\n' % (
+                       int(time.time()) % 90000 + 10000,
+                       k)).encode())
+        print(time.strftime('%H:%M:%S'), 'чат: слушаю #'
+              + k, flush=True)
+        for line in f:
+            line = line.rstrip('\r\n')
+            if line.startswith('PING'):
+                s.sendall(('PONG' + line[4:] + '\r\n')
+                          .encode())
+                continue
+            m = re.match(r'(?:@(\S+) )?:(\w+)!\S+ PRIVMSG '
+                         r'#\w+ :(.*)', line)
+            if m:
+                tags = dict(x.split('=', 1) for x in
+                            (m.group(1) or '').split(';')
+                            if '=' in x)
+                kto = tags.get('display-name') or m.group(2)
+                self.prishlo(kto, m.group(3))
+                donat_iz_chata(tags, kto, m.group(3))
+            else:
+                u = re.match(r'@(\S+) :tmi\.twitch\.tv USERNOTICE '
+                             r'#\w+(?: :(.*))?', line)
+                if u:
+                    sobytie_chata(dict(
+                        x.split('=', 1) for x in u.group(1).split(';')
+                        if '=' in x), u.group(2) or '')
+                else:
+                    zritel_iz_chata(line, k)
+            if self.kanal() != k:
+                break               # канал сменили
+        s.close()
+
+    def prishlo(self, kto, tekst, now=None):
+        now = now or time.time()
+        # чужие слова — обезвредить (как chuzhoe в
+        # dezhurnyy): без управляющих знаков и переносов,
+        # коротко, в «ёлочках» — граница чужой речи видна
+        tekst = ' '.join(re.sub(r'[\x00-\x1f\x7f]', ' ',
+                                tekst).split())
+        if len(tekst) > 200:
+            tekst = tekst[:200] + '…'
+        kto = re.sub(r'[^\w-]', '', kto)[:25] or '?'
+        try:
+            with open(CHAT, 'a') as f:
+                f.write('%s %s: %s\n' % (
+                    time.strftime('%H:%M', time.localtime(now)),
+                    kto, tekst))
+            if os.path.getsize(CHAT) > 512 * 1024:   # не растёт вечно
+                hvost = open(CHAT).readlines()[-2000:]
+                open(CHAT, 'w').writelines(hvost)
+        except OSError:
+            pass
+        with self.lock:
+            tiho = now - self.posl >= CHAT_TISHINA
+            self.posl = now
+            self.novye.append((kto, tekst))
+            # одинокое «плюс» в чате — это «+1», согласие;
+            # к Плюсу обращаются словами
+            if tiho or (K_PLUSU.search(tekst)
+                        and len(tekst.split()) >= 2):
+                self.srochno = True
+
+    def otdavat(self):
+        while True:
+            time.sleep(1)
+            self.otdat()
+
+    def otdat(self, now=None):
+        now = now or time.time()
+        with self.lock:
+            if not self.novye or not (
+                    self.srochno or now - self.otdano >= CHAT_RAZ):
+                return False
+            self.otdachi = [x for x in self.otdachi if now - x < 3600]
+            if len(self.otdachi) >= CHAT_CHAS:
+                if self.srochno:
+                    print(time.strftime('%H:%M:%S'), 'чат: потолок',
+                          CHAT_CHAS, 'в час — жду', flush=True)
+                self.srochno = False
+                return False
+            if not self.alive() or ekran_zanyat():
+                return False      # вопрос на экране: ждём
+            pachka, self.novye = self.novye[-12:], []
+            self.srochno, self.otdano = False, now
+            self.otdachi.append(now)
+        t = ' · '.join('%s: «%s»' % (k, x.replace('«', '"')
+                                      .replace('»', '"'))
+                       for k, x in pachka)
+        if not v_plus(t[:900], CHAT_METKA):
+            with self.lock:   # вопрос появился только что
+                self.novye = pachka + self.novye
+                self.otdachi.pop()
+                self.srochno = True
+            return False
+        print(time.strftime('%H:%M:%S'), 'чат → Плюсу:',
+              len(pachka), flush=True)
+        return True
+
+
+PAMYAT = os.environ.get('USHI_PAMYAT', '/tmp/pamyat.log')
+
+
+def pamyat_termux():
+    """Сколько памяти держит Плюс в Termux, по
+    процессам (VmRSS, МБ) — раз в 30 с в /tmp/pamyat.log.
+    06.10 Quest закрывал по памяти Termux, потом и
+    приложение 2: видно, кто сколько ест перед этим.
+    Приложение пишет своё — curl localhost:8766/pamyat."""
+    gr = {}
+    for d in os.listdir('/proc'):
+        if not d.isdigit():
+            continue
+        try:
+            st = open('/proc/%s/status' % d).read()
+        except OSError:
+            continue
+        n = re.search(r'^Name:\s*(\S+)', st, re.M)
+        r = re.search(r'^VmRSS:\s*(\d+)', st, re.M)
+        if n and r:
+            gr[n.group(1)] = gr.get(n.group(1), 0) + int(r.group(1))
+    top = sorted(gr.items(), key=lambda x: -x[1])[:6]
+    stroka = '%s termux %d МБ: %s\n' % (
+        time.strftime('%d.%m %H:%M:%S'), sum(gr.values()) // 1024,
+        ', '.join('%s %d' % (k, v // 1024) for k, v in top))
+    try:
+        if os.path.getsize(PAMYAT) > 400000:
+            t = open(PAMYAT).read()
+            open(PAMYAT, 'w').write(t[len(t) // 2:])
+    except OSError:
+        pass
+    try:
+        open(PAMYAT, 'a').write(stroka)
+    except OSError:
+        pass
+
+
+def zhdat_claude(maks=60):
+    """Плюса подняли после убийства: ждём, пока Claude
+    готов принять фразу — в окне строка ввода «❯»."""
+    t = time.time()
+    while time.time() - t < maks:
+        if plus_alive() and '❯' in ekran():
+            return True
+        time.sleep(0.5)
+    return False
+
+
+PLUS_PAUZA = os.environ.get('USHI_PLUS_PAUZA', '/tmp/plus-pauza')
+
+
+def plus_alive():
+    """Claude Плюса работает (tmux «plus») — приложение
+    тогда не запускает его заново, а только открывает
+    Termux. После /exit plus 10 с ждёт и поднимает Claude
+    сам (2.2.9) — это тоже «жив»: второй Плюс не нужен."""
+    if subprocess.run(['tmux', 'has-session', '-t', 'plus'],
+                      capture_output=True).returncode == 0:
+        return True
+    try:
+        return time.time() - os.path.getmtime(PLUS_PAUZA) < 20
+    except OSError:
+        return False
+
+
+STRIM = '/tmp/strim.jpg'      # кадр ретранслятора (retr)
+
+
+def strim_live():
+    try:
+        return time.time() - os.path.getmtime(STRIM) < 6
+    except OSError:
+        return False
+
+
+RETR_VKL = os.environ.get('USHI_RETR_VKL', '/root/.retr-vkl')
+
+
+def retr():
+    """Ретранслятор BeamXR — запасной путь стрима: уши держат
+    его запущенным, только если Александр включил его сам
+    (`retr` кладёт /root/.retr-vkl, `retr stop` убирает).
+    Свой эфир идёт из приложения, а ретранслятор занимает
+    порт 1935 — тот же, что у камеры телефона (08.10:
+    камера «не подключается» из-за него)."""
+    if not os.path.exists(RETR_VKL):
+        return
+    try:
+        p = int(open('/tmp/retr.pid').read())
+        os.kill(p, 0)
+        return
+    except (OSError, ValueError):
+        pass
+    # ffmpeg мог стоять и без задания 07 — без retr уши
+    # упали бы на запуске
+    if subprocess.run(['sh', '-c', 'command -v ffmpeg && '
+                       'command -v retr'],
+                      capture_output=True).returncode == 0:
+        subprocess.run(['retr'], capture_output=True)
+
+
+def stamp():
+    out = []
+    for f in (ME, Sluh.SCRIPT, '/root/.sluh-model',
+              '/root/.sluh-threads', PAUZA):
+        try:
+            out.append(os.path.getmtime(f))
+        except OSError:
+            out.append(0)
+    return out
+
+
+def obnovleny(st):
+    """Файлы ушей сменились и дописаны: True —
+    пора перезапуститься. Битый ushi — не трогаем."""
+    time.sleep(2)              # curl мог не дописать
+    if stamp() != st:
+        return False
+    try:
+        compile(open(ME).read(), ME, 'exec')
+    except (OSError, SyntaxError) as x:
+        print(time.strftime('%H:%M:%S'),
+              'новый ushi с ошибкой:', x, flush=True)
+        return False
+    return True
+
+
+def main():
+    open('/tmp/ushi.pid', 'w').write(str(os.getpid()))
+    sluh = Sluh()
+    last = None
+    st, alive = stamp(), plus_alive()
+    nst = nastroyki_st()
+    sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0,
+                pamyat=0)
+    vyzov = None       # Ава на паузе с этого времени
+    podyom = 0.0       # когда подняли после убийства
+    Chat(plus_alive).start()
+    while True:
+        now = time.time()
+        if now > sled['alive']:
+            alive, sled['alive'] = plus_alive(), now + 3
+        if now > sled['retr']:
+            retr()
+            sled['retr'] = now + 30
+        if now > sled['golos']:
+            golos_zhiv()
+            sled['golos'] = now + 30
+        if now > sled['pamyat']:
+            sled['pamyat'] = now + 30
+            try:
+                pamyat_termux()
+            except Exception:
+                pass
+        if ZHDUT and now > sled['zhdut']:
+            dognat()           # вопрос на экране снят?
+            sled['zhdut'] = now + 1
+        if now > sled['stamp']:
+            sled['stamp'] = now + 3
+            if last is not None and nastroyki_st() != nst:
+                nst = nastroyki_st()
+                pauza()        # Плюс поменял настройку ушей
+            if stamp() != st:
+                st = stamp()
+                if obnovleny(st):
+                    print(time.strftime('%H:%M:%S'),
+                          'обновлены — перезапуск',
+                          flush=True)
+                    if sluh.p:
+                        sluh.p.terminate()
+                    os.execv(sys.executable,
+                             [sys.executable, ME])
+        try:
+            if last is None:
+                last = get(EAR)['id']   # старое не повторяем
+                pauza()
+                # подняли после убийства (plus --s N):
+                # фразы с вызова N — когда Claude готов
+                s0 = int(os.environ.get('USHI_S') or 0)
+                if 0 < s0 <= last:
+                    print(time.strftime('%H:%M:%S'),
+                          'подъём: жду Claude, фразы с',
+                          s0, flush=True)
+                    zhdat_claude()
+                    last = s0 - 1
+                    podyom = time.time()
+            t0 = time.time()
+            # wait=3: новое приложение держит запрос,
+            # пока не услышит, — без опроса раз в 0,4 с
+            e = get('%s?after=%d&wait=3%s%s' % (
+                EAR, last, '&plus=1' if alive else '',
+                '&strim=1' if strim_live() else ''),
+                timeout=8)
+            kind = e.get('kind', 'none')
+            if kind == 'none':
+                if e['id'] < last:
+                    last = e['id']   # мост перезапущен
+                if vyzov and e.get('state') != 'hearing' \
+                        and time.time() - vyzov > 1:
+                    signal(G_DALSHE)  # фразы не было
+                    vyzov = None
+                if time.time() - t0 < 0.3:
+                    time.sleep(0.4)  # старое приложение
+                continue
+            last = e['id']
+            if kind == 'wake' and time.time() - podyom < 120 \
+                    and time.time() * 1000 - (e.get('ms') or 0) > 5000:
+                continue    # старый вызов из подъёма: Ава и так молчит
+            if kind == 'wake':
+                vyzov = time.time()
+            handle(e, sluh)
+            if kind in ('text', 'chek'):
+                signal(G_DALSHE)     # Ава договаривает
+                vyzov = None
+        except Exception as x:   # мост выключен — ждём
+            last = None if isinstance(x, OSError) else last
+            time.sleep(0.4)
+
+
+if __name__ == '__main__':
+    main()

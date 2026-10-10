@@ -1,0 +1,86 @@
+#!/bin/sh
+# kamera — камера телефона в эфире: iPhone (приложение Moblin или Larix) шлёт видео по
+# домашней Wi-Fi в Quest Claude Bridge 2, и во время эфира оно — окном поверх кадра.
+# Глаза Плюса окна не видят. Ключ камеры живёт только на странице для айфона; здесь
+# его нет и быть не должно.
+#   kamera                     — как камера
+#   kamera svyaz               — подключить айфон: на 2 минуты страница plus.local:8770
+#                                («Добавить в Moblin» или Larix — приложение само знает адрес с ключом)
+#   kamera ugol [pn|ln|pv|lv] [0.25] — окно в углу: справа/слева, внизу/вверху; доля ширины 0.1–0.5
+#   kamera bolshe | menshe     — окно больше / меньше
+#   kamera krupno              — камера во весь кадр (перерыв, разговор с чатом)
+#   kamera skryt               — убрать окно (телефон остаётся подключён)
+U=${KAMERA_URL:-http://localhost:8766}
+
+molchit() { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+
+skazat() {
+  printf '%s' "$1" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Камера: непонятный ответ приложения."); sys.exit(1)
+s, o = d.get("state"), d.get("oshibka") or ""
+g = d.get("gde") or "pn"
+mesto = {"krupno": "во весь кадр", "skryt": "окно скрыто"}.get(d.get("vid"),
+    "угол %s %s, %d %%" % ("слева" if g[0] == "l" else "справа", "внизу" if g[1] == "n" else "вверху",
+                          round(float(d.get("dolya") or 0.25) * 100)))
+if s == "idyot":
+    gde = "в эфире: " + mesto if d.get("v_efire") else "появится в эфире, когда он начнётся (" + mesto + ")"
+    print("Камера идёт: %s, %s к/с, %s кбит/с; %s." % (d.get("razmer", "").replace("x", "×"), d.get("fps"), d.get("kbps"), gde))
+elif s == "zhdu":
+    stuk = ""
+    if "popytok" in d:                     # приложение 2.2.6+: стучался ли телефон вообще
+        n = d.get("popytok") or 0
+        stuk = " Телефон ещё не стучался." if n == 0 else " Подключений к порту с запуска: %d." % n
+    print("Камера ждёт телефон (подключить айфон — kamera svyaz). Окно: %s." % mesto + stuk + (" " + o if o else ""))
+elif "slushaet" in d:
+    print("Камера: порт приёмника закрыт — приложение открывает его заново само." + (" " + o if o else ""))
+else:
+    print("Камера выключена: нужен захват в приложении 2." + (" " + o if o else ""))
+p = d.get("perezapuskov") or 0
+if p:
+    print("Порт камеры открывался заново %d раз (система его закрывала — так и надо)." % p)
+'
+}
+
+case "$1" in
+  ''|status|s)
+    j=$(curl -s --max-time 5 "$U/kamera") || molchit
+    skazat "$j" ;;
+  svyaz|podklyuchit|aifon)
+    j=$(curl -s --max-time 10 "$U/kamera/stranica") || molchit
+    printf '%s' "$j" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Камера: непонятный ответ приложения."); sys.exit(1)
+if d.get("oshibka"):
+    print("Камера: " + d["oshibka"]); sys.exit(1)
+a = d.get("adres", "").replace("http://", "")
+print("На айфоне в Safari открой %s и нажми «Добавить в Moblin» (или Larix); не откроется — %s. Страница открыта 2 минуты."
+      % (a, d.get("ip", "")))
+' ;;
+  ugol|krupno|skryt)
+    v=$1; shift
+    q="v=$v"
+    case "$1" in pn|ln|pv|lv) q="$q&gde=$1"; shift ;; esac
+    if [ "$v" = ugol ] && [ -n "$1" ]; then
+      case "$1" in *[!0-9.]*) echo "kamera ugol pn 0.3 — доля ширины числом 0.1–0.5."; exit 1 ;; esac
+      q="$q&r=$1"
+    fi
+    j=$(curl -s --max-time 5 "$U/kamera/vid?$q") || molchit
+    skazat "$j" ;;
+  bolshe|menshe)
+    j=$(curl -s --max-time 5 "$U/kamera") || molchit
+    r=$(printf '%s' "$j" | python3 -c '
+import json, sys
+d = float(json.load(sys.stdin).get("dolya") or 0.25)
+print(round(min(0.5, max(0.1, d + (0.05 if sys.argv[1] == "bolshe" else -0.05))), 2))' "$1") || exit 1
+    j=$(curl -s --max-time 5 "$U/kamera/vid?v=ugol&r=$r") || molchit
+    skazat "$j" ;;
+  *)
+    echo "kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera bolshe|menshe; kamera krupno; kamera skryt." ;;
+esac

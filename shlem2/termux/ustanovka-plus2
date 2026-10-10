@@ -1,0 +1,34 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# ustanovka-plus2 — поставить Плюса 2 рядом с 1.0. Запускать в Termux (новая
+# сессия Termux, не в окне Плюса и не в Ubuntu):
+#   1) Ubuntu первой версии копируется в новую Ubuntu «plus2» — первая только
+#      читается, в ней ничего не меняется;
+#   2) скрипт Termux `plus2` — его зовёт приложение Quest Claude Bridge 2;
+#   3) в plus2 — файлы второй версии из зеркала (папка shlem2).
+# Повторный запуск копию не делает, только обновляет файлы второй версии.
+set -e
+B=${PLUS2_BASE:-https://raw.githubusercontent.com/Pneuron1321/3dplus/claude/tender-goodall-41rwsn/shlem2}
+P=$PREFIX/var/lib/proot-distro
+if [ -d "$P/containers/plus2/rootfs" ] || [ -d "$P/installed-rootfs/plus2" ]; then
+  echo "plus2 уже есть — копию не делаю."
+elif [ -d "$P/containers/ubuntu/rootfs" ]; then          # proot-distro 5
+  T=$HOME/plus2.tar
+  [ -e "$T" ] && { echo "Уже лежит $T — удали его и запусти снова."; exit 1; }
+  echo "Копирую Ubuntu 1.0 — несколько минут. Первая Ubuntu только читается."
+  proot-distro backup ubuntu --output "$T"
+  proot-distro install "$T"                     # имя новой Ubuntu — из имени файла: plus2
+  mv "$T" "$HOME/plus-1.0-kopiya.tar"           # копия 1.0 на всякий случай; мешает — удали
+else
+  echo "proot-distro старой версии или Ubuntu не там — ничего не трогаю. Напиши в чат."
+  exit 1
+fi
+curl -fsSL "$B/termux/plus2" -o "$PREFIX/bin/plus2"
+chmod +x "$PREFIX/bin/plus2"
+proot-distro login plus2 -- sh -c "set -e; B=$B
+  curl -fsSL \$B/obnovi -o /usr/local/bin/obnovi && chmod +x /usr/local/bin/obnovi
+  OBNOVI_BASE=\$B obnovi
+  curl -fsSL \$B/CLAUDE.md -o /root/.claude/CLAUDE.md
+  curl -fsSL \$B/settings.json -o /tmp/n-s.json && python3 -c 'import json;json.load(open(\"/tmp/n-s.json\"))' && cp /tmp/n-s.json /root/.claude/settings.json
+  mkdir -p /root/.claude/agents && curl -fsSL \$B/agents/dumat.md -o /root/.claude/agents/dumat.md
+  rm -f /tmp/*.pid /tmp/golos-demon.lock"
+echo "Плюс 2: ок. Запуск — приложение Quest Claude Bridge 2, кнопка «Плюс»."

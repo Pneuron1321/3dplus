@@ -1,0 +1,98 @@
+#!/bin/sh
+# efir — эфир на Twitch прямо из приложения Quest Claude Bridge 2, вместе с глазами
+# Плюса (BeamXR и ретранслятор не нужны; Termux тоже — эфир переживёт его убийство).
+# Ключ Twitch — из /root/.twitch-key (кладёт `kluch twitch`): передаётся приложению
+# внутри шлема (localhost, телом запроса) и нигде не печатается.
+#   efir          — начать: 1080p, 30 к/с, 6000 кбит/с
+#   efir 720      — начать в 720p, 4500 кбит/с (если сеть не тянет)
+#   efir stop     — закончить
+#   efir status   — как идёт
+#   efir mic 4    — голос в эфире громче/тише (0,5–8, обычно 3; приложение запомнит)
+#   efir mic +25% — на слух на 25 % громче (−20% — тише): громкость на слух растёт медленнее
+#                   силы звука — «на 25 % громче» это ×1,45 (+3 дБ), а не ×1,25 (2.3.2)
+U=${EFIR_URL:-http://localhost:8766}
+KEY=${EFIR_KEY:-/root/.twitch-key}
+
+skazat() {
+  j=$(curl -s --max-time 5 "$U/efir") || {
+    echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; return 1; }
+  printf '%s' "$j" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Эфир: непонятный ответ приложения."); sys.exit(1)
+s, o = d.get("state"), d.get("oshibka") or ""
+if s == "efir":
+    print("Эфир идёт: %s с, %s кбит/с (цель %s), %s, звук: %s, голос ×%s; потеряно кадров: %s."
+          % (d.get("sec"), d.get("kbps"), d.get("tsel_kbps"), d.get("razmer"), d.get("zvuk"),
+             d.get("mic"), d.get("drops")))
+    if d.get("mic_propuski") is not None:
+        print("Голос: микропауз %s, сбросов %s (норма — 0)." % (d.get("mic_propuski"), d.get("mic_sbrosy", 0)))
+elif s == "podklyuchayus":
+    print("Эфир: подключаюсь к Twitch… " + o)
+elif s == "obryv":
+    print("Эфир: обрыв, переподключаюсь… " + o)
+else:
+    print("Эфир выключен." + (" " + o if o else ""))
+'
+}
+
+case "$1" in
+  stop)
+    curl -s --max-time 15 "$U/efir/stop" > /dev/null
+    skazat ;;
+  status|s)
+    skazat ;;
+  mic)
+    g=$2; was=
+    case "$g" in
+      [+-]*)                       # на слух: «на 25 % громче» — от того, что сейчас
+        j=$(curl -s --max-time 5 "$U/efir") || {
+          echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+        r=$(printf '%s' "$j" | python3 -c '
+import json, re, sys
+m = re.fullmatch(r"([+-])(\d{1,3}(?:[.,]\d+)?)%?", sys.argv[1])
+if not m:
+    sys.exit(1)
+p = float(m.group(2).replace(",", ".")) / 100
+p = p if m.group(1) == "+" else -min(p, 0.9)
+try:
+    cur = float(json.load(sys.stdin).get("mic") or 3)
+except (ValueError, AttributeError, TypeError):
+    cur = 3.0
+# громкость на слух ~ сила звука в степени 0,6: на N % громче на слух — сила ×(1+N)^(1/0,6)
+print("%.2f %.2f" % (cur, min(8.0, max(0.5, cur * (1 + p) ** (1 / 0.6)))))
+' "$g") || { echo "efir mic +25% — на слух на 25 % громче, efir mic -20% — тише, efir mic 4 — ровно ×4."; exit 1; }
+        was=${r% *}; g=${r#* } ;;
+      ''|*[!0-9.]*) echo "efir mic 4 — число от 0.5 до 8 (обычно 3); efir mic +25% — на слух на 25 % громче."; exit 1 ;;
+    esac
+    k=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$U/efir/mic?g=$g")
+    case "$k" in
+      200) ;;
+      000) echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1 ;;
+      *) echo "Громкость не сохранилась: захват не идёт — в Quest Claude Bridge 2 «Начать захват»."; exit 1 ;;
+    esac
+    if [ -n "$was" ]; then echo "Голос в эфире: ×$was → ×$g (на слух $2, приложение запомнило)."
+    else echo "Голос в эфире: ×$g (приложение запомнило)."; fi
+    skazat ;;
+  ''|720|1080)
+    s=$(curl -s --max-time 3 "$U/status") || {
+      echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+    case "$s" in *'"capturing":true'*) ;; *)
+      echo "Захват не идёт: в Quest Claude Bridge 2 — «Начать захват» → «Разрешить»."; exit 1 ;; esac
+    [ -s "$KEY" ] || { echo "Нет ключа Twitch: в Ubuntu Плюса — kluch twitch."; exit 1; }
+    r=$(curl -s --max-time 5 --data-binary @"$KEY" "$U/efir/key")
+    case "$r" in *'"key":true'*) ;; *)
+      echo "Приложение не приняло ключ (нужно приложение 2.1; ключ не похож на ключ Twitch?)."; exit 1 ;; esac
+    q=; [ "$1" = 720 ] && q='?size=720&kbps=4500'
+    curl -s --max-time 20 "$U/efir/start$q" > /dev/null
+    i=0
+    while [ $i -lt 12 ]; do
+      sleep 1; i=$((i + 1))
+      case "$(curl -s --max-time 3 "$U/efir")" in *'"state":"efir"'*|*'"state":"off"'*) break ;; esac
+    done
+    skazat ;;
+  *)
+    echo "efir — начать эфир, efir 720 — полегче, efir stop — закончить, efir status — как идёт." ;;
+esac

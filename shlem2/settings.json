@@ -1,0 +1,86 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/golos-hook",
+            "async": true,
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/uskor",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/pamyat",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/pamyat",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/golos-hook pre",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "model": "sonnet",
+  "permissions": {
+    "allow": [
+      "Bash(kadr)",
+      "Bash(kadr:*)",
+      "Read(//root/view.jpg)",
+      "Read(~/view.jpg)",
+      "Bash(skazhi:*)",
+      "Bash(tiho)",
+      "Bash(obnovi)",
+      "Bash(retr status)",
+      "Bash(curl -s localhost:8766/status)",
+      "Bash(zamer)",
+      "Bash(zamer:*)",
+      "Bash(golos proba:*)",
+      "Bash(chat)",
+      "Bash(chat:*)"
+    ],
+    "additionalDirectories": [
+      "/root",
+      "/tmp"
+    ]
+  }
+}

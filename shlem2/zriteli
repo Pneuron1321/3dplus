@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""zriteli — зрители эфира (2.2.9): кто зашёл на стрим и сколько смотрят. Александр 09.10:
+«смотреть, сколько зрителей сейчас на стриме, и говорить, если кто-то зашёл».
+  Кто зашёл — без ключа: уши читают чат Twitch анонимно и с 2.2.9 просят у Twitch «кто вошёл /
+  вышел» (JOIN/PART, возможность membership) → /tmp/zriteli.jsonl. Видно зрителей, вошедших в
+  Twitch со своим аккаунтом (они в чате, даже если молчат), пачками раз в ~10 с. Боты-наблюдатели
+  отсеиваются. Пока идёт эфир, Плюс здоровается вслух — голосом, с субтитрами: каждого раз за
+  вечер, несколько — одной фразой, не чаще раза в 90 с и не поверх речи Плюса и вызова.
+  Сколько смотрят — точное число Twitch (и зрители без аккаунта) — только с ключом приложения
+  Twitch (dev.twitch.tv → Your Console → Register Your Application): `! kluch twitch-id`, потом
+  `! kluch twitch-secret`. Раз в минуту, пока идёт эфир; стало больше, а по имени никто не
+  заходил, — Плюс замечает вслух (не чаще раза в 5 минут).
+  Состояние для соведущего и Плюса — /tmp/zriteli.json.
+  zriteli               — сколько смотрят, кто в чате, кто заходил за вечер
+  zriteli tiho | vkl    — не здороваться вслух / снова здороваться
+  zriteli bot ИМЯ       — это бот: не здороваться и не считать
+  zriteli klyuch        — проверить ключ приложения Twitch (его кладёт kluch)
+  zriteli demon         — сам цикл (запускает plus)
+Имена зрителей — чужие слова: только имя, без их сообщений; Плюсу с инструментами не идут."""
+import fcntl
+import json
+import os
+import random
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+MOST = os.environ.get('ZR_MOST', 'http://localhost:8766')
+SOBYTIYA = os.environ.get('ZR_SOBYTIYA', '/tmp/zriteli.jsonl')
+SOST = os.environ.get('ZR_SOST', '/tmp/zriteli.json')
+PAPKA = os.environ.get('ZR_PAPKA', '/root/.zriteli')
+KANAL = os.environ.get('ZR_KANAL', '/root/.twitch-kanal')
+APP_ID = os.environ.get('ZR_APP_ID', '/root/.twitch-app-id')
+APP_SECRET = os.environ.get('ZR_APP_SECRET', '/root/.twitch-app-secret')      # секрет: не печатать
+APP_TOKEN = os.environ.get('ZR_APP_TOKEN', '/root/.twitch-app-token')         # секрет: не печатать
+HELIX = os.environ.get('ZR_HELIX', 'https://api.twitch.tv/helix')
+TOKEN_URL = os.environ.get('ZR_TOKEN_URL', 'https://id.twitch.tv/oauth2/token')
+LOCK = os.environ.get('ZR_LOCK', '/tmp/zriteli.lock')
+SKAZHI = os.environ.get('ZR_SKAZHI', '/usr/local/bin/skazhi')
+GOLOS_Q = os.environ.get('ZR_GOLOS_Q', '/tmp/golos/q')
+SEK = float(os.environ.get('ZR_SEK', 1))                   # в проверке — доли секунды
+PACHKA = 15         # с первого нового имени ждём, не зайдёт ли кто ещё, — одной фразой
+RAZ_PRIVET = 90     # здороваться не чаще
+RAZ_CHISLO = 300    # «нас стало больше» — не чаще раза в 5 минут
+RAZ_HELIX = 60      # число зрителей спрашивать раз в минуту
+VECHER = 8 * 3600   # дольше перерыв — новый вечер: здороваться заново
+# Боты-наблюдатели заходят во все каналы подряд. Остальных Плюс добавляет: zriteli bot ИМЯ.
+BOTY = {'streamelements', 'streamlabs', 'nightbot', 'moobot', 'fossabot', 'wizebot', 'soundalerts',
+        'sery_bot', 'commanderroot', 'anotherttvviewer', 'lurxx', 'drapsnatt', 'aliceydra', 'creatisbot',
+        'kattah', 'pokemoncommunitygame', 'streamstickers', 'blerp', 'own3d', 'botrixoficial',
+        'kofistreambot', 'tangiabot', 'frostytoolsdotcom', 'stay_hydrated_bot', 'v_and_k', '0ax2',
+        'einfachuwe42', 'electricallongboard', 'rogueg1rl', 'd0nk7'}
+BOT_PO_IMENI = re.compile(r'(?:bot$|^bot_|_bot_|viewer|for_?streamers|^streamer_?tools)')
+PRIVET_1 = ['Привет, {}! Добро пожаловать на стрим.', '{}, привет! Располагайся.', 'О, {} с нами. Привет!',
+            'Привет, {}! Рада тебя видеть.']
+PRIVET_MN = ['Привет, {}! Добро пожаловать.', 'О, к нам зашли {}. Привет!', '{} — привет, располагайтесь!']
+BOLSHE = ['Кто-то тихо зашёл — нас уже {}. Привет!', 'Нас стало больше: смотрят уже {}. Привет новеньким!']
+
+
+def log(*a):
+    print(time.strftime('%H:%M:%S'), 'zriteli:', *a, file=sys.stderr, flush=True)
+
+
+def jget(path):
+    try:
+        with urllib.request.urlopen(MOST + path, timeout=5) as r:
+            return json.loads(r.read().decode('utf-8', 'replace'))
+    except Exception:
+        return {}
+
+
+def efir_idyot():
+    return jget('/efir').get('state') == 'efir'
+
+
+def plus_govorit():
+    if jget('/say/status').get('govorit'):
+        return True
+    try:
+        return bool(os.listdir(GOLOS_Q))
+    except OSError:
+        return False
+
+
+def zvali_nedavno(sek=30):
+    w = jget('/status').get('lastWakeMs') or 0
+    return w > 0 and time.time() * 1000 - w < sek * 1000
+
+
+def kanal():
+    try:
+        k = open(KANAL).read().strip().lstrip('#').lower()
+        return k if re.fullmatch(r'\w{2,25}', k) else None
+    except OSError:
+        return None
+
+
+def svoi_boty():
+    try:
+        return {l.strip().lower() for l in open(os.path.join(PAPKA, 'boty.txt')) if l.strip()}
+    except OSError:
+        return set()
+
+
+def bot(imya, svoi=frozenset()):
+    return imya in BOTY or imya in svoi or bool(BOT_PO_IMENI.search(imya))
+
+
+def tiho():
+    return os.path.exists(os.path.join(PAPKA, 'tiho'))
+
+
+def vslukh(imya):
+    """Имя для голоса: «dark_knight_77» → «dark knight 77»."""
+    return ' '.join(re.sub(r'[_\W]+', ' ', imya).split()) or imya
+
+
+def privet(imena):
+    v = [vslukh(x) for x in imena]
+    if len(v) == 1:
+        return random.choice(PRIVET_1).format(v[0])
+    if len(v) <= 3:
+        spisok = ', '.join(v[:-1]) + ' и ' + v[-1]
+    else:
+        spisok = ', '.join(v[:2]) + ' и ещё %d' % (len(v) - 2)
+    return random.choice(PRIVET_MN).format(spisok)
+
+
+def skazat(tekst):
+    try:
+        subprocess.run([SKAZHI, tekst], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=10)
+    except Exception as e:
+        log('skazhi:', type(e).__name__)
+
+
+# ---------- число зрителей: Twitch Helix, ключ приложения ----------
+
+def prochest(put):
+    try:
+        return open(put).read().strip()
+    except OSError:
+        return ''
+
+
+def est_klyuch():
+    return bool(prochest(APP_ID) and prochest(APP_SECRET))
+
+
+def novyy_token():
+    """Токен приложения (client credentials) — секрет: только в файл, не в вывод и не в аргументы."""
+    dannye = urllib.parse.urlencode({'client_id': prochest(APP_ID), 'client_secret': prochest(APP_SECRET),
+                                     'grant_type': 'client_credentials'}).encode()
+    with urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=dannye), timeout=15) as r:
+        t = json.loads(r.read().decode()).get('access_token', '')
+    if not t:
+        raise ValueError('Twitch не дал токен')
+    old = os.umask(0o077)
+    try:
+        open(APP_TOKEN, 'w').write(t + '\n')
+    finally:
+        os.umask(old)
+    return t
+
+
+def skolko_smotryat(k):
+    """viewer_count канала; None — эфира нет на Twitch; исключение — ключа нет или Twitch не ответил."""
+    tok = prochest(APP_TOKEN) or novyy_token()
+    for popytka in (1, 2):
+        req = urllib.request.Request(HELIX + '/streams?user_login=' + urllib.parse.quote(k),
+                                     headers={'Client-Id': prochest(APP_ID), 'Authorization': 'Bearer ' + tok})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                d = json.loads(r.read().decode()).get('data') or []
+            return int(d[0].get('viewer_count', 0)) if d else None
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and popytka == 1:              # токен истёк (~60 дней) — новый
+                tok = novyy_token()
+                continue
+            raise
+    return None
+
+
+# ---------- вечер ----------
+
+def vecher_put():
+    return os.path.join(PAPKA, 'vecher.json')
+
+
+def vecher():
+    try:
+        v = json.load(open(vecher_put()))
+    except (OSError, ValueError):
+        v = None
+    if not v or time.time() - v.get('posl', 0) > VECHER:
+        v = {'pozdorovalis': [], 'za_vecher': [], 'maks': 0, 'posl': time.time()}
+    return v
+
+
+def sohranit_vecher(v):
+    os.makedirs(PAPKA, exist_ok=True)
+    v['posl'] = time.time()
+    tmp = vecher_put() + '.tmp'
+    json.dump(v, open(tmp, 'w'), ensure_ascii=False)
+    os.replace(tmp, vecher_put())
+
+
+class Zal:
+    """Кто в чате (со входом в Twitch), кого ждёт приветствие, сколько смотрят."""
+
+    def __init__(self):
+        self.poz = 0
+        self.v_chate = set()
+        self.zhdut = {}             # имя → когда зашёл (ещё не поприветствовали)
+        self.posl_privet = 0.0
+        self.posl_chislo = 0.0
+        self.posl_helix = 0.0
+        self.zriteley = None        # число Twitch; None — неизвестно (нет ключа или эфира)
+        self.ob_yavleno = 0         # до скольки уже сказали «нас стало больше»
+        self.oshibka = ''
+        self.v = vecher()
+
+    def chitat(self):
+        """Новые JOIN/PART из ушей."""
+        try:
+            razmer = os.path.getsize(SOBYTIYA)
+        except OSError:
+            return
+        if razmer < self.poz:                               # уши обрезали файл — читаем заново
+            self.poz = 0
+        with open(SOBYTIYA, errors='replace') as f:
+            f.seek(self.poz)
+            stroki = f.readlines()
+            self.poz = f.tell()
+        k, svoi = kanal(), svoi_boty()
+        for l in stroki:
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            imya = str(e.get('kto', '')).lower()
+            if not re.fullmatch(r'\w{1,25}', imya) or imya == k or bot(imya, svoi):
+                continue
+            if e.get('chto') == 'join':
+                self.v_chate.add(imya)
+                if imya not in self.v['za_vecher']:
+                    self.v['za_vecher'].append(imya)
+                if imya not in self.v['pozdorovalis']:
+                    self.zhdut.setdefault(imya, float(e.get('t') or time.time()))
+            elif e.get('chto') == 'part':
+                self.v_chate.discard(imya)
+                self.zhdut.pop(imya, None)                  # ушёл, не дождавшись, — не здороваемся
+
+    def chislo(self, now, efir):
+        if not efir or not est_klyuch() or now - self.posl_helix < RAZ_HELIX:
+            if not efir:
+                self.zriteley = None
+            return
+        self.posl_helix = now
+        k = kanal()
+        if not k:
+            return
+        try:
+            self.zriteley, self.oshibka = skolko_smotryat(k), ''
+        except Exception as e:
+            self.oshibka = '%s %s' % (type(e).__name__, getattr(e, 'code', ''))
+            log('число зрителей:', self.oshibka)
+            return
+        if self.zriteley is not None:
+            self.v['maks'] = max(self.v.get('maks', 0), self.zriteley)
+            if self.zriteley < self.ob_yavleno:
+                self.ob_yavleno = self.zriteley             # ушли — следующий приход снова заметим
+
+    def shag(self, now=None):
+        """Один шаг цикла. Возвращает сказанное (или '')."""
+        now = now or time.time()
+        self.chitat()
+        efir = efir_idyot()
+        self.chislo(now, efir)
+        skazano = ''
+        if efir and not tiho():
+            pervyy = min(self.zhdut.values()) if self.zhdut else None
+            if pervyy is not None and now - pervyy >= PACHKA * SEK and now - self.posl_privet >= RAZ_PRIVET * SEK \
+                    and not plus_govorit() and not zvali_nedavno():
+                imena = sorted(self.zhdut, key=self.zhdut.get)
+                skazano = privet(imena)
+                self.v['pozdorovalis'] += imena
+                self.zhdut.clear()
+                self.posl_privet = now
+                if self.zriteley is not None:
+                    self.ob_yavleno = max(self.ob_yavleno, self.zriteley)
+            elif self.zriteley is not None and self.zriteley > max(self.ob_yavleno, 1) and not self.zhdut \
+                    and now - self.posl_chislo >= RAZ_CHISLO * SEK and now - self.posl_privet >= 120 * SEK \
+                    and not plus_govorit() and not zvali_nedavno():
+                if self.ob_yavleno:                         # первое число вечера — не новость
+                    skazano = random.choice(BOLSHE).format(self.zriteley)
+                self.ob_yavleno = self.zriteley
+                self.posl_chislo = now
+        if skazano:
+            skazat(skazano)
+            log('сказала:', skazano)
+        sohranit_vecher(self.v)
+        self.zapisat(now)
+        return skazano
+
+    def zapisat(self, now):
+        d = {'t': now, 'zriteley': self.zriteley, 'klyuch': est_klyuch(), 'oshibka': self.oshibka,
+             'v_chate': sorted(self.v_chate), 'za_vecher': self.v['za_vecher'][-50:], 'maks': self.v.get('maks', 0),
+             'tiho': tiho()}
+        try:
+            tmp = SOST + '.tmp'
+            json.dump(d, open(tmp, 'w'), ensure_ascii=False)
+            os.replace(tmp, SOST)
+        except OSError:
+            pass
+
+
+def obnovilsya(mt):
+    """obnovi положил новую версию — перезапуститься ею (замок отпускается сам: exec закрывает файл)."""
+    try:
+        if os.path.getmtime(__file__) == mt or time.time() - os.path.getmtime(__file__) < 5:
+            return
+        compile(open(__file__, encoding='utf-8').read(), __file__, 'exec')
+    except (OSError, SyntaxError, ValueError):
+        return
+    log('новая версия — перезапускаюсь')
+    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
+
+
+def demon():
+    z = open(LOCK, 'w')
+    try:
+        fcntl.flock(z, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    log('запущен')
+    mt = os.path.getmtime(__file__)
+    zal = Zal()
+    try:                                                    # старое до запуска — не новость
+        zal.poz = os.path.getsize(SOBYTIYA)
+    except OSError:
+        pass
+    while True:
+        obnovilsya(mt)
+        try:
+            zal.shag()
+        except Exception as e:
+            log('сбой:', type(e).__name__, str(e)[:120])
+        time.sleep(3 * SEK)
+
+
+def main(a):
+    if a and a[0] == 'demon':
+        return demon()
+    if a and a[0] in ('tiho', 'vkl'):
+        os.makedirs(PAPKA, exist_ok=True)
+        f = os.path.join(PAPKA, 'tiho')
+        if a[0] == 'tiho':
+            open(f, 'w').write('1')
+            print('Не здороваюсь вслух. Кто зашёл — видно в «zriteli».')
+        else:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+            print('Здороваюсь с теми, кто зашёл, пока идёт эфир.')
+        return 0
+    if a and a[0] == 'bot' and len(a) == 2 and re.fullmatch(r'\w{1,25}', a[1]):
+        os.makedirs(PAPKA, exist_ok=True)
+        with open(os.path.join(PAPKA, 'boty.txt'), 'a') as f:
+            f.write(a[1].lower() + '\n')
+        print('%s — бот: не здороваюсь и не считаю.' % a[1].lower())
+        return 0
+    if a and a[0] == 'klyuch':
+        if not est_klyuch():
+            print('Ключа приложения Twitch нет: ! kluch twitch-id, потом ! kluch twitch-secret.')
+            return 1
+        k = kanal()
+        try:
+            novyy_token()
+            n = skolko_smotryat(k) if k else None
+        except urllib.error.HTTPError as e:
+            print('Twitch не принял ключ (код %d). Скопируй Client ID и секрет заново.' % e.code)
+            return 1
+        except Exception as e:
+            print('Twitch не ответил (%s) — проверь интернет.' % type(e).__name__)
+            return 1
+        if not k:
+            print('Ключ работает. Канал не задан (echo ИМЯ_КАНАЛА > /root/.twitch-kanal) — число зрителей пока не узнать.')
+        else:
+            print('Ключ работает. ' + ('Сейчас смотрят: %d.' % n if n is not None else 'Канал сейчас не в эфире.'))
+        return 0
+    if a and a[0] not in ('status', 's'):
+        print('zriteli — сколько смотрят и кто в чате; tiho | vkl; bot ИМЯ; klyuch.')
+        return 1
+    try:
+        d = json.load(open(SOST))
+    except (OSError, ValueError):
+        d = {}
+    if d.get('zriteley') is not None:
+        print('Сейчас смотрят: %d (Twitch, минуту назад; за вечер больше всего — %d).' % (d['zriteley'], d.get('maks', 0)))
+    elif d.get('klyuch') or est_klyuch():
+        print('Сколько смотрят: эфира на Twitch нет или Twitch пока не ответил%s.' % (
+            ' (' + d['oshibka'] + ')' if d.get('oshibka') else ''))
+    else:
+        print('Сколько смотрят: точное число — с ключом приложения Twitch (! kluch twitch-id, ! kluch twitch-secret).')
+    vc = d.get('v_chate') or []
+    print('В чате со входом в Twitch: %d%s' % (len(vc), (' — ' + ', '.join(vc[:15])) if vc else ''))
+    zv = d.get('za_vecher') or []
+    if zv:
+        print('Заходили за вечер: ' + ', '.join(zv[-15:]))
+    print('Здороваюсь вслух: ' + ('нет (zriteli vkl — включить)' if d.get('tiho', tiho()) else 'да, пока идёт эфир'))
+    if not d or time.time() - d.get('t', 0) > 30:
+        print('(Помощник зрителей не отвечал больше 30 с — он запускается вместе с plus.)')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

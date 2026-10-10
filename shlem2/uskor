@@ -1,0 +1,10 @@
+#!/bin/sh
+# uskor — хук UserPromptSubmit: Александр сказал или написал новое. Ава не
+# обрывается: остаток прежнего ответа она договаривает на 25 % быстрее
+# (оборвать сразу — tiho или «плюс тихо»). Метка для zamer: Claude получил фразу.
+# Хук фоновый (async в settings.json): ответ Claude его не ждёт.
+n=$(date +%s%N)
+s=${n%?????????}
+echo "$s.${n#$s}" > /tmp/golos.uskor
+printf '%s\tprompt\t-\t\n' "${n%??????}" >> /tmp/zamer.log
+exit 0
