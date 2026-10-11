@@ -1,0 +1,105 @@
+#!/bin/sh
+# nagruzka — что открыто в шлеме и что его грузит: программы Termux и Ubuntu по именам, сколько
+# штук каждой, память, процессор сейчас, сколько живут; лишние копии — предупреждение.
+# Печатает только имена программ (у python/node/sh — имя скрипта), без аргументов: в них бывают
+# ключи и адреса. Приложения Android (бридж, игра) отсюда не видно — только через adb с ноутбука.
+#   nagruzka        — сводка (меряет процессор 3 с)
+# Работает и в обычном Termux, и в Ubuntu (proot-distro login plus2).
+SEK=${NAGRUZKA_SEK:-3}
+HZ=100
+up() { cut -d' ' -f1 /proc/uptime | cut -d. -f1; }
+
+imya() {   # $1 — pid: имя программы, у интерпретаторов — с именем скрипта
+  c=$(cat /proc/$1/comm 2> /dev/null) || return 1
+  case "$c" in
+    python*|node|sh|bash|dash|perl|ruby)
+      a=$(tr '\0' '\n' < /proc/$1/cmdline 2> /dev/null | sed -n '2,4p' | grep -v '^-' | head -n 1)
+      b=${a##*/}
+      case "$b" in ''|*[!A-Za-z0-9._-]*) ;; *) c="$c:$b" ;; esac ;;
+  esac
+  printf '%s' "$c"
+}
+
+snimok() {   # pid utime+stime rss_kB nachalo(tiki) ppid
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}
+    s=$(cat "$d/stat" 2> /dev/null) || continue
+    s=${s##*) }                                   # после «(имя) »: состояние, ppid, …
+    set -- $s
+    ppid=$2; t=$(( ${12} + ${13} )); nach=${20}; rss=$(( ${22} * 4 ))
+    echo "$p $t $rss $nach $ppid"
+  done
+}
+
+[ -r /proc/uptime ] || { echo "Нет /proc — запусти в Termux или в Ubuntu шлема."; exit 1; }
+A=$(snimok); U0=$(up)
+sleep "$SEK"
+B=$(snimok); U1=$(up)
+SEJCHAS=$U1
+
+echo "=== Шлем: работает без перезагрузки $(( SEJCHAS / 3600 )) ч $(( SEJCHAS % 3600 / 60 )) мин ==="
+if [ -r /proc/meminfo ]; then
+  awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} /^SwapTotal/{st=$2} /^SwapFree/{sf=$2}
+       END{printf "Память: свободно %.1f из %.1f ГБ", a/1048576, t/1048576;
+           if (st>0) printf "; подкачка занята %.1f ГБ", (st-sf)/1048576; print ""}' /proc/meminfo
+fi
+[ -r /proc/loadavg ] && echo "Нагрузка (1/5/15 мин): $(cut -d' ' -f1-3 /proc/loadavg)"
+T=
+for z in /sys/class/thermal/thermal_zone*/temp /sys/class/power_supply/battery/temp; do
+  v=$(cat "$z" 2> /dev/null) || continue
+  case "$v" in ''|*[!0-9]*) continue ;; esac
+  case "$z" in *battery*) v=$(( v * 100 )) ;; esac          # батарея — в десятых градуса
+  [ "$v" -gt 1000 ] && [ -z "$T" -o "$v" -gt "${T:-0}" ] && T=$v
+done
+[ -n "$T" ] && echo "Температура (самая горячая, что видно): $(( T / 1000 )) °C"
+
+# имена всех живых — один раз
+IM=$(echo "$B" | while read -r p t rss nach pp; do n=$(imya "$p") && echo "$p $n"; done)
+
+echo "$A" > /tmp/.nagr.a; echo "$B" > /tmp/.nagr.b; echo "$IM" > /tmp/.nagr.i
+awk -v sek="$SEK" -v hz=$HZ -v now="$SEJCHAS" -v dt=$((U1 - U0)) '
+  FILENAME ~ /\.a$/ { t0[$1] = $2; next }
+  FILENAME ~ /\.i$/ { n[$1] = $2; next }
+  {
+    p = $1; if (!(p in n)) next
+    nm = n[p]
+    d = (p in t0) ? $2 - t0[p] : 0
+    cpu = (dt > 0 ? d / hz / dt * 100 : d / hz / sek * 100)
+    vozr = now - $4 / hz
+    k[nm]++; mem[nm] += $3; pr[nm] += cpu
+    if (vozr > star[nm]) star[nm] = vozr
+    if (!(nm in mlad) || vozr < mlad[nm]) mlad[nm] = vozr
+    vsego_mem += $3; vsego_cpu += cpu
+  }
+  function vremya(s) { return s >= 3600 ? sprintf("%d ч %02d мин", s / 3600, s % 3600 / 60) : sprintf("%d мин", s / 60) }
+  END {
+    printf "Всего у Termux/Ubuntu: память %.0f МБ, процессор сейчас %.0f %% (100 %% — одно ядро)\n", vsego_mem / 1024, vsego_cpu > "/dev/stderr"
+    for (x in k) printf "%s\t%d\t%.0f\t%.0f\t%s\t%s\n", x, k[x], mem[x] / 1024, pr[x], vremya(star[x]), vremya(mlad[x])
+  }' /tmp/.nagr.a /tmp/.nagr.i /tmp/.nagr.b 2>&1 > /tmp/.nagr.t
+echo
+echo "программа                  штук  память   проц.  живёт (старшая / младшая)"
+sort -t "$(printf '\t')" -k4,4nr -k3,3nr /tmp/.nagr.t | awk -F '\t' '$3 > 0' | head -n 15 |
+  awk -F '\t' '{ printf "%-26s %4s %5s МБ %5s %%  %s / %s\n", $1, $2, $3, $4, $5, $6 }'
+
+# лишние копии того, что должно быть одно
+echo
+LISHN=
+for x in bash:plus python3:ushi python3:golos python3:obzor python3:vedushchiy python3:donaty python3:zriteli python3:raciya ffmpeg cloudflared; do
+  c=$(awk -v x="$x" '$2 == x' /tmp/.nagr.i | wc -l)
+  [ "$c" -gt 1 ] && LISHN="$LISHN $x×$c"
+done
+CL=$(awk '$2 == "node:claude" || $2 == "claude"' /tmp/.nagr.i | wc -l)
+[ "$CL" -gt 3 ] && LISHN="$LISHN claude×$CL"
+ZOMBI=$(for d in /proc/[0-9]*; do s=$(cat "$d/stat" 2> /dev/null) || continue; s=${s##*) }; [ "${s%% *}" = Z ] && echo z; done | wc -l)
+[ "$ZOMBI" -gt 0 ] && LISHN="$LISHN зомби×$ZOMBI"
+if command -v tmux > /dev/null 2>&1; then
+  TS=$(tmux ls 2> /dev/null | wc -l)
+  [ "$TS" -gt 0 ] && echo "Сессий tmux: $TS ($(tmux ls -F '#S' 2> /dev/null | tr '\n' ' '))"
+fi
+if [ -n "$LISHN" ]; then
+  echo "ЛИШНИЕ КОПИИ:$LISHN"
+  echo "(claude — это Плюс, его помощники и разовые автопросмотр/соведущий; больше 3 сразу — много)"
+else
+  echo "Лишних копий не видно: всё, что должно быть одно, — одно."
+fi
+rm -f /tmp/.nagr.a /tmp/.nagr.b /tmp/.nagr.i /tmp/.nagr.t
