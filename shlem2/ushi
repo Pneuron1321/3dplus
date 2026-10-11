@@ -27,6 +27,8 @@ import subprocess
 import sys
 import threading
 import time
+import queue
+import urllib.parse
 import urllib.request
 
 EAR = os.environ.get('USHI_EAR', 'http://localhost:8766/ear')   # приложение 2 (1.0 — 8765)
@@ -793,6 +795,65 @@ def sobytie_chata(tags, tekst, now=None):
     return True
 
 
+# ---------- чат в кадре эфира (2.3.4) ----------
+CHAT_EKRAN = EAR.rsplit('/ear', 1)[0] + '/chat/upr'
+
+
+class EkranChata:
+    """Чат — и в кадр эфира (приложение 2.3.4 рисует его справа, между Плюсом и камерой): каждое
+    сообщение, удалённое модератором, бан и очистка — сразу, своим потоком с очередью (чат не ждёт
+    приложение). Нет приложения или оно старое — молча."""
+    q = queue.Queue(maxsize=200)
+    potok = None
+    lock = threading.Lock()
+
+    @classmethod
+    def poslat(cls, **d):
+        with cls.lock:
+            if cls.potok is None:
+                cls.potok = threading.Thread(target=cls.run, daemon=True)
+                cls.potok.start()
+        try:
+            cls.q.put_nowait(d)
+        except queue.Full:
+            pass
+
+    @classmethod
+    def run(cls):
+        while True:
+            d = cls.q.get()
+            try:
+                urllib.request.urlopen(CHAT_EKRAN + '?' + urllib.parse.urlencode(d), timeout=2).read()
+            except Exception:
+                pass
+
+
+def v_kadr(tags, login, kto, tekst):
+    """Сообщение чата — в кадр: «/me» без служебных знаков; остальное чистит приложение."""
+    if tekst.startswith('\x01ACTION '):
+        tekst = tekst[8:].rstrip('\x01')
+    tekst = re.sub(r'[\x00-\x1f\x7f]', ' ', tekst).strip()
+    if tekst:
+        EkranChata.poslat(kto=kto, login=login, tekst=tekst[:300],
+                          cvet=tags.get('color', ''), id=tags.get('id', ''))
+
+
+def chistka_chata(line):
+    """Модератор удалил сообщение (CLEARMSG), забанил или дал тайм-аут (CLEARCHAT :ник) или
+    очистил чат (CLEARCHAT без ника) — убрать и из кадра. True — строка разобрана."""
+    m = re.match(r'@(\S+) :tmi\.twitch\.tv CLEARMSG #\w+', line)
+    if m:
+        t = dict(x.split('=', 1) for x in m.group(1).split(';') if '=' in x)
+        if t.get('target-msg-id'):
+            EkranChata.poslat(ubrat=t['target-msg-id'])
+        return True
+    m = re.match(r'(?:@\S+ )?:tmi\.twitch\.tv CLEARCHAT #\w+(?: :(\w+))?$', line)
+    if m:
+        EkranChata.poslat(**({'ubrat_kto': m.group(1)} if m.group(1) else {'ochistit': '1'}))
+        return True
+    return False
+
+
 class Chat(threading.Thread):
     """Чат Twitch анонимно (только чтение, без ключа):
     всё — в /tmp/chat.log (chat покажет). Плюсу —
@@ -845,7 +906,7 @@ class Chat(threading.Thread):
         f = s.makefile('r', encoding='utf-8',
                        errors='replace', newline='\r\n')
         s.sendall(('PASS SCHMOOPIIE\r\nNICK justinfan%d'
-                   '\r\nCAP REQ :twitch.tv/tags twitch.tv/membership'
+                   '\r\nCAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership'
                    '\r\nJOIN #%s\r\n' % (
                        int(time.time()) % 90000 + 10000,
                        k)).encode())
@@ -866,6 +927,9 @@ class Chat(threading.Thread):
                 kto = tags.get('display-name') or m.group(2)
                 self.prishlo(kto, m.group(3))
                 donat_iz_chata(tags, kto, m.group(3))
+                v_kadr(tags, m.group(2), kto, m.group(3))
+            elif chistka_chata(line):
+                pass
             else:
                 u = re.match(r'@(\S+) :tmi\.twitch\.tv USERNOTICE '
                              r'#\w+(?: :(.*))?', line)
@@ -884,6 +948,8 @@ class Chat(threading.Thread):
         # чужие слова — обезвредить (как chuzhoe в
         # dezhurnyy): без управляющих знаков и переносов,
         # коротко, в «ёлочках» — граница чужой речи видна
+        if tekst.startswith('\x01ACTION '):       # «/me машет»
+            tekst = tekst[8:].rstrip('\x01')
         tekst = ' '.join(re.sub(r'[\x00-\x1f\x7f]', ' ',
                                 tekst).split())
         if len(tekst) > 200:
