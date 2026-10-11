@@ -52,8 +52,10 @@ TEMP = os.environ.get('GOLOS_TEMP', '+15%')
 BYSTREE = os.environ.get('GOLOS_BYSTREE', '+44%')
 KESH = os.environ.get('GOLOS_KESH', '/root/.cache/golos')   # короткие фразы — готовым звуком
 POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')      # последний ответ — «плюс плюс повтори»
-# синтез не вышел (нет сети) — Ава говорит это из кэша, а не молчит (не чаще раза в минуту)
-BEZ_SETI = 'Голос без сети. Ответ — в окне.'
+# синтез не вышел и со второй попытки (нет сети) — Ава говорит это из кэша, а не молчит (не чаще
+# раза в минуту). Решение Александра 11.10: одно слово «Четыре» — пропало, значит, голос снова есть.
+BEZ_SETI = 'Четыре.'
+PUSTO = ''                # кусок без звука: в тексте нечего сказать (одни знаки, смайлы)
 ZARANEE = ('Не расслышала.', 'Теперь в ухо.', 'Теперь вслух.', 'Сжимаю контекст.', 'Рация.', 'Окно.',
            'Сейчас посмотрю.', 'Секунду.', 'Готово.', BEZ_SETI, 'Ещё нечего повторить.')
 PAUZA_MAKS = 200          # с: пауза дольше — прерванное устарело, не договариваем
@@ -214,30 +216,44 @@ class Sintez:
         self.exe = shutil.which('edge-tts')
 
     def __call__(self, tekst, temp, put):
+        """True — звук готов. None — сказать нечего: edge-tts не вернул звука (одни знаки, смайлы),
+        сеть ни при чём. False — не вышел и со второй попытки (11.10: «голос без сети» звучал перед
+        нормальным ответом — сбой одного куска при живой сети; теперь он пробуется ещё раз)."""
         tmp = put + '.tmp'
-        try:
-            if self.mod:
-                async def go():
-                    c = self.mod.Communicate(tekst, VOICE, rate=temp)
-                    with open(tmp, 'wb') as f:
-                        async for ch in c.stream():
-                            if ch['type'] == 'audio':
-                                f.write(ch['data'])
-                self.asyncio.run(go())
-            elif self.exe:
-                subprocess.run([self.exe, '--voice', VOICE, '--rate=' + temp, '--text', tekst,
-                                '--write-media', tmp], stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=30)
-            if os.path.getsize(tmp) > 0:
-                os.replace(tmp, put)
-                return True
-        except Exception as e:
-            log('синтез не вышел:', type(e).__name__, str(e)[:120])
+        for popytka in (1, 2):
+            try:
+                if self.mod:
+                    async def go():
+                        c = self.mod.Communicate(tekst, VOICE, rate=temp)
+                        with open(tmp, 'wb') as f:
+                            async for ch in c.stream():
+                                if ch['type'] == 'audio':
+                                    f.write(ch['data'])
+                    self.asyncio.run(go())
+                elif self.exe:
+                    subprocess.run([self.exe, '--voice', VOICE, '--rate=' + temp, '--text', tekst,
+                                    '--write-media', tmp], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, timeout=30)
+                if os.path.getsize(tmp) > 0:
+                    os.replace(tmp, put)
+                    return True
+            except Exception as e:
+                if type(e).__name__ == 'NoAudioReceived':
+                    log('нечего сказать: edge-tts не вернул звука')
+                    self.ubrat(tmp)
+                    return None
+                log('синтез не вышел (попытка %d):' % popytka, type(e).__name__, str(e)[:120])
+            if popytka == 1:
+                time.sleep(0.3)
+        self.ubrat(tmp)
+        return False
+
+    @staticmethod
+    def ubrat(tmp):
         try:
             os.remove(tmp)
         except OSError:
             pass
-        return False
 
 
 # ---------- проигрыватели ----------
@@ -367,7 +383,7 @@ class Kusok:
         self.tekst, self.uid, self.t, self.pervyy = tekst, uid, t, pervyy
         self.dosluh = dosluh      # последний кусок ответа: доиграл — уши слушают ещё секунду
         self.bystro = False
-        self.mp3 = {}             # темп → путь, или False — не вышел
+        self.mp3 = {}             # темп → путь, False — не вышел, PUSTO — сказать нечего
 
     @property
     def temp(self):
@@ -391,7 +407,7 @@ class Golos:
         self.rezhim = self.chitat_rezhim()
         self.skazano = []          # сказанное в этом ходе: вступление не повторять хуком Stop
         self.pozzhe = []           # вступления, которых ещё нет в журнале: (когда, попытка, raw)
-        self.bez_seti_t = 0.0      # когда последний раз говорили «голос без сети»
+        self.bez_seti_t = 0.0      # когда последний раз говорили «Четыре» (голоса нет)
         self.zhdu_dosluh = False   # доиграл ответ: замолчит совсем — уши слушают секунду
 
     # --- приём ---
@@ -555,7 +571,7 @@ class Golos:
                 return
             igrok, self.igrok = self.igrok, None
             if getattr(igrok, 'vne_ocheredi', False):
-                return                     # «голос без сети» — не кусок очереди
+                return                     # «Четыре» (голоса нет) — не кусок очереди
             with self.cv:
                 k = self.q[0] if self.q else None
             if end == 'done' or k is None:
@@ -585,9 +601,11 @@ class Golos:
             put = k.mp3.get(k.temp)
         if put is None:
             return                         # ещё готовится
-        if put is False:
+        if put is False or put == PUSTO:
             self.vybrosit(lambda x: x is k)
-            self.bez_seti()
+            self.zhdu_dosluh = self.zhdu_dosluh or k.dosluh
+            if put is False:
+                self.bez_seti()
             return
         if k.pervyy:
             metka('zvuk', k.uid, self.rezhim)
@@ -617,7 +635,7 @@ class Golos:
             t0 = time.time()
             ok = self.gotovyy(k.tekst, temp, put)
             with self.cv:
-                k.mp3[temp] = put if ok else False
+                k.mp3[temp] = put if ok else (PUSTO if ok is None else False)
                 if k not in self.q and ok:
                     try:
                         os.remove(put)
@@ -629,7 +647,9 @@ class Golos:
 
     def gotovyy(self, tekst, temp, put):
         """Синтез с кэшем: короткая фраза, уже сказанная раньше, берётся
-        готовым файлом — без похода в сеть (сотни мс)."""
+        готовым файлом — без похода в сеть (сотни мс). None — сказать нечего."""
+        if not re.search(r'\w', tekst):
+            return None                    # одни знаки и смайлы: edge-tts всё равно промолчит
         if len(tekst) > 80:
             return self.sintez(tekst, temp, put)
         f = kesh(tekst, temp)
@@ -639,8 +659,9 @@ class Golos:
             return True
         except OSError:
             pass
-        if not self.sintez(tekst, temp, put):
-            return False
+        ok = self.sintez(tekst, temp, put)
+        if not ok:
+            return ok
         try:
             os.makedirs(KESH, exist_ok=True)
             shutil.copyfile(put, f + '.tmp')
@@ -653,7 +674,7 @@ class Golos:
         return True
 
     def bez_seti(self):
-        """Синтез не вышел: речь не умирает молча — «голос без сети» из кэша."""
+        """Синтез не вышел и со второй попытки: речь не умирает молча — «Четыре» из кэша."""
         if time.time() - self.bez_seti_t < 60 or not os.path.exists(kesh(BEZ_SETI, TEMP)):
             return
         self.bez_seti_t = time.time()
@@ -663,7 +684,7 @@ class Golos:
             shutil.copyfile(kesh(BEZ_SETI, TEMP), put)
         except OSError:
             return
-        log('синтез не вышел — сказала «голос без сети»')
+        log('синтез не вышел — сказала «Четыре»')
         self.igrok = self.Most(put, 'uho') if self.rezhim == 'uho' else self.Termux(put)
         self.igrok.vne_ocheredi = True
 
