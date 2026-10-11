@@ -12,6 +12,8 @@
 #   kamera vplotnuyu | otstup  — окно вплотную к углу / с отступом от края
 #   kamera krupno              — камера во весь кадр (перерыв, разговор с чатом)
 #   kamera skryt               — убрать окно (телефон остаётся подключён)
+#   kamera snimaet vkl | vykl  — Плюс снимает тебя: поднимает фиолетовый iPhone, на окне — видоискатель
+#                                и «● REC» (2.3.5; только пока окно камеры в правом нижнем углу)
 U=${KAMERA_URL:-http://localhost:8766}
 
 molchit() { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
@@ -102,6 +104,24 @@ print(round(min(0.5, max(0.1, d)), 4))' "$1" "$2") || exit 1
     k=0; [ "$1" = otstup ] && k=1
     j=$(curl -s --max-time 5 "$U/kamera/vid?kray=$k") || molchit
     skazat "$j" ;;
+  snimaet|telefon)
+    case "$2" in vkl|da|1|'') t=1 ;; vykl|net|0) t=0 ;; *) echo "kamera snimaet vkl | kamera snimaet vykl"; exit 1 ;; esac
+    j=$(curl -s --max-time 5 "$U/nalet/upr?telefon=$t") || molchit
+    printf '%s' "$j" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Камера: непонятный ответ приложения."); sys.exit(1)
+if "telefon" not in d:
+    print("Это приложение ещё не умеет: нужна версия 2.3.5."); sys.exit(1)
+if not d["telefon"]:
+    print("Плюс опустил телефон: в эфире без съёмки.")
+elif d.get("snimaet"):
+    print("Плюс снимает тебя: телефон в руке, на окне камеры — видоискатель и REC.")
+else:
+    print("Плюс будет снимать, когда окно камеры видно в правом нижнем углу (kamera ugol pn) и идёт эфир.")
+' ;;
   *)
-    echo "kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera krupno; kamera skryt." ;;
+    echo "kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera krupno; kamera skryt; kamera snimaet vkl|vykl." ;;
 esac
