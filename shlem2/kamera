@@ -7,7 +7,9 @@
 #   kamera svyaz               — подключить айфон: на 2 минуты страница plus.local:8770
 #                                («Добавить в Moblin» или Larix — приложение само знает адрес с ключом)
 #   kamera ugol [pn|ln|pv|lv] [0.25] — окно в углу: справа/слева, внизу/вверху; доля ширины 0.1–0.5
-#   kamera bolshe | menshe     — окно больше / меньше
+#   kamera bolshe | menshe     — окно больше / меньше (на 0.05 ширины); kamera bolshe 15 — на 15 %
+#   kamera povorot 90|180|270|0 — повернуть картинку по часовой (айфон вертикально, поток боком)
+#   kamera vplotnuyu | otstup  — окно вплотную к углу / с отступом от края
 #   kamera krupno              — камера во весь кадр (перерыв, разговор с чатом)
 #   kamera skryt               — убрать окно (телефон остаётся подключён)
 U=${KAMERA_URL:-http://localhost:8766}
@@ -24,8 +26,12 @@ except ValueError:
 s, o = d.get("state"), d.get("oshibka") or ""
 g = d.get("gde") or "pn"
 mesto = {"krupno": "во весь кадр", "skryt": "окно скрыто"}.get(d.get("vid"),
-    "угол %s %s, %d %%" % ("слева" if g[0] == "l" else "справа", "внизу" if g[1] == "n" else "вверху",
-                          round(float(d.get("dolya") or 0.25) * 100)))
+    "угол %s %s, %s %%" % ("слева" if g[0] == "l" else "справа", "внизу" if g[1] == "n" else "вверху",
+                          "%g" % round(float(d.get("dolya") or 0.25) * 100 + 1e-6, 1)))
+if d.get("povorot"):
+    mesto += ", повёрнута на %s° по часовой" % d["povorot"]
+if d.get("vplotnuyu"):
+    mesto += ", вплотную к углу"
 if s == "idyot":
     gde = "в эфире: " + mesto if d.get("v_efire") else "появится в эфире, когда он начнётся (" + mesto + ")"
     print("Камера идёт: %s, %s к/с, %s кбит/с; %s." % (d.get("razmer", "").replace("x", "×"), d.get("fps"), d.get("kbps"), gde))
@@ -74,13 +80,28 @@ print("На айфоне в Safari открой %s и нажми «Добави�
     j=$(curl -s --max-time 5 "$U/kamera/vid?$q") || molchit
     skazat "$j" ;;
   bolshe|menshe)
+    case "$2" in *[!0-9.]*) echo "kamera bolshe 15 — на 15 % больше (число процентов)."; exit 1 ;; esac
     j=$(curl -s --max-time 5 "$U/kamera") || molchit
     r=$(printf '%s' "$j" | python3 -c '
 import json, sys
 d = float(json.load(sys.stdin).get("dolya") or 0.25)
-print(round(min(0.5, max(0.1, d + (0.05 if sys.argv[1] == "bolshe" else -0.05))), 2))' "$1") || exit 1
+b = sys.argv[1] == "bolshe"
+if sys.argv[2]:                                   # на N процентов
+    p = float(sys.argv[2]) / 100
+    d = d * (1 + p) if b else d / (1 + p)
+else:
+    d = d + (0.05 if b else -0.05)
+print(round(min(0.5, max(0.1, d)), 4))' "$1" "$2") || exit 1
     j=$(curl -s --max-time 5 "$U/kamera/vid?v=ugol&r=$r") || molchit
     skazat "$j" ;;
+  povorot)
+    case "$2" in 0|90|180|270) ;; *) echo "kamera povorot 90 — по часовой (180, 270; 0 — как было)."; exit 1 ;; esac
+    j=$(curl -s --max-time 5 "$U/kamera/vid?pov=$2") || molchit
+    skazat "$j" ;;
+  vplotnuyu|otstup)
+    k=0; [ "$1" = otstup ] && k=1
+    j=$(curl -s --max-time 5 "$U/kamera/vid?kray=$k") || molchit
+    skazat "$j" ;;
   *)
-    echo "kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera bolshe|menshe; kamera krupno; kamera skryt." ;;
+    echo "kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera krupno; kamera skryt." ;;
 esac
