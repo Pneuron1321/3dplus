@@ -12,8 +12,8 @@
 #   kamera vplotnuyu | otstup  — окно вплотную к углу / с отступом от края
 #   kamera krupno              — камера во весь кадр (перерыв, разговор с чатом)
 #   kamera skryt               — убрать окно (телефон остаётся подключён)
-#   kamera snimaet vkl | vykl  — Плюс снимает тебя: поднимает фиолетовый iPhone, на окне — видоискатель
-#                                и «● REC» (2.3.5; только пока окно камеры в правом нижнем углу)
+#   kamera snimaet vkl | vykl  — Плюс снимает тебя: держит перед собой двумя руками фиолетовый iPhone,
+#                                пока камера в эфире (2.3.7)
 U=${KAMERA_URL:-http://localhost:8766}
 
 molchit() { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
@@ -118,9 +118,9 @@ if "telefon" not in d:
 if not d["telefon"]:
     print("Плюс опустил телефон: в эфире без съёмки.")
 elif d.get("snimaet"):
-    print("Плюс снимает тебя: телефон в руке, на окне камеры — видоискатель и REC.")
+    print("Плюс снимает тебя: держит телефон перед собой двумя руками.")
 else:
-    print("Плюс будет снимать, когда окно камеры видно в правом нижнем углу (kamera ugol pn) и идёт эфир.")
+    print("Плюс будет снимать, когда камера включена и идёт эфир.")
 ' ;;
   *)
     echo "kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera krupno; kamera skryt; kamera snimaet vkl|vykl." ;;
