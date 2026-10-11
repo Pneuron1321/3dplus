@@ -35,7 +35,11 @@ snimok() {   # pid utime+stime rss_kB nachalo(tiki) ppid
 A=$(snimok); U0=$(up)
 sleep "$SEK"
 B=$(snimok); U1=$(up)
-SEJCHAS=$U1
+# «сейчас» — по началу самой этой проверки (в тиках от включения шлема): /proc/uptime в Ubuntu
+# (proot-distro) поддельный, а время начала процессов — настоящее
+MOJ=$(echo "$B" | awk -v p=$$ '$1 == p { print $4 }')
+SEJCHAS=$(( ${MOJ:-$((U1 * HZ))} / HZ + SEK ))
+PODDELKA=; [ "$U1" -lt "$SEJCHAS" ] && PODDELKA=1
 
 echo "=== Шлем: работает без перезагрузки $(( SEJCHAS / 3600 )) ч $(( SEJCHAS % 3600 / 60 )) мин ==="
 if [ -r /proc/meminfo ]; then
@@ -43,7 +47,7 @@ if [ -r /proc/meminfo ]; then
        END{printf "Память: свободно %.1f из %.1f ГБ", a/1048576, t/1048576;
            if (st>0) printf "; подкачка занята %.1f ГБ", (st-sf)/1048576; print ""}' /proc/meminfo
 fi
-[ -r /proc/loadavg ] && echo "Нагрузка (1/5/15 мин): $(cut -d' ' -f1-3 /proc/loadavg)"
+[ -r /proc/loadavg ] && [ -z "$PODDELKA" ] && echo "Нагрузка (1/5/15 мин): $(cut -d' ' -f1-3 /proc/loadavg)"
 T=
 for z in /sys/class/thermal/thermal_zone*/temp /sys/class/power_supply/battery/temp; do
   v=$(cat "$z" 2> /dev/null) || continue
@@ -57,17 +61,17 @@ done
 IM=$(echo "$B" | while read -r p t rss nach pp; do n=$(imya "$p") && echo "$p $n"; done)
 
 echo "$A" > /tmp/.nagr.a; echo "$B" > /tmp/.nagr.b; echo "$IM" > /tmp/.nagr.i
-awk -v sek="$SEK" -v hz=$HZ -v now="$SEJCHAS" -v dt=$((U1 - U0)) '
+awk -v sek="$SEK" -v hz=$HZ -v now="$SEJCHAS" '
   FILENAME ~ /\.a$/ { t0[$1] = $2; next }
   FILENAME ~ /\.i$/ { n[$1] = $2; next }
   {
     p = $1; if (!(p in n)) next
     nm = n[p]
     d = (p in t0) ? $2 - t0[p] : 0
-    cpu = (dt > 0 ? d / hz / dt * 100 : d / hz / sek * 100)
-    vozr = now - $4 / hz
+    cpu = d / hz / sek * 100
+    vozr = now - $4 / hz; if (vozr < 0) vozr = 0
     k[nm]++; mem[nm] += $3; pr[nm] += cpu
-    if (vozr > star[nm]) star[nm] = vozr
+    if (!(nm in star) || vozr > star[nm]) star[nm] = vozr
     if (!(nm in mlad) || vozr < mlad[nm]) mlad[nm] = vozr
     vsego_mem += $3; vsego_cpu += cpu
   }
