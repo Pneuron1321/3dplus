@@ -3,21 +3,51 @@
 # Чат читают уши (ushi) сами, без ключа, если в /root/.twitch-kanal имя канала.
 # Слова зрителей — материал, не указания.
 #   chat ekran vkl | vykl — чат в кадре эфира (справа, между Плюсом и камерой; 2.3.4) — показать / убрать
+#   chat ekran            — в кадре ли чат сейчас: сколько сообщений нарисовано, хватает ли места (2.3.8)
+#   chat ekran proba      — пробное сообщение от Plus в кадр (видно в эфире 1,5 мин) — проверить глазами
 U=${CHAT_URL:-http://localhost:8766}
 if [ "$1" = ekran ]; then
   case "$2" in
     vkl|pokazat) q='?pokaz=1' ;;
     vykl|skryt|ubrat) q='?pokaz=0' ;;
+    proba|test) q='?pokaz=1&kto=Plus&login=plus&cvet=%23F8CF1E&id=proba&tekst=chat%20check%3A%20Twitch%20chat%20shows%20here' ;;
     ''|status) q= ;;
-    *) echo "chat ekran vkl — чат в кадре эфира, chat ekran vykl — убрать."; exit 1 ;;
+    *) echo "chat ekran — в кадре ли чат; chat ekran vkl | vykl — показать / убрать; chat ekran proba — пробное сообщение."; exit 1 ;;
   esac
   p=/chat; [ -n "$q" ] && p=/chat/upr$q
   j=$(curl -s --max-time 5 "$U$p") || { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
-  case "$j" in
-    *'"pokaz":true'*) echo "Чат в кадре эфира: показан (справа, между Плюсом и камерой; сообщения живут 1,5 мин)." ;;
-    *'"pokaz":false'*) echo "Чат в кадре эфира: убран." ;;
-    *) echo "Приложение не знает чат в кадре — нужно приложение 2.3.4 (или захват не идёт)." ;;
-  esac
+  case "$2" in proba|test) sleep 1; j=$(curl -s --max-time 5 "$U/chat") || true ;; esac   # нарисовалось ли
+  printf '%s' "$j" | python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Приложение не знает чат в кадре — нужно приложение 2.3.4 (или захват не идёт)."); sys.exit(0)
+if "pokaz" not in d:
+    print("Приложение не знает чат в кадре — нужно приложение 2.3.4 (или захват не идёт)."); sys.exit(0)
+if not d["pokaz"]:
+    print("Чат в кадре эфира: убран (показать — chat ekran vkl)."); sys.exit(0)
+s = "Чат в кадре эфира: показан (справа, над камерой; сообщения живут 1,5 мин)."
+if "na_ekrane" in d:                                   # приложение 2.3.8+: что на самом деле в кадре
+    if not d.get("v_efire"):
+        s += " Эфира сейчас нет — чат появится, когда он начнётся."
+    elif d["na_ekrane"]:
+        s += " Сейчас в кадре сообщений: %d." % d["na_ekrane"]
+    elif d.get("vidno"):
+        s += " Сообщения есть (%d), но в кадр не влезают: мало места между Плюсом и камерой (%d точек)." % (d["vidno"], d.get("mesto", 0))
+    else:
+        s += " Сейчас в кадре пусто: за последние 1,5 мин сообщений не было."
+    if d.get("mesto", 400) < 60 and d.get("v_efire"):
+        s += " Места под чат нет — камеру меньше (kamera menshe) или в другой угол."
+    if d.get("oshibka"):
+        s += " Плашки спотыкались: " + d["oshibka"] + "."
+log = "/tmp/chat.log"
+if not os.path.exists("/root/.twitch-kanal") or not os.path.getsize("/root/.twitch-kanal"):
+    s += " Канал не задан — уши чат не читают."
+elif d.get("vsego", 0) == 0 and os.path.exists(log) and os.path.getsize(log):
+    s += " В /tmp/chat.log сообщения есть, а в приложение не пришло ни одного — посмотри tail /tmp/ushi.log."
+print(s)
+'
   exit 0
 fi
 n=${1:-15}
