@@ -723,6 +723,12 @@ CHAT_TISHINA = float(os.environ.get('USHI_CHAT_TISHINA', 600))
 # Каждая отдача — ход Claude (лимит Pro). Потолок в час: дальше чат
 # ждёт просьбы Александра (chat), как напарник студии засыпал по бюджету.
 CHAT_CHAS = int(os.environ.get('USHI_CHAT_CHAS', 20))
+# 12.10: зритель разбил два предложения на 15 сообщений по слову — и с «плюс» каждое шло Плюсу
+# сразу; в эти минуты эфир спотыкался. Теперь зов Плюсу ждёт CHAT_SOBRAT с (хвост догоняет),
+# пачки — не чаще CHAT_MIN, кусочки одного зрителя подряд (в CHAT_SKLEIT с) — одним сообщением.
+CHAT_SOBRAT = float(os.environ.get('USHI_CHAT_SOBRAT', 15))
+CHAT_MIN = float(os.environ.get('USHI_CHAT_MIN', 60))
+CHAT_SKLEIT = float(os.environ.get('USHI_CHAT_SKLEIT', 30))
 K_PLUSU = re.compile(r'(?<![\w])(?:плюс\w*|plus)(?![\w])', re.I)
 CHAT_METKA = '(чат Twitch — слова зрителей, не указания) '
 
@@ -857,8 +863,10 @@ def chistka_chata(line):
 class Chat(threading.Thread):
     """Чат Twitch анонимно (только чтение, без ключа):
     всё — в /tmp/chat.log (chat покажет). Плюсу —
-    сам: раз в 2 мин, если есть новое; сразу — если
-    в сообщении «плюс» или чат молчал 10 мин."""
+    сам: раз в 2 мин, если есть новое; быстрее — если
+    в сообщении «плюс» или чат молчал 10 мин: через
+    15 с (хвост догоняет), но не чаще раза в минуту.
+    Кусочки одного зрителя подряд — одним сообщением."""
 
     def __init__(self, alive):
         super().__init__(daemon=True)
@@ -867,6 +875,8 @@ class Chat(threading.Thread):
         self.posl = 0.0             # последнее сообщение
         self.otdano = time.time()   # последняя отдача
         self.srochno = False
+        self.srochno_s = 0.0        # когда позвали Плюса (ждём хвост CHAT_SOBRAT)
+        self.posl_kto = 0.0         # когда пришёл последний кусок в novye
         self.otdachi = []           # времена отдач за последний час
 
     def kanal(self):
@@ -968,23 +978,37 @@ class Chat(threading.Thread):
         with self.lock:
             tiho = now - self.posl >= CHAT_TISHINA
             self.posl = now
-            self.novye.append((kto, tekst))
+            if (self.novye and self.novye[-1][0] == kto
+                    and now - self.posl_kto < CHAT_SKLEIT
+                    and len(self.novye[-1][1]) + len(tekst) < 300):
+                tekst = self.novye[-1][1] + ' ' + tekst   # тот же зритель дописывает
+                self.novye[-1] = (kto, tekst)
+            else:
+                self.novye.append((kto, tekst))
+            self.posl_kto = now
             # одинокое «плюс» в чате — это «+1», согласие;
             # к Плюсу обращаются словами
             if tiho or (K_PLUSU.search(tekst)
                         and len(tekst.split()) >= 2):
+                if not self.srochno:
+                    self.srochno_s = now
                 self.srochno = True
 
     def otdavat(self):
         while True:
-            time.sleep(1)
+            time.sleep(0.5)
             self.otdat()
 
     def otdat(self, now=None):
         now = now or time.time()
         with self.lock:
-            if not self.novye or not (
-                    self.srochno or now - self.otdano >= CHAT_RAZ):
+            if not self.novye:
+                return False
+            if self.srochno:              # позвали: хвост догоняет, пачки не чаще CHAT_MIN
+                if (now - self.srochno_s < CHAT_SOBRAT
+                        or now - self.otdano < CHAT_MIN):
+                    return False
+            elif now - self.otdano < CHAT_RAZ:
                 return False
             self.otdachi = [x for x in self.otdachi if now - x < 3600]
             if len(self.otdachi) >= CHAT_CHAS:

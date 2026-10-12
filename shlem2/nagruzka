@@ -122,6 +122,170 @@ print('(память в МБ: Termux — больше всего за 5 мин, 
 PY
   exit 0
 fi
+#   nagruzka demon   — чёрный ящик (запускает plus, второй не встанет): раз в 2 с, пока идёт эфир, —
+#                    кадры, потери и пропуски звука эфира и процессор Плюса и помощников; /tmp/nagruzka.log
+#   nagruzka sboi [часов] — где эфир спотыкался (по чёрному ящику) и что в эти секунды делал Плюс
+if [ "$1" = demon ] || [ "$1" = sboi ]; then
+  REZHIM=$1; shift
+  exec python3 - "nagruzka-$REZHIM" "$0" "${1:-4}" "${NAGRUZKA_URL:-http://localhost:8766}" <<'PY'
+import datetime as dt, fcntl, json, os, re, statistics, sys, time, urllib.request
+REZHIM, SKRIPT, CHASOV, URL = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
+ZHURNAL = os.environ.get('NAGRUZKA_LOG', '/tmp/nagruzka.log')
+SHAG = float(os.environ.get('NAGRUZKA_SHAG', 2))
+HZ = os.sysconf('SC_CLK_TCK')
+GRUPPY = ('claude', 'golos', 'ushi', 'obzor', 'vedushchiy', 'raciya')
+
+
+def gruppa(pid):
+    try:
+        c = open('/proc/%s/comm' % pid).read().strip()
+        a = open('/proc/%s/cmdline' % pid, 'rb').read().split(b'\0')
+    except OSError:
+        return None
+    imena = [c] + [os.path.basename(x.decode('utf-8', 'replace')) for x in a[:4]]
+    for g in GRUPPY:
+        if g in imena:
+            return g
+    return 'drugoe'
+
+
+def tiki():
+    out = {}
+    for d in os.listdir('/proc'):
+        if not d.isdigit():
+            continue
+        try:
+            st = open('/proc/%s/stat' % d).read()
+        except OSError:
+            continue
+        f = st[st.rfind(')') + 2:].split()
+        out[d] = int(f[11]) + int(f[12])
+    return out
+
+
+def efir():
+    try:
+        return json.loads(urllib.request.urlopen(URL + '/efir', timeout=1.5).read().decode())
+    except Exception:
+        return None
+
+
+def demon():
+    zamok = open('/tmp/nagruzka-demon.lock', 'w')
+    try:
+        fcntl.flock(zamok, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return                                    # чёрный ящик уже пишет
+    versiya = os.path.getmtime(SKRIPT) if os.path.exists(SKRIPT) else 0
+    imena, t0, e0, m0, posl = {}, tiki(), efir(), time.time(), 0.0
+    while True:
+        time.sleep(SHAG)
+        if os.path.exists(SKRIPT) and os.path.getmtime(SKRIPT) != versiya:
+            zamok.close()
+            os.execv('/bin/sh', ['sh', SKRIPT, 'demon'])          # обновили — новая версия
+        t1, e1, m1 = tiki(), efir(), time.time()
+        dt_ = max(0.5, m1 - m0)
+        cpu = dict.fromkeys(GRUPPY + ('drugoe',), 0.0)
+        for pid, t in t1.items():
+            if pid not in imena:
+                imena[pid] = gruppa(pid)
+            g = imena[pid]
+            if g and pid in t0:
+                cpu[g] += (t - t0[pid]) / HZ / dt_ * 100
+        for pid in list(imena):
+            if pid not in t1:
+                del imena[pid]
+        idet = e1 is not None and e1.get('state') == 'efir'
+        if idet or m1 - posl >= 30:
+            metki = []
+            try:
+                if os.listdir('/tmp/golos/q'):
+                    metki.append('говорит')
+            except OSError:
+                pass
+            if os.path.exists('/tmp/golos.pauza'):
+                metki.append('слушает')
+            if idet and e0 is not None and e0.get('state') == 'efir':
+                d = lambda k: max(0, int(e1.get(k) or 0) - int(e0.get(k) or 0))
+                ef = '%.1f\t%d\t%d\t%d\t%d' % (d('kadrov') / dt_, int(e1.get('kbps') or 0), d('drops'),
+                                              d('mic_propuski'), d('mic_sbrosy'))
+            else:
+                ef = 'нет\t\t\t\t'
+            stroka = '%s\t%s\t%s\t%s\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
+                                             '\t'.join('%.0f' % cpu[g] for g in GRUPPY + ('drugoe',)), ','.join(metki))
+            try:
+                if os.path.exists(ZHURNAL) and os.path.getsize(ZHURNAL) > 2_000_000:
+                    t = open(ZHURNAL).read()
+                    open(ZHURNAL, 'w').write(t[t.index('\n', len(t) // 2) + 1:])
+                open(ZHURNAL, 'a').write(stroka)
+            except OSError:
+                pass
+            posl = m1
+        t0, e0, m0 = t1, e1, m1
+
+
+def sboi():
+    seychas = dt.datetime.now()
+    zap = []
+    try:
+        linii = open(ZHURNAL, encoding='utf-8', errors='replace').read().splitlines()
+    except OSError:
+        print('Чёрного ящика ещё нет (/tmp/nagruzka.log): он пишет, пока идёт эфир, — после обновления и /exit.')
+        return
+    for l in linii:
+        p = l.split('\t')
+        if len(p) < 12 or p[1] == 'нет':
+            continue
+        try:
+            t = dt.datetime.strptime('%d.' % seychas.year + p[0], '%Y.%d.%m %H:%M:%S')
+        except ValueError:
+            continue
+        if t > seychas + dt.timedelta(days=1):
+            t = t.replace(year=seychas.year - 1)
+        if seychas - t > dt.timedelta(hours=CHASOV):
+            continue
+        fps, kbps, drops, mic, sbros = float(p[1]), int(p[2]), int(p[3]), int(p[4]), int(p[5])
+        cpu = dict(zip(GRUPPY + ('drugoe',), map(float, p[6:13])))
+        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else ''))
+    if not zap:
+        print('За %g ч эфира в чёрном ящике нет.' % CHASOV)
+        return
+    norma = statistics.median(z[1] for z in zap)
+    plohie = [z for z in zap if z[1] < norma * 0.8 or z[3] or z[4] or z[5]]
+    print('Эфир в чёрном ящике: %d мин, обычно %.0f кадров/с. Спотыкался %d раз из %d замеров (%.0f %%).' % (
+        len(zap) * SHAG / 60, norma, len(plohie), len(zap), 100 * len(plohie) / len(zap)))
+    def sred(nabor, g):
+        return sum(z[6][g] for z in nabor) / len(nabor) if nabor else 0
+    horoshie = [z for z in zap if z not in plohie]
+    print('Процессор в среднем, % одного ядра:   когда спотыкался   /   когда ровно')
+    for g in GRUPPY + ('drugoe',):
+        print('  %-11s %18.0f %15.0f' % (g, sred(plohie, g), sred(horoshie, g)))
+    for metka in ('говорит', 'слушает'):
+        a = sum(1 for z in plohie if metka in z[7]); b = sum(1 for z in horoshie if metka in z[7])
+        print('Плюс %s: в %.0f %% сбоев и в %.0f %% ровного времени' % (
+            {'говорит': 'говорит (голос)', 'слушает': 'слушает тебя («плюс плюс»)'}[metka],
+            100 * a / max(1, len(plohie)), 100 * b / max(1, len(horoshie))))
+    # сбои — отрезками
+    otrezki, cur = [], None
+    for z in plohie:
+        if cur and (z[0] - cur[1]).total_seconds() <= SHAG * 2.5:
+            cur[1] = z[0]; cur[2].append(z)
+        else:
+            cur = [z[0], z[0], [z]]; otrezki.append(cur)
+    if otrezki:
+        print('\nСамые длинные сбои:')
+        for a, b, zz in sorted(otrezki, key=lambda o: -len(o[2]))[:15]:
+            cl = max(z[6]['claude'] for z in zz)
+            go = max(z[6]['golos'] for z in zz)
+            met = sorted({m for z in zz for m in z[7].split(',') if m})
+            print('  %s–%s  кадров/с от %.0f, потерь %d, пропусков звука %d · claude до %.0f %%, golos до %.0f %%%s' % (
+                a.strftime('%H:%M:%S'), b.strftime('%H:%M:%S'), min(z[1] for z in zz), sum(z[3] for z in zz),
+                sum(z[4] + z[5] for z in zz), cl, go, (' · ' + ', '.join(met)) if met else ''))
+
+
+demon() if REZHIM == 'nagruzka-demon' else sboi()
+PY
+fi
 SEK=${NAGRUZKA_SEK:-3}
 HZ=100
 up() { cut -d' ' -f1 /proc/uptime | cut -d. -f1; }
@@ -205,7 +369,7 @@ sort -t "$(printf '\t')" -k4,4nr -k3,3nr /tmp/.nagr.t | awk -F '\t' '$3 > 0' | h
 # лишние копии того, что должно быть одно
 echo
 LISHN=
-for x in bash:plus python3:ushi python3:golos python3:obzor python3:vedushchiy python3:donaty python3:zriteli python3:raciya ffmpeg cloudflared; do
+for x in bash:plus python3:ushi python3:golos python3:obzor python3:vedushchiy python3:donaty python3:zriteli python3:raciya python3:nagruzka-demon ffmpeg cloudflared; do
   c=$(awk -v x="$x" '$2 == x' /tmp/.nagr.i | wc -l)
   [ "$c" -gt 1 ] && LISHN="$LISHN $x×$c"
 done
@@ -213,6 +377,9 @@ CL=$(awk '$2 == "node:claude" || $2 == "claude"' /tmp/.nagr.i | wc -l)
 [ "$CL" -gt 3 ] && LISHN="$LISHN claude×$CL"
 ZOMBI=$(for d in /proc/[0-9]*; do s=$(cat "$d/stat" 2> /dev/null) || continue; s=${s##*) }; [ "${s%% *}" = Z ] && echo z; done | wc -l)
 [ "$ZOMBI" -gt 0 ] && LISHN="$LISHN зомби×$ZOMBI"
+NI=$(for p in $(awk '$2 == "claude" || $2 == "node:claude" { print $1 }' /tmp/.nagr.i); do
+  s=$(cat /proc/$p/stat 2> /dev/null) || continue; s=${s##*) }; set -- $s; echo "${17}"; done | sort -n | tail -n 1)
+[ -n "$NI" ] && echo "Приоритет Плюса: nice $NI (10 — уступает игре и бриджу, 0 — наравне с ними)"
 if command -v tmux > /dev/null 2>&1; then
   TS=$(tmux ls 2> /dev/null | wc -l)
   [ "$TS" -gt 0 ] && echo "Сессий tmux: $TS ($(tmux ls -F '#S' 2> /dev/null | tr '\n' ' '))"

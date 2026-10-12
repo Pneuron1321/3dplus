@@ -10,6 +10,33 @@
 # Claude вышел — через 10 с поднимется снова: Enter — сразу, c — продолжить прошлый
 # разговор, q — закрыть всё, как раньше.
 export LANG=C.UTF-8
+# 12.10: эфир спотыкался, когда Александр говорил с Плюсом. Плюс и всё, что запускается отсюда
+# (Claude, уши, голос, помощники, чёрный ящик), уступают процессор игре и бриджу: приоритет ниже
+# обычного (nice 10; своё число — в /root/.plus-nice, 0 — как было). Ответ — на доли секунды позже.
+NICE=$(cat /root/.plus-nice 2> /dev/null)
+case "$NICE" in ''|*[!0-9]*) NICE=10 ;; esac
+python3 - "$$" "$NICE" << 'PY' 2> /dev/null
+import os, sys
+moy, n = int(sys.argv[1]), min(19, int(sys.argv[2]))
+os.setpriority(os.PRIO_PROCESS, moy, n)
+# уже запущенные (до обновления) Claude, tmux и помощники — тоже, каждым потоком
+SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'raciya', b'nagruzka'}
+for d in os.listdir('/proc'):
+    if not d.isdigit():
+        continue
+    try:
+        a = open('/proc/%s/cmdline' % d, 'rb').read().split(b'\0')[:3]
+        if not SVOI & {os.path.basename(x) for x in a}:
+            continue
+        for t in os.listdir('/proc/%s/task' % d):
+            try:
+                if os.getpriority(os.PRIO_PROCESS, int(t)) < n:
+                    os.setpriority(os.PRIO_PROCESS, int(t), n)
+            except OSError:
+                pass
+    except OSError:
+        pass
+PY
 CONT=; S=
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,6 +70,8 @@ while :; do
   setsid nohup /usr/local/bin/vedushchiy demon >> /tmp/vedushchiy.log 2>&1 < /dev/null &
   setsid nohup /usr/local/bin/donaty demon >> /tmp/donaty.log 2>&1 < /dev/null &
   setsid nohup /usr/local/bin/zriteli demon >> /tmp/zriteli.log 2>&1 < /dev/null &
+  # чёрный ящик: раз в 2 с — эфир (кадры, потери, звук) и процессор помощников (nagruzka sboi)
+  setsid nohup /usr/local/bin/nagruzka demon >> /tmp/nagruzka-demon.log 2>&1 < /dev/null &
   # Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
   # «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
   D=/root/plus
