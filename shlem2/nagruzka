@@ -5,6 +5,123 @@
 # ключи и адреса. Приложения Android (бридж, игра) отсюда не видно — только через adb с ноутбука.
 #   nagruzka        — сводка (меряет процессор 3 с)
 # Работает и в обычном Termux, и в Ubuntu (proot-distro login plus2).
+#   nagruzka zhurnal [часов] — что было по 5 минут (по умолчанию 4 ч): сообщений в чате, пачек
+#                    чата Плюсу, память Termux, свободно у шлема, приложение, просьбы системы отдать память
+if [ "$1" = zhurnal ]; then
+  python3 - "${2:-4}" "${NAGRUZKA_URL:-http://localhost:8766}" <<'PY'
+import datetime as dt, re, sys, urllib.request
+CHASOV, URL = float(sys.argv[1]), sys.argv[2]
+seychas = dt.datetime.now()
+nachalo = seychas - dt.timedelta(hours=CHASOV)
+b = {}                                          # «корзина» по 5 мин → что было
+
+
+def korz(t):
+    return t.replace(minute=t.minute - t.minute % 5, second=0, microsecond=0)
+
+
+def k(t):
+    return b.setdefault(korz(t), {'chat': 0, 'plusu': 0, 'termux': 0, 'svob': None, 'pril': 0, 'graf': 0,
+                                  'efir': '', 'sob': []})
+
+
+def stroki(put):
+    try:
+        return open(put, encoding='utf-8', errors='replace').read().splitlines()
+    except OSError:
+        return []
+
+
+def bez_daty(linii, rx):
+    """Журналы только со временем (ЧЧ:ММ): даты — с конца назад, через полночь — на день раньше."""
+    den, pred, out = seychas.date(), None, []
+    for l in reversed(linii):
+        m = re.match(rx, l)
+        if not m:
+            continue
+        hh, mm = int(m.group(1)), int(m.group(2))
+        t = dt.datetime.combine(den, dt.time(hh, mm))
+        if pred is not None and t > pred:
+            den -= dt.timedelta(days=1)
+            t -= dt.timedelta(days=1)
+        if t > seychas + dt.timedelta(minutes=1):
+            den -= dt.timedelta(days=1)
+            t -= dt.timedelta(days=1)
+        pred = t
+        out.append((t, l))
+    return out
+
+
+def s_datoy(l):
+    m = re.match(r'(\d\d)\.(\d\d) (\d\d):(\d\d):(\d\d) ', l)
+    if not m:
+        return None
+    d, mo, hh, mi, ss = map(int, m.groups())
+    t = dt.datetime(seychas.year, mo, d, hh, mi, ss)
+    return t if t <= seychas + dt.timedelta(days=1) else t.replace(year=seychas.year - 1)
+
+
+for t, l in bez_daty(stroki('/tmp/chat.log'), r'(\d\d):(\d\d) '):
+    k(t)['chat'] += 1
+for t, l in bez_daty(stroki('/tmp/ushi.log'), r'(\d\d):(\d\d):\d\d '):
+    if 'чат → Плюсу' in l:
+        k(t)['plusu'] += 1
+    elif 'потолок' in l:
+        k(t)['sob'].append('чат: потолок')
+    elif 'Traceback' in l or 'Error' in l:
+        k(t)['sob'].append('уши: ошибка')
+for l in stroki('/tmp/pamyat.log'):
+    t = s_datoy(l)
+    m = re.search(r'termux (\d+) МБ', l)
+    if t and m:
+        x = k(t); x['termux'] = max(x['termux'], int(m.group(1)))
+try:
+    pril = urllib.request.urlopen(URL + '/pamyat?n=2000', timeout=5).read().decode('utf-8', 'replace').splitlines()
+except Exception:
+    pril = []
+    print('(приложение 2 не ответило — его замера памяти не будет)')
+sdvig = dt.timedelta(0)                         # у Android и Ubuntu может быть разный часовой пояс
+posl = [t for t in map(s_datoy, pril) if t]
+if posl and abs(posl[-1] - seychas) > dt.timedelta(minutes=5):
+    chetv = dt.timedelta(minutes=15)
+    sdvig = round((posl[-1] - seychas) / chetv) * chetv
+for l in pril:
+    t = s_datoy(l)
+    if not t:
+        continue
+    x = k(t - sdvig)
+    m = re.search(r'свободно (\d+) МБ', l)
+    if m:
+        v = int(m.group(1)); x['svob'] = v if x['svob'] is None else min(x['svob'], v)
+    m = re.search(r'приложение (\d+) МБ', l)
+    if m:
+        x['pril'] = max(x['pril'], int(m.group(1)))
+    m = re.search(r'графика (\d+)', l)
+    if m:
+        x['graf'] = max(x['graf'], int(m.group(1)))
+    if 'эфир идёт' in l:
+        x['efir'] = 'да'
+    if ', МАЛО' in l and 'МАЛО' not in x['sob']:
+        x['sob'].append('МАЛО')
+    m = re.search(r'система просит память: (\w+)', l)
+    if m and m.group(1) != 'UI_HIDDEN':
+        x['sob'].append('просит ' + m.group(1))
+    if 'приложение запущено' in l:
+        x['sob'].append('приложение запущено заново')
+print('время   чат  Плюсу  Termux  свободно  прилож.(графика)  эфир  события')
+for t in sorted(b):
+    if t < korz(nachalo):
+        continue
+    x = b[t]
+    sob = sorted(set(x['sob']), key=x['sob'].index)
+    print('%s %4s %5s %6s %8s %8s(%4s)  %4s  %s' % (
+        t.strftime('%H:%M'), x['chat'] or '', x['plusu'] or '', '%d' % x['termux'] if x['termux'] else '',
+        '%d' % x['svob'] if x['svob'] is not None else '', '%d' % x['pril'] if x['pril'] else '',
+        '%d' % x['graf'] if x['graf'] else '', x['efir'], ', '.join(sob)))
+print('(память в МБ: Termux — больше всего за 5 мин, свободно — меньше всего)')
+PY
+  exit 0
+fi
 SEK=${NAGRUZKA_SEK:-3}
 HZ=100
 up() { cut -d' ' -f1 /proc/uptime | cut -d. -f1; }
