@@ -173,6 +173,11 @@ def efir_idyot():
     return jget('/efir').get('state') == 'efir'
 
 
+def tesno():
+    """Бридж говорит «тесно» (2.3.9: игра просела, эфир теряет кадры, шлем греется, чат кипит)."""
+    return bool(jget('/efir').get('tesno'))
+
+
 def plus_govorit():
     if jget('/say/status').get('govorit'):
         return True
@@ -308,6 +313,8 @@ def cikl():
         return 'выключен'
     if not efir_idyot():
         return 'нет эфира'
+    if tesno():
+        return 'тесно'                                        # эфиру тесно — соведущий ждёт, Haiku не зовём
     k = kniga()
     now = time.time()
     min_ = lambda t: (now - t) / MINUTA
@@ -434,7 +441,7 @@ def demon():
         except Exception as e:
             r = 'сбой: %s %s' % (type(e).__name__, str(e)[:120])
         log(r)
-        if r in ('жду тишины', 'бой') and povtorov < POVTOROV:
+        if r in ('жду тишины', 'бой', 'тесно') and povtorov < POVTOROV:
             povtorov += 1                                     # пауза не вышла — ещё раз скоро, не через 15 минут
             time.sleep(POVTOR * MINUTA)
             continue

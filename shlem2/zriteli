@@ -77,6 +77,11 @@ def efir_idyot():
     return jget('/efir').get('state') == 'efir'
 
 
+def tesno():
+    """Бридж говорит «тесно» (2.3.9) — приветствия подождут: имена копятся, скажем позже одной фразой."""
+    return bool(jget('/efir').get('tesno'))
+
+
 def plus_govorit():
     if jget('/say/status').get('govorit'):
         return True
@@ -282,7 +287,7 @@ class Zal:
         efir = efir_idyot()
         self.chislo(now, efir)
         skazano = ''
-        if efir and not tiho():
+        if efir and not tiho() and not tesno():
             pervyy = min(self.zhdut.values()) if self.zhdut else None
             if pervyy is not None and now - pervyy >= PACHKA * SEK and now - self.posl_privet >= RAZ_PRIVET * SEK \
                     and not plus_govorit() and not zvali_nedavno():

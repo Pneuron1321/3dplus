@@ -60,6 +60,14 @@ def efir_idyot():
         return False
 
 
+def tesno():
+    """Бридж говорит «тесно» (2.3.9: игра просела, эфир теряет кадры, шлем греется, чат кипит) — подождать."""
+    try:
+        return bool(json.loads(get('/efir').decode()).get('tesno'))
+    except Exception:
+        return False
+
+
 def kazhdye():
     """Раз в сколько минут смотреть: файла нет — по умолчанию (Александр 09.10: раз в 8 минут)."""
     try:
@@ -154,8 +162,12 @@ def demon():
             log('выключен — выхожу')
             return 0
         if time.time() >= sled and efir_idyot():
-            vzglyad()
-            sled = time.time() + n * SEK_V_MIN
+            if tesno():                                      # эфиру тесно — взгляд через минуту
+                log('тесно — автопросмотр подождёт')
+                sled = time.time() + 60
+            else:
+                vzglyad()
+                sled = time.time() + n * SEK_V_MIN
         time.sleep(min(30.0, max(0.2, SEK_V_MIN / 2)))
 
 

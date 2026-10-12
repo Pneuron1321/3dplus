@@ -161,6 +161,9 @@ def efir_skazat(U):
                       d.get('mic'), d.get('drops')))
         if d.get('mic_propuski') is not None:
             out.append('Голос: микропауз %s, сбросов %s (норма — 0).' % (d.get('mic_propuski'), d.get('mic_sbrosy', 0)))
+        if d.get('ekran_fps') is not None:             # 2.3.9: игра или эфир
+            out.append('Игра: %s кадров/с; плашки эфира: %s мс в секунду; глазам Плюса: %s кадра/с.'
+                       % (d.get('ekran_fps'), d.get('plashki_ms'), d.get('glaza_fps')))
     elif s == 'podklyuchayus':
         out.append('Эфир: подключаюсь к Twitch… ' + o)
     elif s == 'obryv':

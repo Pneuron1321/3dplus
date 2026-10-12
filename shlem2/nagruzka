@@ -205,14 +205,19 @@ def demon():
                 pass
             if os.path.exists('/tmp/golos.pauza'):
                 metki.append('слушает')
+            if e1 is not None and e1.get('tesno'):           # 2.3.9: бридж сказал «тесно»
+                metki.append('тесно')
             if idet and e0 is not None and e0.get('state') == 'efir':
                 d = lambda k: max(0, int(e1.get(k) or 0) - int(e0.get(k) or 0))
                 ef = '%.1f\t%d\t%d\t%d\t%d' % (d('kadrov') / dt_, int(e1.get('kbps') or 0), d('drops'),
                                               d('mic_propuski'), d('mic_sbrosy'))
             else:
                 ef = 'нет\t\t\t\t'
-            stroka = '%s\t%s\t%s\t%s\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
-                                             '\t'.join('%.0f' % cpu[g] for g in GRUPPY + ('drugoe',)), ','.join(metki))
+            # 2.3.9: игра или эфир — кадры экрана, мс загрузок плашек в секунду, кадры глаз (в конце строки:
+            # старые строки без них читаются как раньше)
+            ek = '\t'.join(str(e1.get(k, '')) for k in ('ekran_fps', 'plashki_ms', 'glaza_fps')) if idet else '\t\t'
+            stroka = '%s\t%s\t%s\t%s\t%s\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
+                                                 '\t'.join('%.0f' % cpu[g] for g in GRUPPY + ('drugoe',)), ','.join(metki), ek)
             try:
                 if os.path.exists(ZHURNAL) and os.path.getsize(ZHURNAL) > 2_000_000:
                     t = open(ZHURNAL).read()
@@ -246,7 +251,13 @@ def sboi():
             continue
         fps, kbps, drops, mic, sbros = float(p[1]), int(p[2]), int(p[3]), int(p[4]), int(p[5])
         cpu = dict(zip(GRUPPY + ('drugoe',), map(float, p[6:13])))
-        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else ''))
+
+        def chislo(i):
+            try:
+                return float(p[i])
+            except (IndexError, ValueError):
+                return None
+        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else '', chislo(14), chislo(15)))
     if not zap:
         print('За %g ч эфира в чёрном ящике нет.' % CHASOV)
         return
@@ -260,10 +271,25 @@ def sboi():
     print('Процессор в среднем, % одного ядра:   когда спотыкался   /   когда ровно')
     for g in GRUPPY + ('drugoe',):
         print('  %-11s %18.0f %15.0f' % (g, sred(plohie, g), sred(horoshie, g)))
-    for metka in ('говорит', 'слушает'):
+    ek = [z for z in zap if z[8] is not None]                 # 2.3.9: кадры экрана — сама игра
+    if ek:
+        norma_e = statistics.median(z[8] for z in ek)
+        pe = [z for z in plohie if z[8] is not None]
+        igra = [z for z in ek if z[8] < norma_e * 0.8]
+        print('Игра (кадры экрана): обычно %.0f/с; в сбоях эфира — %s; сама проседала %d раз из %d.' % (
+            norma_e, '%.0f/с' % (sum(z[8] for z in pe) / len(pe)) if pe else 'нет данных', len(igra), len(ek)))
+        pl = [z for z in ek if z[9] is not None]
+        if pl:
+            print('Плашки эфира: %.1f мс в секунду в среднем, в сбоях — %.1f мс.' % (
+                sum(z[9] for z in pl) / len(pl),
+                sum(z[9] for z in pe if z[9] is not None) / max(1, sum(1 for z in pe if z[9] is not None))))
+    for metka in ('говорит', 'слушает', 'тесно'):
         a = sum(1 for z in plohie if metka in z[7]); b = sum(1 for z in horoshie if metka in z[7])
-        print('Плюс %s: в %.0f %% сбоев и в %.0f %% ровного времени' % (
-            {'говорит': 'говорит (голос)', 'слушает': 'слушает тебя («плюс плюс»)'}[metka],
+        if metka == 'тесно' and not a and not b:
+            continue                                         # бридж до 2.3.9 «тесно» не говорит
+        print('%s: в %.0f %% сбоев и в %.0f %% ровного времени' % (
+            {'говорит': 'Плюс говорит (голос)', 'слушает': 'Плюс слушает тебя («плюс плюс»)',
+             'тесно': 'Бридж говорил «тесно»'}[metka],
             100 * a / max(1, len(plohie)), 100 * b / max(1, len(horoshie))))
     # сбои — отрезками
     otrezki, cur = [], None

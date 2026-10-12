@@ -332,9 +332,12 @@ def sostoyanie():
     for chto in ('efir', 'kamera'):
         try:
             with urllib.request.urlopen(EAR.rsplit('/ear', 1)[0] + '/' + chto, timeout=0.5) as r:
-                d[chto] = json.loads(r.read()).get('state')
+                j = json.loads(r.read())
         except Exception:
-            d[chto] = None
+            j = {}
+        d[chto] = j.get('state')
+        if chto == 'efir' and j.get('state') == 'efir' and 'tesno' in j:   # 2.3.9: «тесно» от бриджа
+            d['tesno'] = j.get('tesno_pochemu') or '' if j.get('tesno') else None
     return d
 
 
@@ -349,6 +352,8 @@ def delta_stroka(bylo, stalo):
     if k0 and k1 and k0 != k1:
         ch.append({'idyot': 'камера подключилась', 'zhdu': 'камера отключилась, ждёт телефон'}.get(
             k1, 'камера выключена'))
+    if 'tesno' in bylo and 'tesno' in stalo and bylo['tesno'] != stalo['tesno']:
+        ch.append('эфиру тесно: %s' % stalo['tesno'] if stalo['tesno'] is not None else 'эфиру снова свободно')
     for klyuch, formy in (('donaty', ('донат', 'доната', 'донатов')),
                           ('podpiski', ('подписка', 'подписки', 'подписок')),
                           ('reydy', ('рейд', 'рейда', 'рейдов')),
@@ -971,7 +976,7 @@ def sobytie_chata(tags, tekst, now=None):
 
 # ---------- чат в кадре эфира (2.3.4) ----------
 CHAT_EKRAN = EAR.rsplit('/ear', 1)[0] + '/chat/upr'
-CHAT_EKRAN_PACHKA = EAR.rsplit('/ear', 1)[0] + '/chat/pachka'     # 2.3.9: POST, JSON-список
+CHAT_EKRAN_PACHKA = EAR.rsplit('/ear', 1)[0] + '/chat/pachka'     # 2.3.9: POST, строка — как /chat/upr
 CHAT_PACHKA = float(os.environ.get('USHI_CHAT_PACHKA', 0.3))
 
 
@@ -1008,10 +1013,10 @@ class EkranChata:
                         pachka.append(cls.q.get(timeout=max(0.0, konec - time.time())))
                     except queue.Empty:
                         break
-                try:
+                try:                       # строка тела — как запрос /chat/upr
                     urllib.request.urlopen(urllib.request.Request(
-                        CHAT_EKRAN_PACHKA, data=json.dumps(pachka, ensure_ascii=False).encode(),
-                        headers={'Content-Type': 'application/json'}), timeout=2).read()
+                        CHAT_EKRAN_PACHKA, data='\n'.join(urllib.parse.urlencode(d) for d in pachka).encode(),
+                        headers={'Content-Type': 'text/plain'}), timeout=2).read()
                 except Exception:
                     pass
                 continue
@@ -1028,8 +1033,10 @@ def v_kadr(tags, login, kto, tekst):
         tekst = tekst[8:].rstrip('\x01')
     tekst = re.sub(r'[\x00-\x1f\x7f]', ' ', tekst).strip()
     if tekst:
-        EkranChata.poslat(kto=kto, login=login, tekst=tekst[:300],
-                          cvet=tags.get('color', ''), id=tags.get('id', ''))
+        d = dict(kto=kto, login=login, tekst=tekst[:300], cvet=tags.get('color', ''), id=tags.get('id', ''))
+        if k_plusu(tekst) or tags.get('bits'):         # 2.3.9: в шквал на плашке — первыми
+            d['vazhno'] = '1'
+        EkranChata.poslat(**d)
 
 
 def chistka_chata(line):
