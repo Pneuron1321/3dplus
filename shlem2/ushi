@@ -312,9 +312,61 @@ def v_plus(text, metka='(голосом) '):
     return True
 
 
+# Мир сообщает изменения (12.10, этап 2 плана эфира, I.3): к фразе Александра уши приписывают,
+# что изменилось с прошлой фразы — эфир, камера, донаты, чат. Только состояния и числа, без слов
+# зрителей; одной строкой. Плюсу не нужно звать efir и kamera, чтобы это узнать.
+DELTA = os.environ.get('USHI_DELTA', '1') != '0'
+SCHET = {'chat': 0, 'donaty': 0, 'podpiski': 0, 'reydy': 0}
+PROSHLOE = [None]
+
+
+def skolko(n, odin, dva, pyat):
+    k = n % 100
+    slovo = pyat if 11 <= k <= 14 else odin if k % 10 == 1 else dva if 2 <= k % 10 <= 4 else pyat
+    return '%d %s' % (n, slovo)
+
+
+def sostoyanie():
+    """Эфир и камера (у приложения, по полсекунды на ответ) и счётчики ушей."""
+    d = dict(SCHET)
+    for chto in ('efir', 'kamera'):
+        try:
+            with urllib.request.urlopen(EAR.rsplit('/ear', 1)[0] + '/' + chto, timeout=0.5) as r:
+                d[chto] = json.loads(r.read()).get('state')
+        except Exception:
+            d[chto] = None
+    return d
+
+
+def delta_stroka(bylo, stalo):
+    """Что изменилось между двумя состояниями — « (с прошлой фразы: …)» или пусто."""
+    ch = []
+    e0, e1 = bylo.get('efir'), stalo.get('efir')
+    if e0 and e1 and e0 != e1:
+        ch.append({'efir': 'эфир идёт', 'off': 'эфир закончился', 'obryv': 'эфир оборвался, переподключается',
+                   'podklyuchayus': 'эфир подключается'}.get(e1, 'эфир: ' + e1))
+    k0, k1 = bylo.get('kamera'), stalo.get('kamera')
+    if k0 and k1 and k0 != k1:
+        ch.append({'idyot': 'камера подключилась', 'zhdu': 'камера отключилась, ждёт телефон'}.get(
+            k1, 'камера выключена'))
+    for klyuch, formy in (('donaty', ('донат', 'доната', 'донатов')),
+                          ('podpiski', ('подписка', 'подписки', 'подписок')),
+                          ('reydy', ('рейд', 'рейда', 'рейдов')),
+                          ('chat', ('сообщение в чате', 'сообщения в чате', 'сообщений в чате'))):
+        n = stalo.get(klyuch, 0) - bylo.get(klyuch, 0)
+        if n > 0:
+            ch.append('+' + skolko(n, *formy))
+    return ' (с прошлой фразы: %s)' % '; '.join(ch) if ch else ''
+
+
 def golosom(text, pometka='(голосом) '):
     """Фраза Александра: вписать, а если на экране
     вопрос — сказать об этом, фраза ждёт (dognat)."""
+    if DELTA:
+        stalo = sostoyanie()
+        if PROSHLOE[0] is not None:
+            text += delta_stroka(PROSHLOE[0], stalo)
+        PROSHLOE[0] = stalo
     if v_plus(text, pometka):
         return True
     if not ZHDUT:
@@ -359,6 +411,51 @@ S_KADROM = ('(голосом; кадр момента вопроса уже в '
             '«Сейчас посмотрю» уже сказано) ')
 
 
+PLUS_LIB = os.environ.get('USHI_PLUS_LIB', '/usr/local/bin/plus-lib')
+
+
+class PlusLib:
+    """plus-lib (kadr) как модуль (12.10, этап 2): кадр вызова на каждое «плюс плюс», «зум зум» и
+    плёнка — в этом же процессе, без sh и двух curl (под proot ≈110 мс процессора на кадр).
+    Нет plus-lib или не загрузился — программа kadr, как раньше. Обновили — перечитаем."""
+    m, mtime, lock = None, 0.0, threading.Lock()
+
+    @classmethod
+    def modul(cls):
+        with cls.lock:
+            try:
+                mt = os.path.getmtime(PLUS_LIB)
+            except OSError:
+                return None
+            if cls.m is None or mt != cls.mtime:
+                cls.mtime = mt
+                try:
+                    import importlib.machinery
+                    import importlib.util
+                    ld = importlib.machinery.SourceFileLoader('plus_lib', PLUS_LIB)
+                    m = importlib.util.module_from_spec(importlib.util.spec_from_loader('plus_lib', ld))
+                    ld.exec_module(m)
+                    cls.m = m if hasattr(m, 'kadr') else None
+                except Exception as e:
+                    print(time.strftime('%H:%M:%S'), 'plus-lib не загрузился:', type(e).__name__, flush=True)
+                    cls.m = None
+            return cls.m
+
+
+def kadr(args=(), out=None):
+    """Кадр: (код, текст ответа kadr). out — в какой файл (по умолчанию /root/view.jpg)."""
+    m = PlusLib.modul()
+    if m is not None:
+        try:
+            kod, stroki, _ = m.kadr(list(args), out=out)
+            return kod, '\n'.join(stroki)
+        except Exception as e:
+            print(time.strftime('%H:%M:%S'), 'plus-lib kadr сломался:', type(e).__name__, flush=True)
+    r = subprocess.run(['kadr'] + list(args), capture_output=True, text=True,
+                       env=dict(os.environ, KADR_OUT=out) if out else None)
+    return r.returncode, r.stdout.strip()
+
+
 UMEET_SEK = float(os.environ.get('USHI_UMEET_SEK', 60))
 UMEET = {'t': -1e9, 'chto': frozenset()}
 
@@ -385,8 +482,7 @@ def kadr_vyzova():
     def snyat():
         if most_umeet('kadr_t'):
             return
-        subprocess.run(['kadr'], capture_output=True,
-                       env=dict(os.environ, KADR_OUT=KADR_VYZOV))
+        kadr(out=KADR_VYZOV)
     threading.Thread(target=snyat, daemon=True).start()
 
 
@@ -399,8 +495,7 @@ def vzglyad(text):
     ms = VYZOV_MS[0]
     # плёнка держит 30 с: вызов свежее 25 с — кадр того момента из неё (2.3.9)
     if ms and time.time() * 1000 - ms < 25000 and most_umeet('kadr_t'):
-        est = subprocess.run(['kadr', 'moment', str(int(ms))], capture_output=True,
-                             env=dict(os.environ, KADR_OUT=VIEW)).returncode == 0
+        est = kadr(['moment', str(int(ms))], out=VIEW)[0] == 0
     try:
         if not est and time.time() - os.path.getmtime(KADR_VYZOV) < 120:
             shutil.move(KADR_VYZOV, VIEW)
@@ -408,8 +503,7 @@ def vzglyad(text):
     except OSError:
         pass
     if not est:
-        est = subprocess.run(['kadr'], capture_output=True
-                             ).returncode == 0
+        est = kadr(out=VIEW)[0] == 0
     return golosom(text, S_KADROM if est else '(голосом) ')
 
 
@@ -574,13 +668,12 @@ def compact(kind):
 
 def zoom(kind):
     arg, what = ZOOM.get(kind, ZOOM['x2'])
-    r = subprocess.run(['kadr', arg],
-                       capture_output=True, text=True)
-    if r.returncode == 0:
+    kod, otv = kadr([arg])
+    if kod == 0:
         golosom(what + ' уже в /root/view.jpg — '
                 'открой и скажи, что там важно')
     else:
-        say(r.stdout.strip() or 'Кадр не получился.')
+        say(otv or 'Кадр не получился.')
 
 
 def plenka(n, ms):
@@ -590,12 +683,11 @@ def plenka(n, ms):
     imya = 'чек чек' if n == '7' else 'зум чек'
 
     def idti():
-        r = subprocess.run(['kadr', 'plenka', str(int(ms or time.time() * 1000)), n],
-                           capture_output=True, text=True)
-        if r.returncode == 0:
-            golosom('%s — %s Открой и скажи, что произошло.' % (imya, r.stdout.strip()))
+        kod, otv = kadr(['plenka', str(int(ms or time.time() * 1000)), n])
+        if kod == 0:
+            golosom('%s — %s Открой и скажи, что произошло.' % (imya, otv))
         else:
-            say(r.stdout.strip() or 'Плёнка не получилась.')
+            say(otv or 'Плёнка не получилась.')
     threading.Thread(target=idti, daemon=True).start()
 
 
@@ -606,14 +698,13 @@ def chek_plus(vopros, ms, uid):
     """«Чек чек плюс …»: плёнка 7 кадров вокруг команды и 1,5 с речи после
     неё — Плюсу вместе: картинка момента и вопрос к ней."""
     def idti():
-        r = subprocess.run(['kadr', 'plenka', str(int(ms or time.time() * 1000)), '7'],
-                           capture_output=True, text=True)
-        if r.returncode != 0:
-            say(r.stdout.strip() or 'Плёнка не получилась.')
+        kod, otv = kadr(['plenka', str(int(ms or time.time() * 1000)), '7'])
+        if kod != 0:
+            say(otv or 'Плёнка не получилась.')
             return
         v = ('Вопрос Александра: «%s». Открой и ответь.' % vopros if vopros
              else 'Вопроса не было — открой и скажи, что произошло.')
-        if golosom('чек чек плюс — %s %s' % (r.stdout.strip(), v)):
+        if golosom('чек чек плюс — %s %s' % (otv, v)):
             metka('vpisal', uid)
     threading.Thread(target=idti, daemon=True).start()
 
@@ -815,6 +906,8 @@ CHEER = re.compile(r'(?<![\w])[A-Za-z]+\d+(?![\w])')     # Cheer100, Kappa50 —
 def v_donaty(d):
     """Событие для donaty (цель, спасибо, ответ донатеру): строка JSON в /tmp/donaty.jsonl."""
     d['t'] = d.get('t') or time.time()
+    i = d.get('istochnik')
+    SCHET['reydy' if i == 'raid' else 'donaty' if i == 'bits' else 'podpiski'] += 1
     try:
         with open(DONATY, 'a') as f:
             f.write(json.dumps(d, ensure_ascii=False) + '\n')
@@ -1070,6 +1163,7 @@ class Chat(threading.Thread):
                             (m.group(1) or '').split(';')
                             if '=' in x)
                 kto = tags.get('display-name') or m.group(2)
+                SCHET['chat'] += 1
                 self.prishlo(kto, m.group(3))
                 donat_iz_chata(tags, kto, m.group(3))
                 v_kadr(tags, m.group(2), kto, m.group(3))

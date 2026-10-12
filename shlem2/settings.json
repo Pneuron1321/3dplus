@@ -48,7 +48,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "*",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
@@ -76,7 +76,10 @@
       "Bash(zamer:*)",
       "Bash(golos proba:*)",
       "Bash(chat)",
-      "Bash(chat:*)"
+      "Bash(chat:*)",
+      "mcp__plus__kadr",
+      "mcp__plus__kamera",
+      "mcp__plus__efir"
     ],
     "additionalDirectories": [
       "/root",

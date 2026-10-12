@@ -1,0 +1,405 @@
+#!/usr/bin/env -S python3 -S
+# plus-lib — инструменты Плюса одной библиотекой: kadr, efir, kamera (этап 2 плана эфира, 12.10).
+# Два входа к одной логике: скрипты kadr, efir, kamera (Александру, проверкам и запасной путь
+# Плюса — тонкие обёртки) и plus-mcp — постоянный процесс, через который Плюс зовёт инструменты
+# без нового процесса на каждый вызов (под proot запуск программы в 3–5 раз дороже).
+# Граница секретов та же, что у скриптов: ключ эфира уходит приложению телом запроса и нигде не
+# печатается; ключ камеры здесь не бывает; инструмента «прочитать любой файл» нет.
+#   plus-lib kadr|efir|kamera [аргументы] — как одноимённые скрипты
+# Каждая функция возвращает (код выхода, строки ответа, картинка или None).
+import http.client
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.parse
+
+APP = 'http://localhost:8766'      # приложение 2 (1.0 — 8765)
+MOLCHIT = 'Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват».'
+
+
+def zapros(url, put, sek, telo=None):
+    """Запрос к приложению: (код, тело). None — не ответило (как curl -s с ошибкой связи)."""
+    u = urllib.parse.urlsplit(url)
+    c = http.client.HTTPConnection(u.hostname or 'localhost', u.port or 80, timeout=sek)
+    try:
+        c.request('GET' if telo is None else 'POST', put, body=telo)
+        r = c.getresponse()
+        return r.status, r.read().decode('utf-8', 'replace')
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        c.close()
+
+
+def razobrat(telo):
+    try:
+        d = json.loads(telo)
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+# ---------- kadr: глаза ----------
+
+def kadr(a, out=None):
+    """kadr [x2|x4|centr|plenka [мс] [7|13]|moment мс] — свежий кадр шлема в /root/view.jpg
+    (out — в другой файл: уши кладут кадр вызова отдельно)."""
+    a = list(a) + ['', '', '']
+    rez = a[0]
+    U = os.environ.get('KADR_URL') or APP
+    OUT = out or os.environ.get('KADR_OUT') or '/root/view.jpg'
+    # Стрим идёт через ретранслятор (retr) — кадр из стрима: захват экрана у BeamXR,
+    # наш захват его бы оборвал (Quest даёт захват одному приложению).
+    S = os.environ.get('KADR_STRIM') or '/tmp/strim.jpg'
+    try:
+        sa = int(time.time()) - int(os.stat(S).st_mtime)
+    except OSError:
+        sa = None
+    if sa is not None and sa < 6:
+        out = []
+        if rez == 'plenka':
+            out.append('Плёнка во время стрима пока не умеет (захват у BeamXR) — даю один кадр из стрима.')
+        vf = {'x2': 'scale=1086:-2', 'x4': 'scale=1536:-2', 'krupno': 'scale=1536:-2',
+              'centr': 'crop=iw/2:ih/2,scale=960:-2'}.get(rez, 'scale=768:-2')
+        r = subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', S, '-vf', vf,
+                            '-q:v', '3', OUT], stdin=subprocess.DEVNULL)
+        if r.returncode:
+            return 1, out + ['Кадр из стрима не получился.'], None
+        return 0, out + ['Кадр из стрима: %s · возраст ~%d с (то, что видят зрители)' % (OUT, sa)], OUT
+    if rez == 'x2':
+        Q = '?size=x2'
+    elif rez in ('x4', 'krupno'):
+        Q = '?size=big'
+    elif rez == 'centr':
+        Q = '?zoom=2'
+    elif rez == 'plenka':
+        q = [x for x in (a[1] and 't=' + a[1], a[2] and 'n=' + a[2]) if x]
+        Q = '?' + '&'.join(q) if q else ''
+    elif rez == 'moment':
+        Q = '?t=' + a[1]
+    else:
+        Q = ''
+    r = zapros(U, '/status', 3)
+    if r is None:
+        return 1, ['Глаза выключены: quest-bridge не отвечает. Открой Quest Claude Bridge и нажми «Начать захват».'], None
+    s = r[1]
+    if '"capturing":false' in s:
+        return 1, ['Захват остановлен. В Quest Claude Bridge нажми «Начать захват».'], None
+    if '"stale":true' in s:
+        return 2, ['Захват застыл (системная видеозапись?). В Quest Claude Bridge: «Остановить» → «Начать захват» → «Разрешить».'], None
+    m = re.search(r'"ageMs":(-?[0-9]+)', s)
+    age = int(m.group(1)) if m else None
+    if age is None or age < 0:
+        return 1, ['Кадров ещё нет — подожди пару секунд.'], None
+    if age > 5000:
+        return 2, ['Захват застыл: последний кадр %d с назад (системная видеозапись?). В Quest Claude Bridge: '
+                   '«Остановить» → «Начать захват» → «Разрешить».' % (age // 1000)], None
+    if rez == 'plenka':
+        # кадры «после» могут ещё сниматься — приложение ждёт их до ~3 с
+        if not skachat(U, '/plenka.jpg' + Q, 9, OUT):
+            return 1, ['Плёнка не скачалась (нужно приложение 0.6; кадров вокруг вызова нет?).'], None
+        if a[2] == '7':
+            return 0, ['Плёнка: %s · 7 кадров через 0,5 с, от −1,5 до +1,5 с вокруг команды, по порядку слева '
+                       'направо, сверху вниз, время подписано внизу слева; 0 с (момент команды) — в красной рамке; '
+                       'последний — +1,5 с (сейчас).' % OUT], OUT
+        # с моментом (мс) — плёнку заказала команда («зум чек»), без — вопрос после «плюс плюс»
+        v, mm = ('команды', 'момент команды') if a[1] else ('«плюс плюс»', 'момент вопроса')
+        return 0, ['Плёнка: %s · 13 кадров через 0,5 с, от −3 до +3 с вокруг %s, по порядку слева направо, сверху '
+                   'вниз, время подписано внизу слева; 0 с (%s) — в красной рамке; крупно в правом нижнем углу — '
+                   '+3 с (сейчас).' % (OUT, v, mm)], OUT
+    if rez == 'moment':
+        if '"kadr_t"' not in s:
+            return 1, ['Кадр момента из плёнки — с приложения 2.3.9.'], None
+        if not skachat(U, '/frame.jpg' + Q, 5, OUT):
+            return 1, ['Кадра того момента в плёнке нет (старше 30 с?).'], None
+        return 0, ['Кадр момента вопроса: %s' % OUT], OUT
+    if not skachat(U, '/frame.jpg' + Q, 5, OUT):
+        return 1, ['Кадр не скачался%s.' % (' (крупный кадр — с quest-bridge 0.3)' if Q else '')], None
+    return 0, ['Кадр: %s · возраст %d мс' % (OUT, age)], OUT
+
+
+def skachat(U, put, sek, OUT):
+    """Картинку — в файл (как curl -sf -o): только ответ 200; файл подменяется целиком."""
+    u = urllib.parse.urlsplit(U)
+    c = http.client.HTTPConnection(u.hostname or 'localhost', u.port or 80, timeout=sek)
+    try:
+        c.request('GET', put)
+        r = c.getresponse()
+        telo = r.read()
+        if r.status >= 400:
+            return False
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        c.close()
+    try:
+        with open(OUT + '.novyy', 'wb') as f:
+            f.write(telo)
+        os.replace(OUT + '.novyy', OUT)
+    except OSError:
+        return False
+    return True
+
+
+# ---------- efir: эфир на Twitch из приложения 2 ----------
+
+def efir_skazat(U):
+    r = zapros(U, '/efir', 5)
+    if r is None:
+        return 1, [MOLCHIT]
+    d = razobrat(r[1])
+    if d is None:
+        return 1, ['Эфир: непонятный ответ приложения.']
+    s, o = d.get('state'), d.get('oshibka') or ''
+    out = []
+    if s == 'efir':
+        out.append('Эфир идёт: %s с, %s кбит/с (цель %s), %s, звук: %s, голос ×%s; потеряно кадров: %s.'
+                   % (d.get('sec'), d.get('kbps'), d.get('tsel_kbps'), d.get('razmer'), d.get('zvuk'),
+                      d.get('mic'), d.get('drops')))
+        if d.get('mic_propuski') is not None:
+            out.append('Голос: микропауз %s, сбросов %s (норма — 0).' % (d.get('mic_propuski'), d.get('mic_sbrosy', 0)))
+    elif s == 'podklyuchayus':
+        out.append('Эфир: подключаюсь к Twitch… ' + o)
+    elif s == 'obryv':
+        out.append('Эфир: обрыв, переподключаюсь… ' + o)
+    else:
+        out.append('Эфир выключен.' + (' ' + o if o else ''))
+    return 0, out
+
+
+def efir(a):
+    """efir [720|1080] — начать; efir stop|status; efir mic 4|+25%|-20%. Ключ — из /root/.twitch-key
+    (кладёт `kluch twitch`): уходит приложению телом запроса внутри шлема и нигде не печатается."""
+    a = list(a)
+    U = os.environ.get('EFIR_URL') or APP
+    KEY = os.environ.get('EFIR_KEY') or '/root/.twitch-key'
+    c = a[0] if a else ''
+    if c == 'stop':
+        zapros(U, '/efir/stop', 15)
+        k, out = efir_skazat(U)
+    elif c in ('status', 's'):
+        k, out = efir_skazat(U)
+    elif c == 'mic':
+        g = a[1] if len(a) > 1 else ''
+        was = None
+        if g[:1] in ('+', '-') and g:            # на слух: «на 25 % громче» — от того, что сейчас
+            r = zapros(U, '/efir', 5)
+            if r is None:
+                return 1, [MOLCHIT], None
+            m = re.fullmatch(r'([+-])(\d{1,3}(?:[.,]\d+)?)%?', g)
+            if not m:
+                return 1, ['efir mic +25% — на слух на 25 % громче, efir mic -20% — тише, efir mic 4 — ровно ×4.'], None
+            p = float(m.group(2).replace(',', '.')) / 100
+            p = p if m.group(1) == '+' else -min(p, 0.9)
+            try:
+                cur = float(json.loads(r[1]).get('mic') or 3)
+            except (ValueError, AttributeError, TypeError):
+                cur = 3.0
+            # громкость на слух ~ сила звука в степени 0,6: на N % громче на слух — сила ×(1+N)^(1/0,6)
+            was, g = '%.2f' % cur, '%.2f' % min(8.0, max(0.5, cur * (1 + p) ** (1 / 0.6)))
+        elif not g or re.search(r'[^0-9.]', g):
+            return 1, ['efir mic 4 — число от 0.5 до 8 (обычно 3); efir mic +25% — на слух на 25 % громче.'], None
+        r = zapros(U, '/efir/mic?g=' + g, 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if r[0] != 200:
+            return 1, ['Громкость не сохранилась: захват не идёт — в Quest Claude Bridge 2 «Начать захват».'], None
+        out = ['Голос в эфире: ×%s → ×%s (на слух %s, приложение запомнило).' % (was, g, a[1]) if was
+               else 'Голос в эфире: ×%s (приложение запомнило).' % g]
+        k, o2 = efir_skazat(U)
+        out += o2
+    elif c in ('', '720', '1080'):
+        r = zapros(U, '/status', 3)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if '"capturing":true' not in r[1]:
+            return 1, ['Захват не идёт: в Quest Claude Bridge 2 — «Начать захват» → «Разрешить».'], None
+        try:
+            klyuch = open(KEY, 'rb').read() if os.path.getsize(KEY) > 0 else b''
+        except OSError:
+            klyuch = b''
+        if not klyuch:
+            return 1, ['Нет ключа Twitch: в Ubuntu Плюса — kluch twitch.'], None
+        r = zapros(U, '/efir/key', 5, telo=klyuch)
+        del klyuch
+        if r is None or '"key":true' not in r[1]:
+            return 1, ['Приложение не приняло ключ (нужно приложение 2.1; ключ не похож на ключ Twitch?).'], None
+        zapros(U, '/efir/start' + ('?size=720&kbps=4500' if c == '720' else ''), 20)
+        for _ in range(12):
+            time.sleep(float(os.environ.get('EFIR_SHAG') or 1))
+            r = zapros(U, '/efir', 3)
+            if r and ('"state":"efir"' in r[1] or '"state":"off"' in r[1]):
+                break
+        k, out = efir_skazat(U)
+    else:
+        return 0, ['efir — начать эфир, efir 720 — полегче, efir stop — закончить, efir status — как идёт.'], None
+    return k, out, None
+
+
+# ---------- kamera: камера телефона в эфире ----------
+
+def kamera_skazat(telo):
+    d = razobrat(telo)
+    if d is None:
+        return 1, ['Камера: непонятный ответ приложения.']
+    s, o = d.get('state'), d.get('oshibka') or ''
+    g = d.get('gde') or 'pn'
+    mesto = {'krupno': 'во весь кадр', 'skryt': 'окно скрыто'}.get(d.get('vid'))
+    if mesto is None:
+        mesto = 'угол %s %s, %s %%' % ('слева' if g[0] == 'l' else 'справа', 'внизу' if g[1] == 'n' else 'вверху',
+                                       '%g' % round(float(d.get('dolya') or 0.25) * 100 + 1e-6, 1))
+    if d.get('povorot'):
+        mesto += ', повёрнута на %s° по часовой' % d['povorot']
+    b = d.get('sboku')
+    if d.get('vid') not in ('krupno', 'skryt'):
+        if b is None:                                  # приложение до 2.3.8: отступ сбоку как снизу
+            if d.get('vplotnuyu'):
+                mesto += ', вплотную к углу'
+        elif d.get('vplotnuyu') and not b:
+            mesto += ', вплотную к углу'
+        else:
+            kray = 'снизу' if g[1] == 'n' else 'сверху'
+            bok = 'справа' if g[0] == 'p' else 'слева'
+            mesto += ', %s %s, %s %s' % (kray, 'вплотную' if d.get('vplotnuyu') else 'отступ 3 % высоты',
+                                         bok, '%g %% ширины' % b if b else 'вплотную')
+    out = []
+    if s == 'idyot':
+        gde = 'в эфире: ' + mesto if d.get('v_efire') else 'появится в эфире, когда он начнётся (' + mesto + ')'
+        out.append('Камера идёт: %s, %s к/с, %s кбит/с; %s.' % (d.get('razmer', '').replace('x', '×'), d.get('fps'),
+                                                                d.get('kbps'), gde))
+    elif s == 'zhdu':
+        stuk = ''
+        if 'popytok' in d:                     # приложение 2.2.6+: стучался ли телефон вообще
+            n = d.get('popytok') or 0
+            stuk = ' Телефон ещё не стучался.' if n == 0 else ' Подключений к порту с запуска: %d.' % n
+        out.append('Камера ждёт телефон (подключить айфон — kamera svyaz). Окно: %s.' % mesto + stuk
+                   + (' ' + o if o else ''))
+    elif 'slushaet' in d:
+        out.append('Камера: порт приёмника закрыт — приложение открывает его заново само.' + (' ' + o if o else ''))
+    else:
+        out.append('Камера выключена: нужен захват в приложении 2.' + (' ' + o if o else ''))
+    p = d.get('perezapuskov') or 0
+    if p:
+        out.append('Порт камеры открывался заново %d раз (система его закрывала — так и надо).' % p)
+    return 0, out
+
+
+def kamera(a):
+    """kamera — как камера; svyaz; ugol pn|ln|pv|lv [0.25]; bolshe|menshe [15]; povorot 90|180|270|0;
+    vplotnuyu|otstup; sboku 4; snizu vplotnuyu|otstup; krupno; skryt; snimaet vkl|vykl."""
+    a = list(a)
+    U = os.environ.get('KAMERA_URL') or APP
+    c = a[0] if a else ''
+    a2 = a[1] if len(a) > 1 else ''
+
+    def vid(q):
+        r = zapros(U, '/kamera/vid?' + q, 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        return kamera_skazat(r[1]) + (None,)
+
+    if c in ('', 'status', 's'):
+        r = zapros(U, '/kamera', 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        return kamera_skazat(r[1]) + (None,)
+    if c in ('svyaz', 'podklyuchit', 'aifon'):
+        r = zapros(U, '/kamera/stranica', 10)
+        if r is None:
+            return 1, [MOLCHIT], None
+        d = razobrat(r[1])
+        if d is None:
+            return 1, ['Камера: непонятный ответ приложения.'], None
+        if d.get('oshibka'):
+            return 1, ['Камера: ' + d['oshibka']], None
+        return 0, ['На айфоне в Safari открой %s и нажми «Добавить в Moblin» (или Larix); не откроется — %s. '
+                   'Страница открыта 2 минуты.' % (d.get('adres', '').replace('http://', ''), d.get('ip', ''))], None
+    if c in ('ugol', 'krupno', 'skryt'):
+        ost = a[1:]
+        q = 'v=' + c
+        if ost and ost[0] in ('pn', 'ln', 'pv', 'lv'):
+            q += '&gde=' + ost.pop(0)
+        if c == 'ugol' and ost and ost[0]:
+            if re.search(r'[^0-9.]', ost[0]):
+                return 1, ['kamera ugol pn 0.3 — доля ширины числом 0.1–0.5.'], None
+            q += '&r=' + ost[0]
+        return vid(q)
+    if c in ('bolshe', 'menshe'):
+        if re.search(r'[^0-9.]', a2):
+            return 1, ['kamera bolshe 15 — на 15 % больше (число процентов).'], None
+        r = zapros(U, '/kamera', 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        try:
+            d = float((razobrat(r[1]) or {}).get('dolya') or 0.25)
+            b = c == 'bolshe'
+            if a2:                                    # на N процентов
+                p = float(a2) / 100
+                d = d * (1 + p) if b else d / (1 + p)
+            else:
+                d = d + (0.05 if b else -0.05)
+        except (ValueError, TypeError):
+            return 1, ['kamera bolshe 15 — на 15 % больше (число процентов).'], None
+        return vid('v=ugol&r=%s' % round(min(0.5, max(0.1, d)), 4))
+    if c == 'povorot':
+        if a2 not in ('0', '90', '180', '270'):
+            return 1, ['kamera povorot 90 — по часовой (180, 270; 0 — как было).'], None
+        return vid('pov=' + a2)
+    if c in ('vplotnuyu', 'otstup'):
+        return vid('kray=1&bok=4' if c == 'otstup' else 'kray=0&bok=0')
+    if c in ('snizu', 'sverhu', 'kray'):
+        k = {'vplotnuyu': '0', '0': '0', 'otstup': '1', '1': '1'}.get(a2)
+        if k is None:
+            return 1, ['kamera snizu vplotnuyu | kamera snizu otstup'], None
+        return vid('kray=' + k)
+    if c in ('sboku', 'bok'):
+        b = a2.replace(',', '.')
+        if not b or b == '.' or re.search(r'[^0-9.]', b) or b.count('.') > 1:
+            return 1, ['kamera sboku 4 — отступ от бокового края в % ширины кадра (0 — вплотную).'], None
+        r = zapros(U, '/kamera/vid?bok=' + b, 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if '"sboku"' not in r[1] and '"state"' in r[1]:
+            return 0, ['Это приложение ещё не умеет отступ сбоку: нужна версия 2.3.8.'], None
+        return kamera_skazat(r[1]) + (None,)
+    if c in ('snimaet', 'telefon'):
+        t = {'vkl': '1', 'da': '1', '1': '1', '': '1', 'vykl': '0', 'net': '0', '0': '0'}.get(a2)
+        if t is None:
+            return 1, ['kamera snimaet vkl | kamera snimaet vykl'], None
+        r = zapros(U, '/nalet/upr?telefon=' + t, 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        d = razobrat(r[1])
+        if d is None:
+            return 1, ['Камера: непонятный ответ приложения.'], None
+        if 'telefon' not in d:
+            return 1, ['Это приложение ещё не умеет: нужна версия 2.3.5.'], None
+        if not d['telefon']:
+            return 0, ['Плюс опустил телефон: в эфире без съёмки.'], None
+        if d.get('snimaet'):
+            return 0, ['Плюс снимает тебя: держит телефон перед собой двумя руками.'], None
+        return 0, ['Плюс будет снимать, когда камера включена и идёт эфир.'], None
+    return 0, ['kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera '
+               'bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera sboku 4; kamera '
+               'snizu vplotnuyu|otstup; kamera krupno; kamera skryt; kamera snimaet vkl|vykl.'], None
+
+
+INSTRUMENTY = {'kadr': kadr, 'efir': efir, 'kamera': kamera}
+
+
+def main():
+    f = INSTRUMENTY.get(sys.argv[1] if len(sys.argv) > 1 else '')
+    if f is None:
+        print('plus-lib kadr|efir|kamera [аргументы]')
+        return 1
+    kod, stroki, _ = f(sys.argv[2:])
+    for s in stroki:
+        print(s)
+    return kod
+
+
+if __name__ == '__main__':
+    sys.exit(main())

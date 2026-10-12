@@ -20,7 +20,7 @@ import os, sys
 moy, n = int(sys.argv[1]), min(19, int(sys.argv[2]))
 os.setpriority(os.PRIO_PROCESS, moy, n)
 # уже запущенные (до обновления) Claude, tmux и помощники — тоже, каждым потоком
-SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'raciya', b'nagruzka'}
+SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'raciya', b'nagruzka', b'plus-mcp'}
 for d in os.listdir('/proc'):
     if not d.isdigit():
         continue

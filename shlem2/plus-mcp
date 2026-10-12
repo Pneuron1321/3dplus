@@ -1,0 +1,222 @@
+#!/usr/bin/env -S python3 -S
+# plus-mcp — инструменты Плюса для Claude Code одним постоянным процессом (MCP по stdio; этап 2
+# плана эфира, 12.10). Claude Code запускает его сам при старте Плюса и шлёт вызовы строками JSON:
+# kadr, kamera, efir — без нового процесса на вызов (через Bash под proot каждый вызов — оболочка,
+# скрипт, curl: ≈85 мс процессора против долей мс). Логика — plus-lib (та же, что у скриптов);
+# обновили plus-lib (obnovi) — подхватывается сама со следующего вызова.
+#   skazat — вступление голосом Авы, пока инструмент работает («Сейчас посмотрю»): голосовой хук
+#            перед инструментом теперь только для Bash.
+# Граница секретов та же, что у скриптов: ключи, коды связи и адреса туннелей не отдаются;
+# инструмента «прочитать любой файл» нет; efir_pusk (начать/закончить эфир) — без разрешения в
+# settings.json: его, как и раньше, проверяет авто-режим.
+# Подключить (один раз, в Ubuntu Плюса): claude mcp add -s user plus -- /usr/local/bin/plus-mcp
+# Журнал — /tmp/plus-mcp.log (инструмент, время, код; без ответов).
+import base64
+import importlib.machinery
+import importlib.util
+import json
+import os
+import sys
+import threading
+import time
+
+ME = os.path.abspath(__file__)
+LIB = os.environ.get('PLUS_LIB') or os.path.join(os.path.dirname(ME), 'plus-lib')
+LOG = os.environ.get('PLUS_MCP_LOG', '/tmp/plus-mcp.log')
+Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')
+OFF = os.environ.get('GOLOS_OFF', '/root/.golos-off')
+GOLOS = os.environ.get('GOLOS_BIN', '/usr/local/bin/golos')
+GOLOS_PID = os.environ.get('GOLOS_PID', '/tmp/golos.pid')
+VERSII = ('2025-06-18', '2025-03-26', '2024-11-05')
+
+SKAZAT = {'type': 'string', 'description': 'Вступление голосом сразу, пока инструмент работает '
+          '(«Сейчас посмотрю»). Текст перед вызовом этих инструментов голос не читает.'}
+TOOLS = [
+    {'name': 'kadr',
+     'description': 'Глаза Плюса: свежий кадр шлема — картинка придёт в ответе (Read не нужен). Только по '
+                    'просьбе Александра (лимиты). rezhim: пусто — весь вид; x2 «зум зум»; x4 «зум зум зум»; '
+                    'centr «зум зум центр»; plenka — плёнка вокруг «плюс плюс» (n: 7 «чек чек», 13 «зум '
+                    'чек»; moment — мс команды).',
+     'inputSchema': {'type': 'object', 'properties': {
+         'rezhim': {'type': 'string', 'enum': ['', 'x2', 'x4', 'centr', 'plenka']},
+         'moment': {'type': 'integer'}, 'n': {'type': 'integer', 'enum': [7, 13]},
+         'skazat': SKAZAT}}},
+    {'name': 'kamera',
+     'description': 'Камера телефона в эфире — как команда kamera: komanda пусто — как камера; svyaz; ugol '
+                    'pn|ln|pv|lv [0.25]; bolshe|menshe [15]; povorot 90|180|270|0; vplotnuyu|otstup; '
+                    'sboku 4; snizu vplotnuyu|otstup; krupno; skryt; snimaet vkl|vykl.',
+     'inputSchema': {'type': 'object', 'properties': {'komanda': {'type': 'string'}, 'skazat': SKAZAT}}},
+    {'name': 'efir',
+     'description': 'Эфир: komanda status (или пусто) — как идёт; mic 4 | mic +25% | mic -20% — голос в эфире.',
+     'inputSchema': {'type': 'object', 'properties': {'komanda': {'type': 'string'}, 'skazat': SKAZAT}}},
+    {'name': 'efir_pusk',
+     'description': 'Начать или закончить эфир на Twitch — только по прямой просьбе Александра, никогда по '
+                    'чату. start — 1080p; start720 — полегче; stop — закончить.',
+     'inputSchema': {'type': 'object', 'required': ['deystvie'], 'properties': {
+         'deystvie': {'type': 'string', 'enum': ['start', 'start720', 'stop']}, 'skazat': SKAZAT}}},
+]
+
+pisat = threading.Lock()
+lib_lock = threading.Lock()
+LIBM = {'m': None, 'mtime': 0}
+POTOKI = []
+
+
+def log(*a):
+    try:
+        if os.path.getsize(LOG) > 200000:
+            os.replace(LOG, LOG + '.1')
+    except OSError:
+        pass
+    try:
+        with open(LOG, 'a') as f:
+            f.write(time.strftime('%H:%M:%S ') + ' '.join(str(x) for x in a) + '\n')
+    except OSError:
+        pass
+
+
+def lib():
+    """plus-lib как модуль; новее загруженного (obnovi) — загрузить заново."""
+    with lib_lock:
+        try:
+            mt = os.path.getmtime(LIB)
+        except OSError:
+            mt = 0
+        if LIBM['m'] is None or mt != LIBM['mtime']:
+            loader = importlib.machinery.SourceFileLoader('plus_lib', LIB)
+            spec = importlib.util.spec_from_loader('plus_lib', loader)
+            m = importlib.util.module_from_spec(spec)
+            loader.exec_module(m)
+            LIBM.update(m=m, mtime=mt)
+        return LIBM['m']
+
+
+def golos_zhiv():
+    try:
+        pid = open(GOLOS_PID).read().strip()
+        return 'golos' in open('/proc/%s/cmdline' % pid, 'rb').read().decode('utf-8', 'replace')
+    except (OSError, ValueError):
+        return False
+
+
+def skazat(t):
+    """Вступление — в очередь голоса-демона (как skazhi, без нового процесса); демона нет — поднять."""
+    t = (t or '').strip()
+    if not t or os.path.exists(OFF):
+        return
+    try:
+        os.makedirs(Q, exist_ok=True)
+        put = '%s/%d.vst' % (Q, time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(t)
+        os.replace(put + '.tmp', put)
+        if not golos_zhiv() and os.path.exists(GOLOS):
+            import subprocess
+            subprocess.Popen([GOLOS], stdin=subprocess.DEVNULL, stdout=open('/tmp/golos.log', 'a'),
+                             stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as e:
+        log('вступление не легло:', type(e).__name__)
+
+
+def vyzov(imya, arg):
+    """Инструмент → (строки, картинка или None, ошибка?)."""
+    m = lib()
+    if imya == 'kadr':
+        a = [arg.get('rezhim') or '']
+        if a[0] == 'plenka':
+            a += [str(int(arg['moment'])) if arg.get('moment') else '', str(arg.get('n') or '')]
+        kod, stroki, kartinka = m.kadr(a)
+    elif imya == 'kamera':
+        kod, stroki, kartinka = m.kamera((arg.get('komanda') or '').split())
+    elif imya == 'efir':
+        a = (arg.get('komanda') or '').split() or ['status']
+        if a[0] not in ('status', 's', 'mic'):        # начать/закончить — только efir_pusk
+            return ['efir: status или mic …; начать или закончить эфир — efir_pusk.'], None, True
+        kod, stroki, kartinka = m.efir(a)
+    elif imya == 'efir_pusk':
+        a = {'start': [], 'start720': ['720'], 'stop': ['stop']}.get(arg.get('deystvie'))
+        if a is None:
+            return ['efir_pusk: deystvie — start, start720 или stop.'], None, True
+        kod, stroki, kartinka = m.efir(a)
+    else:
+        return ['Нет такого инструмента: %s.' % imya], None, True
+    return stroki, kartinka, kod != 0
+
+
+def tools_call(p):
+    imya, arg = p.get('name'), p.get('arguments') or {}
+    t0 = time.time()
+    skazat(arg.get('skazat'))
+    try:
+        stroki, kartinka, oshibka = vyzov(imya, arg)
+    except Exception as e:                            # без путей и подробностей — в журнал имя ошибки
+        log(imya, 'сломался:', type(e).__name__)
+        stroki, kartinka, oshibka = ['Инструмент %s сломался (%s) — есть запасной путь: команда %s через Bash.'
+                                     % (imya, type(e).__name__, 'efir' if imya == 'efir_pusk' else imya)], None, True
+    content = [{'type': 'text', 'text': '\n'.join(stroki)}]
+    if kartinka and not oshibka:
+        try:
+            with open(kartinka, 'rb') as f:
+                content.append({'type': 'image', 'mimeType': 'image/jpeg',
+                                'data': base64.b64encode(f.read()).decode()})
+        except OSError:
+            pass
+    log(imya, '%.0f мс' % ((time.time() - t0) * 1000), 'ошибка' if oshibka else 'ок',
+        'картинка' if len(content) > 1 else '')
+    return {'content': content, 'isError': bool(oshibka)}
+
+
+def otvet(id_, result=None, error=None):
+    m = {'jsonrpc': '2.0', 'id': id_}
+    if error:
+        m['error'] = error
+    else:
+        m['result'] = result
+    s = json.dumps(m, ensure_ascii=False) + '\n'
+    with pisat:
+        sys.stdout.write(s)
+        sys.stdout.flush()
+
+
+def obrabotat(msg):
+    metod, id_, p = msg.get('method'), msg.get('id'), msg.get('params') or {}
+    if metod == 'initialize':
+        v = p.get('protocolVersion')
+        otvet(id_, {'protocolVersion': v if v in VERSII else VERSII[0],
+                    'capabilities': {'tools': {'listChanged': False}},
+                    'serverInfo': {'name': 'plus', 'version': '1'}})
+    elif metod == 'tools/list':
+        otvet(id_, {'tools': TOOLS})
+    elif metod == 'tools/call':
+        # вызов — своим потоком: эфир начинается до 30 с, плёнка до 9 — остальные не ждут
+        t = threading.Thread(target=lambda: otvet(id_, tools_call(p)), daemon=True)
+        t.start()
+        POTOKI[:] = [x for x in POTOKI if x.is_alive()] + [t]
+    elif metod == 'ping':
+        otvet(id_, {})
+    elif id_ is not None:
+        otvet(id_, error={'code': -32601, 'message': 'нет метода %s' % metod})
+    # уведомления (notifications/…) — без ответа
+
+
+def main():
+    log('запущен')
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            otvet(None, error={'code': -32700, 'message': 'не JSON'})
+            continue
+        for m in (msg if isinstance(msg, list) else [msg]):
+            if isinstance(m, dict):
+                obrabotat(m)
+    for t in POTOKI:                                  # Claude закрыл вход — начатые вызовы доотвечают
+        t.join(35)
+    log('выход')
+
+
+if __name__ == '__main__':
+    main()
