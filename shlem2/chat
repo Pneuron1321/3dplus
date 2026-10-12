@@ -5,7 +5,38 @@
 #   chat ekran vkl | vykl — чат в кадре эфира (справа, между Плюсом и камерой; 2.3.4) — показать / убрать
 #   chat ekran            — в кадре ли чат сейчас: сколько сообщений нарисовано, хватает ли места (2.3.8)
 #   chat ekran proba      — пробное сообщение от Plus в кадр (видно в эфире 1,5 мин) — проверить глазами
+#   chat vsluh vkl | vykl — читать ли чат вслух (12.10): каждое сообщение — голосом Авы дословно, вне
+#                           очереди её речи (уши → голос, мимо Плюса); chat vsluh — включено ли
+#   chat drug ИМЯ         — друг Александра: его сообщения первыми (вслух, Плюсу, в кадре), и в шквал;
+#   chat drug ubrat ИМЯ     убрать; chat drug — кто в друзьях (12.10)
 U=${CHAT_URL:-http://localhost:8766}
+OFF=${CHAT_VSLUH_OFF:-/root/.chat-vsluh-off}
+DRUZYA=${CHAT_DRUZYA:-/root/.chat-druzya}
+if [ "$1" = drug ] || [ "$1" = druzya ]; then
+  imya=$(printf '%s' "${3:-$2}" | tr -d '@' | tr 'A-Z' 'a-z')
+  case "$2" in
+    '') if [ -s "$DRUZYA" ]; then echo "Друзья (их сообщения первыми): $(tr '\n' ' ' < "$DRUZYA")"; else echo "Друзей в списке нет (chat drug ИМЯ — добавить)."; fi; exit 0 ;;
+  esac
+  case "$imya" in *[!a-z0-9_]*|'') echo "Ник в Twitch — латинские буквы, цифры и _ (как в чате, без @)."; exit 1 ;; esac
+  touch "$DRUZYA"
+  if [ "$2" = ubrat ] || [ "$2" = udalit ]; then
+    grep -vx "$imya" "$DRUZYA" > "$DRUZYA.tmp"; mv "$DRUZYA.tmp" "$DRUZYA"
+    echo "$imya — больше не в друзьях."
+  else
+    grep -qx "$imya" "$DRUZYA" || echo "$imya" >> "$DRUZYA"
+    echo "$imya — друг: его сообщения читаю первыми, и в шквал тоже."
+  fi
+  exit 0
+fi
+if [ "$1" = vsluh ]; then
+  case "$2" in
+    vykl|off|net) touch "$OFF"; echo "Чат вслух выключен: сообщения не читаю (в кадре и Плюсу — как раньше). Включить — chat vsluh vkl." ;;
+    vkl|on|da) rm -f "$OFF"; echo "Чат вслух включён: каждое сообщение — голосом, дословно, вне очереди." ;;
+    *) if [ -e "$OFF" ]; then echo "Чат вслух: выключен (chat vsluh vkl — включить)."
+       else echo "Чат вслух: включён — каждое сообщение голосом, дословно, вне очереди (chat vsluh vykl — выключить)."; fi ;;
+  esac
+  exit 0
+fi
 if [ "$1" = ekran ]; then
   case "$2" in
     vkl|pokazat) q='?pokaz=1' ;;

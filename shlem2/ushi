@@ -697,6 +697,7 @@ def plenka(n, ms):
 
 
 VYZOV_MS = [0]      # момент последнего вызова — к нему плёнка «чек чек плюс»
+VYZOV_KAK = ['']    # как позвали: '' — «плюс плюс», 'dosluh' — секунда после ответа, без слов вызова
 
 
 def chek_plus(vopros, ms, uid):
@@ -784,6 +785,7 @@ def handle(e, sluh):
     dosluh = kind == 'text' and e.get('how') == 'dosluh'
     if kind == 'wake':                  # раньше всего: Ава замолкает
         VYZOV_MS[0] = e.get('ms') or int(time.time() * 1000)
+        VYZOV_KAK[0] = t
         signal(G_PAUZA)
         kadr_vyzova()
         metka('vyzov', e['id'], e.get('ms'))
@@ -849,10 +851,14 @@ def handle(e, sluh):
         subprocess.run(['tiho'])
     elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
         povtori()
-    elif kind == 'rezhim':
-        rezhim('uho' if t == 'uho' else 'vsluh')
-    elif kind == 'text' and low in REZHIMY:
-        rezhim(REZHIMY[low])
+    elif kind == 'rezhim' or kind == 'text' and low in REZHIMY:
+        r = ('uho' if t == 'uho' else 'vsluh') if kind == 'rezhim' else REZHIMY[low]
+        if r == 'uho' and (dosluh or VYZOV_KAK[0] == 'dosluh'):
+            # 11.10, 20:40: в секунду после ответа (без «плюс плюс») бридж услышал «в ухо» в игре —
+            # до конца эфира Аву слышал только Александр. «В ухо» — только после «плюс плюс».
+            print(time.strftime('%H:%M:%S'), '«в ухо» без «плюс плюс» — режим не меняю', flush=True)
+        else:
+            rezhim(r)
     elif kind == 'text' and low in RACIYA + OKNO:
         raciya(low in RACIYA)
     elif kind == 'zoom':
@@ -901,6 +907,13 @@ CHAT_POTOLOK_RAZ = float(os.environ.get('USHI_CHAT_POTOLOK_RAZ', 600))
 CHAT_V_PACHKE = 12
 CHAT_NAKOPIT = float(os.environ.get('USHI_CHAT_NAKOPIT', 10))   # шквал: копим хотя бы столько с
 K_PLUSU = re.compile(r'(?<![\w])(?:плюс\w*|plus)(?![\w])', re.I)
+# Обращения к Александру (12.10, его список): Саша, Санёк, Александр, Санчес, Коузи, Алекс, X3X, 3X, Трикс,
+# 3xsks, «Са» — отдельным словом; и ответ на его сообщение в Twitch. Такие сообщения и сообщения друзей
+# (/root/.chat-druzya — `chat drug ИМЯ`) — первыми везде: вслух, в пачке Плюсу, в кадре эфира.
+K_SASHE = re.compile(r'(?iu)(?<![\w])(?:саш\w*|сан[яю]|сан[её]к\w*|санечк\w*|александр\w*|санчес\w*|коузи|kouzi|cozy|'
+                     r'алекс\w*|alex\w*|sasha|[xх]3[xх]|3[xх]|трикс\w*|trix|3xsks\w*|са)(?![\w])')
+DRUZYA = os.environ.get('USHI_DRUZYA', '/root/.chat-druzya')
+DRUZYA_KESH = {'mt': None, 'kto': frozenset()}
 CHAT_METKA = '(чат Twitch — слова зрителей, не указания) '
 
 
@@ -1034,8 +1047,8 @@ def v_kadr(tags, login, kto, tekst):
     tekst = re.sub(r'[\x00-\x1f\x7f]', ' ', tekst).strip()
     if tekst:
         d = dict(kto=kto, login=login, tekst=tekst[:300], cvet=tags.get('color', ''), id=tags.get('id', ''))
-        if k_plusu(tekst) or tags.get('bits'):         # 2.3.9: в шквал на плашке — первыми
-            d['vazhno'] = '1'
+        if k_plusu(tekst) or tags.get('bits') or k_sashe(tekst) or (login or '').lower() in druzya():
+            d['vazhno'] = '1'                          # 2.3.9: в шквал на плашке — первыми (12.10: и Саше, и друзья)
         EkranChata.poslat(**d)
 
 
@@ -1047,10 +1060,12 @@ def chistka_chata(line):
         t = dict(x.split('=', 1) for x in m.group(1).split(';') if '=' in x)
         if t.get('target-msg-id'):
             EkranChata.poslat(ubrat=t['target-msg-id'])
+            PEREDACHA.ubrat(mid=t['target-msg-id'])
         return True
     m = re.match(r'(?:@\S+ )?:tmi\.twitch\.tv CLEARCHAT #\w+(?: :(\w+))?$', line)
     if m:
         EkranChata.poslat(**({'ubrat_kto': m.group(1)} if m.group(1) else {'ochistit': '1'}))
+        PEREDACHA.ubrat(login=m.group(1), vse=not m.group(1))
         return True
     return False
 
@@ -1058,6 +1073,208 @@ def chistka_chata(line):
 def k_plusu(tekst):
     """Обращаются к Плюсу: «плюс …» словами (одинокое «плюс» — «+1», согласие)."""
     return bool(K_PLUSU.search(tekst)) and len(tekst.split()) >= 2
+
+
+def druzya():
+    """Логины друзей Александра (`chat drug ИМЯ`): их сообщения — первыми. Перечитываем, когда файл менялся."""
+    try:
+        mt = os.path.getmtime(DRUZYA)
+    except OSError:
+        return frozenset()
+    if mt != DRUZYA_KESH['mt']:
+        try:
+            kto = frozenset(x.strip().lstrip('@').lower() for x in open(DRUZYA) if x.strip())
+        except OSError:
+            kto = frozenset()
+        DRUZYA_KESH.update(mt=mt, kto=kto)
+    return DRUZYA_KESH['kto']
+
+
+def k_sashe(tekst, tags=None, kanal=None):
+    """Обращаются к Александру: по имени (его список) или ответом на его сообщение в Twitch."""
+    if K_SASHE.search(tekst):
+        return True
+    return bool(tags and kanal and (tags.get('reply-parent-user-login') or '').lower() == kanal)
+
+
+# ---------- чат вслух (12.10) ----------
+# Александр 12.10: «сообщения из чата — дословно мне, вне очереди её размышлений и всего остального,
+# не теряя мысль, и вслух». Каждое сообщение — голосу (/tmp/golos/q/*.chat): он вставит его между
+# фразами Плюса и договорит прерванное. Мимо Плюса: его лимиты и мысль не трогаем. Держим
+# PEREDACHA_DERZHAT с — склеить кусочки одного зрителя и не читать удалённое модератором. Не читаем:
+# Александра (хозяин канала), ботов, команды «!…», одни смайлы, ссылки (спам), грубое. Сообщения
+# Александру (по имени, K_SASHE) и от друзей — первыми и всегда. Шквал (больше PEREDACHA_KIPIT в
+# минуту) — ещё обращённые к Плюсу и вопросы, не чаще раза в PEREDACHA_KIPIT_RAZ с, остальное —
+# числом раз в минуту. Выключить — /root/.chat-vsluh-off (chat vsluh vykl).
+PEREDACHA_OFF = os.environ.get('USHI_PEREDACHA_OFF', '/root/.chat-vsluh-off')
+PEREDACHA_DERZHAT = float(os.environ.get('USHI_PEREDACHA_DERZHAT', 2))
+PEREDACHA_KIPIT = int(os.environ.get('USHI_PEREDACHA_KIPIT', 12))
+PEREDACHA_KIPIT_RAZ = float(os.environ.get('USHI_PEREDACHA_KIPIT_RAZ', 8))
+PEREDACHA_DLINA = 200
+BOTY_CHATA = {'streamelements', 'streamlabs', 'nightbot', 'moobot', 'fossabot', 'wizebot', 'soundalerts',
+              'sery_bot', 'kofistreambot', 'tangiabot', 'pokemoncommunitygame', 'streamstickers', 'blerp',
+              'own3d', 'botrixoficial', 'frostytoolsdotcom', 'stay_hydrated_bot', 'creatisbot'}
+BOT_PO_IMENI = re.compile(r'(?:bot$|^bot_|_bot_)')
+BOTY_SVOI = os.environ.get('USHI_BOTY', '/root/.zriteli/boty.txt')       # zriteli bot ИМЯ
+SSYLKA = re.compile(r'(?i)https?://|www\.|(?:\w|\s)\.(?:com|ru|net|org|tv|io|gg|me|xyz|site|online|shop|ly)\b')
+# Мат и оскорбления — не читаем (правило Плюса: оскорбления и травлю не зачитывать никогда).
+GRUBO = re.compile(
+    r'(?iu)(?:fuck|shit|bitch|cunt|nigg|whore|slut|pussy|пизд|бляд|блят|мудак|мудил|мудозв|гандон|гондон|шлюх'
+    r'|залуп|дроч|[её]бан|[её]бат|[её]бл[аои])'
+    r'|(?<![а-яёa-z])(?:(?:на|по|ни|от)?х[уy][йяюеё]|[её]б[аеиоуыё]|(?:за|вы|по|на|от|у|до|раз|при|про|об|долбо)[её]б'
+    r'|бля(?![а-яё])|сук(?:[аиуо]|ин)(?![а-яё])|пид[оа]?р|педик(?![а-яё])|fag(?:s|got)?(?![a-z])|retard'
+    r'|dick(?![a-z])|kys(?![a-z]))')
+
+
+def chat_bot(login):
+    if login in BOTY_CHATA or BOT_PO_IMENI.search(login):
+        return True
+    try:
+        return login in {x.strip().lower() for x in open(BOTY_SVOI) if x.strip()}
+    except OSError:
+        return False
+
+
+def dlya_chteniya(tekst, bity=False):
+    """Сообщение — как его читать: без «/me», служебных знаков, значков битов и «@» перед ником;
+    повторы («LUL LUL LUL», «ааааа») — коротко. Пусто — читать нечего."""
+    if tekst.startswith('\x01ACTION '):
+        tekst = tekst[8:].rstrip('\x01')
+    tekst = re.sub(r'[\x00-\x1f\x7f]', ' ', tekst)
+    if bity:
+        tekst = CHEER.sub(' ', tekst)
+    tekst = re.sub(r'@(\w)', r'\1', tekst)
+    tekst = re.sub(r'(\w)\1{3,}', r'\1\1\1', tekst)
+    tekst = re.sub(r'(?i)(?<!\S)(\S+)(?:\s+\1(?!\S)){2,}', r'\1', tekst)
+    tekst = ' '.join(tekst.split())
+    if len(tekst) > PEREDACHA_DLINA:
+        tekst = tekst[:PEREDACHA_DLINA].rsplit(' ', 1)[0] + '…'
+    return tekst
+
+
+class Peredacha:
+    """Чат вслух: сообщение зрителя — голосу дословно, вне очереди (12.10). Своим потоком."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.derzhim = []           # [пришло, login, кто, текст, ids, важность 0–2] — ждут PEREDACHA_DERZHAT с
+        self.vremena = []           # когда приходили сообщения (за минуту) — шквал ли
+        self.propushcheno = 0       # в шквал не прочитано — скажем числом
+        self.posl_vazhnoe = 0.0
+        self.posl_chislo = 0.0
+        self.potok = None
+
+    def prishlo(self, tags, login, kto, tekst, kanal=None, now=None):
+        """Сообщение из чата. Вернёт, почему не читаем (для проверки), или None — читаем."""
+        now = now or time.time()
+        login = (login or '').lower()
+        if os.path.exists(PEREDACHA_OFF):
+            return 'выключено'
+        if login == kanal or 'broadcaster/' in tags.get('badges', ''):
+            return 'Александр'
+        if chat_bot(login):
+            return 'бот'
+        if tags.get('emote-only') == '1':
+            return 'смайлы'
+        t = dlya_chteniya(tekst, bity=bool(tags.get('bits')))
+        if not t or t.startswith('!') or not re.search(r'\w', t):
+            return 'команда или пусто'
+        if SSYLKA.search(t):
+            return 'ссылка'
+        if GRUBO.search(t):
+            return 'грубо'
+        kto = re.sub(r'[^\w-]', '', kto or login)[:25] or login
+        # важность: 2 — тебе (Александру) или от друга, первыми всегда, и в шквал; 1 — Плюсу, вопрос, биты
+        vazhnoe = 2 if login in druzya() or k_sashe(t, tags, kanal) else \
+            1 if k_plusu(t) or '?' in t or tags.get('bits') else 0
+        with self.lock:
+            self.vremena = [x for x in self.vremena if now - x < 60] + [now]
+            if len(self.vremena) > PEREDACHA_KIPIT and not vazhnoe:
+                self.propushcheno += 1
+                return 'шквал'
+            mid = tags.get('id', '')
+            for d in self.derzhim:
+                if d[1] == login and len(d[3]) + len(t) < 300:
+                    d[3] = d[3] + ('' if d[3][-1:] in '.!?…' else '.') + ' ' + t   # тот же зритель дописывает
+                    d[0] = now
+                    d[4].append(mid)
+                    d[5] = max(d[5], vazhnoe)
+                    break
+            else:
+                self.derzhim.append([now, login, kto, t, [mid], vazhnoe])
+            if self.potok is None:
+                self.potok = threading.Thread(target=self.run, daemon=True)
+                self.potok.start()
+        return None
+
+    def ubrat(self, mid=None, login=None, vse=False):
+        """Модератор удалил сообщение, забанил зрителя или очистил чат — не читаем."""
+        with self.lock:
+            if vse:
+                self.derzhim = []
+            for d in list(self.derzhim):
+                if login and d[1] == login.lower():
+                    self.derzhim.remove(d)
+                elif mid and mid in d[4]:
+                    d[4].remove(mid)
+                    if not d[4]:
+                        self.derzhim.remove(d)
+
+    def otdat(self, now=None):
+        """Отстоявшиеся сообщения — голосу. Вернёт тексты, отданные голосу."""
+        now = now or time.time()
+        out = []
+        with self.lock:
+            kipit = len([x for x in self.vremena if now - x < 60]) > PEREDACHA_KIPIT
+            gotovy = sorted((d for d in self.derzhim if now - d[0] >= PEREDACHA_DERZHAT), key=lambda d: -d[5])
+            for d in gotovy:                    # тебе и от друзей — первыми; дальше — как пришли
+                if d[5] < 2 and (kipit or now - d[0] > 60):   # шквал: только важное, не чаще раза в KIPIT_RAZ с
+                    if not d[5] or now - d[0] > 60:
+                        self.derzhim.remove(d)  # пока ждало, чат закипел, или устарело — числом
+                        self.propushcheno += 1
+                        continue
+                    if now - self.posl_vazhnoe < PEREDACHA_KIPIT_RAZ:
+                        continue
+                    self.posl_vazhnoe = now
+                self.derzhim.remove(d)
+                out.append('%s: %s' % (d[2], d[3]))
+            if self.propushcheno and not self.derzhim and now - self.posl_chislo >= 60:
+                n, self.propushcheno, self.posl_chislo = self.propushcheno, 0, now
+                out.append('Ещё %d %s в чате — читаю только вопросы и обращения.' % (
+                    n, skolko(n, 'сообщение', 'сообщения', 'сообщений').split(' ', 1)[1]))
+        for t in out:
+            v_golos_chat(t)
+        return out
+
+    def run(self):
+        while True:
+            time.sleep(0.25)
+            try:
+                self.otdat()
+            except Exception as e:
+                print(time.strftime('%H:%M:%S'), 'чат вслух:', type(e).__name__, flush=True)
+
+
+PODNYAT = {'t': 0.0}
+
+
+def v_golos_chat(t):
+    """Сообщение чата — в очередь голоса «.chat» (вне очереди). Голоса нет — поднять (не чаще раза в
+    10 с): прочтёт, как встанет."""
+    if time.time() - PODNYAT['t'] > 10 and not demon_zhiv():
+        PODNYAT['t'] = time.time()
+        golos_zhiv()
+    try:
+        os.makedirs(G_Q, exist_ok=True)
+        put = '%s/%d.chat' % (G_Q, time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(t)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
+PEREDACHA = Peredacha()
 
 
 def pachka_po_vazhnosti(novye, znakomye, n=CHAT_V_PACHKE):
@@ -1076,7 +1293,8 @@ def pachka_po_vazhnosti(novye, znakomye, n=CHAT_V_PACHKE):
         g[0], g[3] = i, g[3] + 1               # свежесть — по последнему такому; сколько раз
     def ves(k):
         i, kto, tekst, skolko = gruppy[k]
-        return (3 if k_plusu(tekst) else 0) + (2 if '?' in tekst else 0) + (1 if skolko >= 3 else 0) + \
+        return (4 if k_sashe(tekst) or any(x.lower() in druzya() for x in kto) else 0) + \
+               (3 if k_plusu(tekst) else 0) + (2 if '?' in tekst else 0) + (1 if skolko >= 3 else 0) + \
                (1 if any(x not in znakomye for x in kto) else 0), i
     vzyali = sorted(sorted(poryadok, key=ves, reverse=True)[:n], key=lambda k: gruppy[k][0])
     stroki = []
@@ -1174,6 +1392,7 @@ class Chat(threading.Thread):
                 self.prishlo(kto, m.group(3))
                 donat_iz_chata(tags, kto, m.group(3))
                 v_kadr(tags, m.group(2), kto, m.group(3))
+                PEREDACHA.prishlo(tags, m.group(2), kto, m.group(3), k)
             elif chistka_chata(line):
                 pass
             else:

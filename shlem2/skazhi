@@ -10,6 +10,7 @@ OFF = '/root/.golos-off'
 STOP = '/tmp/golos.stop'        # tiho пишет сюда время; речь, начатая раньше, замолкает
 LOCK = '/tmp/golos.lock'        # очередь: говорит тот, кто держит замок
 VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
+VOICE_VED = os.environ.get('GOLOS_VOICE_VED', 'de-DE-SeraphinaMultilingualNeural')   # соведущая (12.10)
 PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
 
 
@@ -66,7 +67,8 @@ def stary(text):
                 break
             src, mp3 = os.path.join(tmp, '%d.txt' % i), os.path.join(tmp, '%d.mp3' % i)
             open(src, 'w').write(k)
-            p = subprocess.Popen(['edge-tts', '--voice', VOICE, '-f', src, '--write-media', mp3],
+            golos = VOICE_VED if os.environ.get('SKAZHI_VID') == 'ved' else VOICE   # соведущая — Серафина
+            p = subprocess.Popen(['edge-tts', '--voice', golos, '-f', src, '--write-media', mp3],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             synth[:] = [p]
             ready.put(mp3 if p.wait() == 0 else None)

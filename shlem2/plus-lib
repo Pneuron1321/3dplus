@@ -146,6 +146,22 @@ def skachat(U, put, sek, OUT):
 
 # ---------- efir: эфир на Twitch из приложения 2 ----------
 
+GOLOS_KUDA = os.environ.get('GOLOS_KUDA', '/tmp/golos.kuda')
+KUDA = {'most-oba': 'Голос Плюса: в эфире (мост играет в шлем и прямо в эфир).',
+        'most-vsluh': 'Голос Плюса: в эфире (мост играет, захват эфира пишет; приложение старше 2.3.9).',
+        'uho': 'Голос Плюса: только в ухо Александру, в эфир не идёт («плюс плюс вслух» — вернуть).',
+        'termux': 'Голос Плюса в эфир НЕ идёт: играет Termux — мост не ответил или в /root/.golos-rezhim '
+                  '«termux». Открыт ли Quest Claude Bridge 2?'}
+
+
+def golos_kuda():
+    """Слышно ли Аву в эфире (12.10: 11.10 её не было слышно): куда golos играл последнюю порцию."""
+    try:
+        return KUDA.get(open(GOLOS_KUDA).read().split()[1])
+    except (OSError, IndexError):
+        return None
+
+
 def efir_skazat(U):
     r = zapros(U, '/efir', 5)
     if r is None:
@@ -164,6 +180,9 @@ def efir_skazat(U):
         if d.get('ekran_fps') is not None:             # 2.3.9: игра или эфир
             out.append('Игра: %s кадров/с; плашки эфира: %s мс в секунду; глазам Плюса: %s кадра/с.'
                        % (d.get('ekran_fps'), d.get('plashki_ms'), d.get('glaza_fps')))
+        g = golos_kuda()
+        if g:
+            out.append(g)
     elif s == 'podklyuchayus':
         out.append('Эфир: подключаюсь к Twitch… ' + o)
     elif s == 'obryv':

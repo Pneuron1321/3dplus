@@ -10,11 +10,17 @@
 #                       быстрее (звучащий кусок доигрывает как есть);
 #   /tmp/golos.pauza  — «плюс плюс»: пауза, пока он говорит (иначе микрофон пишет Аву);
 #   /tmp/golos.dalshe — фраза услышана: продолжить с начала прерванного куска, +25 %.
-# Режим — /root/.golos-rezhim: «vsluh» (по умолчанию: Аву слышно и в шлеме, и в эфире; с
-# приложения 2.3.9 играет сам мост — в шлем и прямо в эфир, без play-audio; мост не умеет или
-# не сыграл — сам назад на play-audio Termux на 10 минут), «termux» (всегда play-audio, как до
-# 2.3.9 — ручной откат) или «uho» (играет приложение-мост со звуком «не записывать»: слышит
-# только Александр). В «uho» без моста Ава молчит — в эфир не уходит никогда.
+# Режим — /root/.golos-rezhim: «vsluh» (по умолчанию: Аву слышно и в шлеме, и в эфире; играет
+# мост: с приложения 2.3.9 — в шлем и прямо в эфир, старше — обычным звуком, его пишет захват звука
+# эфира; мост не отвечает или не сыграл — play-audio Termux на 10 минут: в шлеме слышно, а в эфир
+# моста НЕ попадает — Termux старое приложение, его звук закрыт для захвата, так 11.10 Аву и не
+# было слышно в эфире), «termux» (всегда play-audio — ручной откат) или «uho» (играет приложение-
+# мост со звуком «не записывать»: слышит только Александр; в «uho» без моста Ава молчит). «В ухо»,
+# оставшееся с прошлого раза, новый эфир сам сбрасывает на «вслух» (12.10: вся речь — в эфире).
+# Где звучит сейчас — /tmp/golos.kuda (efir status говорит).
+# Чат вслух (12.10): уши кладут «.chat» — сообщение зрителя дословно, вне очереди: звучащая порция
+# обрывается на границе фраз, чат звучит, потом Ава продолжает со следующей фразы.
+# Соведущая («.ved» от vedushchiy) говорит своим голосом — Серафина (GOLOS_VOICE_VED); остальное — как у Авы.
 # Ответ звучит порциями (12.10): короткие предложения склеиваются в порцию до 120 (вторая) и
 # 220 знаков, первая — как раньше, до запятой; внутри — метки фраз из синтеза (edge-tts присылает
 # время каждой фразы): на «плюс плюс» Ава продолжит с начала прерванной фразы, субтитр идёт
@@ -53,6 +59,8 @@ OFF = os.environ.get('GOLOS_OFF', '/root/.golos-off')
 ZAMER = os.environ.get('GOLOS_ZAMER', '/tmp/zamer.log')
 MOST = os.environ.get('GOLOS_MOST', 'http://localhost:8766')   # приложение 2 (1.0 — 8765)
 VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
+# Соведущая (12.10, Александр): свой голос — Серафина; темп, порции, очередь, эфир, субтитры — как у Авы.
+VOICE_VED = os.environ.get('GOLOS_VOICE_VED', 'de-DE-SeraphinaMultilingualNeural')
 PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
 TITR = os.environ.get('GOLOS_TITR', '/usr/local/bin/titr')     # субтитры эфира (приложение 2.2.7)
 # Темп Авы (решение Александра 05.10): обычная речь +15 % — это новые «100 %»;
@@ -64,14 +72,25 @@ POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')      # последний
 # синтез не вышел и со второй попытки (нет сети) — Ава говорит это из кэша, а не молчит (не чаще
 # раза в минуту). Решение Александра 11.10: одно слово «Четыре» — пропало, значит, голос снова есть.
 BEZ_SETI = 'Четыре.'
+# Во время эфира мост не сыграл «вслух» и голос ушёл на play-audio — Ава говорит это Александру
+# (play-audio: слышит только он), не чаще раза в минуту (12.10: «я думаю, что она говорит всем»).
+NE_SLYSHNO = 'Меня не слышно в эфире.'
 PUSTO = ''                # кусок без звука: в тексте нечего сказать (одни знаки, смайлы)
 ZARANEE = ('Не расслышала.', 'Теперь в ухо.', 'Теперь вслух.', 'Сжимаю контекст.', 'Рация.', 'Окно.',
-           'Сейчас посмотрю.', 'Секунду.', 'Готово.', BEZ_SETI, 'Ещё нечего повторить.')
+           'Сейчас посмотрю.', 'Секунду.', 'Готово.', BEZ_SETI, NE_SLYSHNO, 'Ещё нечего повторить.')
+# Синтез: 11.10 вечером edge-tts десятки раз отвечал «403» (сервис отказывал), обе попытки пропадали
+# и звучало «Четыре». Теперь попыток четыре, с паузами между ними (с).
+PAUZY_SINTEZA = (0.3, 0.8, 1.5)
 PAUZA_MAKS = 200          # с: пауза дольше — прерванное устарело, не договариваем
 VPERED = 2                # сколько кусков готовить заранее, пока звучит текущий
 # Порции (12.10): вторая — до 120 знаков (успеть синтезировать, пока звучит первая), дальше — до 220.
 PORCIYA = tuple(int(x) for x in os.environ.get('GOLOS_PORCIYA', '120,220').split(','))
 MOST_SLOMAN = 600         # с: мост не сыграл «вслух» — столько играем через play-audio (самооткат)
+MOST_SLOMAN_EFIR = 20     # с: то же во время эфира — play-audio эфир не слышит, мост пробуем почти сразу
+KUDA = os.environ.get('GOLOS_KUDA', '/tmp/golos.kuda')       # где звучит голос: для efir status
+EFIR_SEK = 15             # с: как часто спрашивать мост, идёт ли эфир (новый эфир — «в ухо» снова «вслух»)
+EFIR_IDYOT = ('efir', 'podklyuchayus', 'obryv')
+SREZ_ZAPAS = 0.12         # с: чат ждёт — порцию обрываем за столько до следующей фразы (в паузе между ними)
 BAJT_SEK = 6000.0         # edge-tts: 48 кбит/с — 6000 байт на секунду звука
 DOSLUH = ('hook', 'potok0', 'potok', 'ved')   # после чего уши слушают секунду без «плюс плюс»
 
@@ -80,9 +99,9 @@ def log(*a):
     print(time.strftime('%H:%M:%S'), *a, flush=True)
 
 
-def kesh(tekst, temp):
-    """Файл короткой фразы в кэше."""
-    return os.path.join(KESH, hashlib.sha1(('%s|%s|%s' % (VOICE, temp, tekst)).encode()).hexdigest()
+def kesh(tekst, temp, golos=None):
+    """Файл короткой фразы в кэше (у каждого голоса — свой)."""
+    return os.path.join(KESH, hashlib.sha1(('%s|%s|%s' % (golos or VOICE, temp, tekst)).encode()).hexdigest()
                         + '.mp3')
 
 
@@ -300,19 +319,20 @@ class Sintez:
         """Границы фраз (или слов) последнего синтеза этого потока: [(с, длительность, текст)]."""
         return getattr(self.tl, 'metki', None)
 
-    def __call__(self, tekst, temp, put):
-        """True — звук готов. None — сказать нечего: edge-tts не вернул звука (одни знаки, смайлы),
-        сеть ни при чём. False — не вышел и со второй попытки (11.10: «голос без сети» звучал перед
-        нормальным ответом — сбой одного куска при живой сети; теперь он пробуется ещё раз)."""
+    def __call__(self, tekst, temp, put, golos=None):
+        """golos — чей голос (по умолчанию Ава; соведущая — VOICE_VED). True — звук готов. None —
+        сказать нечего: edge-tts не вернул звука (одни знаки, смайлы), сеть ни при чём. False — не
+        вышел ни с одной из попыток (12.10: их четыре, с паузами PAUZY_SINTEZA — 11.10 вечером
+        сервис часто отвечал «403», и двух попыток не хватало)."""
         tmp = put + '.tmp'
         self.tl.metki = None
-        for popytka in (1, 2):
+        for popytka in range(1, len(PAUZY_SINTEZA) + 2):
             try:
                 if self.mod:
                     metki = []
 
                     async def go():
-                        c = self.mod.Communicate(tekst, VOICE, rate=temp)
+                        c = self.mod.Communicate(tekst, golos or VOICE, rate=temp)
                         with open(tmp, 'wb') as f:
                             async for ch in c.stream():
                                 if ch['type'] == 'audio':
@@ -323,7 +343,7 @@ class Sintez:
                     self.asyncio.run(go())
                     self.tl.metki = metki or None
                 elif self.exe:
-                    subprocess.run([self.exe, '--voice', VOICE, '--rate=' + temp, '--text', tekst,
+                    subprocess.run([self.exe, '--voice', golos or VOICE, '--rate=' + temp, '--text', tekst,
                                     '--write-media', tmp], stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, timeout=30)
                 if os.path.getsize(tmp) > 0:
@@ -335,8 +355,8 @@ class Sintez:
                     self.ubrat(tmp)
                     return None
                 log('синтез не вышел (попытка %d):' % popytka, type(e).__name__, str(e)[:120])
-            if popytka == 1:
-                time.sleep(0.3)
+            if popytka <= len(PAUZY_SINTEZA):
+                time.sleep(PAUZY_SINTEZA[popytka - 1])
         self.ubrat(tmp)
         return False
 
@@ -460,7 +480,9 @@ class Rot:
 
 
 class Termux:
-    """play-audio Termux: звук идёт в общий микс — его пишет и стрим."""
+    """play-audio Termux: звук слышно в шлеме (и BeamXR пишет весь звук), а захват звука эфира моста
+    его не берёт — Termux старое приложение (targetSdk 28), его звук закрыт для захвата. Поэтому
+    «вслух» играет мост, а play-audio — только запасной путь, когда мост не отвечает."""
 
     def __init__(self, put):
         self.t0 = time.time()
@@ -531,13 +553,29 @@ def most_umeet():
         return False
 
 
-def most_umeet_oba():
-    """Мост (2.3.9+) сам играет «вслух»: в шлем и прямо в эфир (режим «oba» в /say/status)."""
+def most_vsluh():
+    """Чем мост играет «вслух»: «oba» (2.3.9+: в шлем и прямо в эфир), «vsluh» (старше: обычным звуком —
+    его пишет захват звука эфира) или None — мост не отвечает (тогда play-audio Termux)."""
     try:
         with urllib.request.urlopen(MOST + '/say/status', timeout=2) as r:
-            return 'oba' in (json.loads(r.read().decode() or '{}').get('rezhimy') or [])
+            if r.status != 200:
+                return None
+            try:
+                d = json.loads(r.read().decode() or '{}')
+            except ValueError:
+                d = {}
     except Exception:
-        return False
+        return None
+    return 'oba' if 'oba' in ((d.get('rezhimy') if isinstance(d, dict) else None) or []) else 'vsluh'
+
+
+def efir_sostoyanie():
+    """Что с эфиром моста: state из /efir («efir», «podklyuchayus», «obryv», иначе выключен); None — мост молчит."""
+    try:
+        with urllib.request.urlopen(MOST + '/efir', timeout=2) as r:
+            return str(json.loads(r.read().decode() or '{}').get('state') or '')
+    except Exception:
+        return None
 
 
 # ---------- демон ----------
@@ -552,6 +590,8 @@ class Kusok:
         self.tekst = ' '.join(self.predl)
         self.uid, self.t, self.pervyy = uid, t, pervyy
         self.dosluh = dosluh      # последний кусок ответа: доиграл — уши слушают ещё секунду
+        self.chat = False         # сообщение чата вслух: вне очереди, без субтитров
+        self.golos = None         # чей голос: None — Ава, VOICE_VED — соведущая
         self.bystro = False
         self.mp3 = {}             # темп → путь, False — не вышел, PUSTO — сказать нечего
         self.nachala = {}         # темп → где в звуке начинается каждое предложение (с)
@@ -563,14 +603,18 @@ class Kusok:
 
 
 class Golos:
-    def __init__(self, sintez=None, termux=Termux, most=Most, dosluh=None, dlit=None, titr=False, most_oba=None):
+    def __init__(self, sintez=None, termux=Termux, most=Most, dosluh=None, dlit=None, titr=False, most_oba=None,
+                 efir=None):
         self.sintez = sintez or Sintez()
         self.Termux, self.Most = termux, most
         self.dosluh = dosluh or Rot.dosluh
         self.dlit_f = dlit or (lambda put: os.path.getsize(put) / BAJT_SEK)
         self.titry = Titry(zagruzit_titr() if titr is False else titr)
-        self.most_oba_f = most_oba or most_umeet_oba
-        self.most_oba_t, self.most_oba = 0.0, False
+        self.most_oba_f = most_oba or most_vsluh   # «oba» | «vsluh» | None (True/False — как «oba»/None)
+        self.most_oba_t, self.most_oba = 0.0, None
+        self.efir_f = efir or efir_sostoyanie
+        self.efir_t, self.efir_bylo = 0.0, None    # шёл ли эфир при прошлом взгляде (None — ещё не знаем)
+        self.kuda = None                           # куда звучала последняя порция (/tmp/golos.kuda)
         self.most_sloman_do = 0.0  # самооткат: мост не сыграл «вслух» — до этого времени play-audio
         self.q = []
         self.cv = threading.Condition()
@@ -585,6 +629,7 @@ class Golos:
         self.skazano = []          # сказанное в этом ходе: вступление не повторять хуком Stop
         self.pozzhe = []           # вступления, которых ещё нет в журнале: (когда, попытка, raw)
         self.bez_seti_t = 0.0      # когда последний раз говорили «Четыре» (голоса нет)
+        self.ne_slyshno_t = 0.0    # когда последний раз говорили «Меня не слышно в эфире»
         self.zhdu_dosluh = False   # доиграл ответ: замолчит совсем — уши слушают секунду
 
     # --- приём ---
@@ -597,17 +642,53 @@ class Golos:
         return 'uho' if r == 'uho' else 'vsluh'
 
     def cherez_most(self):
-        """«Вслух» играет мост (2.3.9: в шлем и прямо в эфир) — если не «termux», мост умеет и не
-        ломался последние MOST_SLOMAN с. Умеет ли — спрашиваем не чаще раза в минуту."""
+        """Каким режимом «вслух» играет мост: «oba» (2.3.9: в шлем и прямо в эфир), «vsluh» (мост старше:
+        обычным звуком — его пишет захват эфира) или None — play-audio Termux («termux» в файле режима,
+        мост не отвечает или ломался последние MOST_SLOMAN с). Спрашиваем мост не чаще раза в минуту."""
         if getattr(self, 'termux_vsegda', False) or time.time() < self.most_sloman_do:
-            return False
+            return None
         if time.time() - self.most_oba_t > 60:
             self.most_oba_t = time.time()
             try:
-                self.most_oba = bool(self.most_oba_f())
+                m = self.most_oba_f()
             except Exception:
-                self.most_oba = False
+                m = None
+            self.most_oba = 'oba' if m is True else (m if m in ('oba', 'vsluh') else None)
         return self.most_oba
+
+    def novyy_efir(self):
+        """Новый эфир (12.10, Александр: «вся её речь — по умолчанию в эфире»): «в ухо», оставшееся с
+        прошлого раза, — снова «вслух». Переподключение того же эфира — не новый: «в ухо», сказанное
+        посреди эфира, держится до следующего. Мост не ответил — ничего не решаем."""
+        if time.time() - self.efir_t < EFIR_SEK:
+            return
+        self.efir_t = time.time()
+        try:
+            s = self.efir_f()
+        except Exception:
+            s = None
+        if s is None:
+            return
+        idyot = s in EFIR_IDYOT
+        if idyot and self.efir_bylo is False and self.chitat_rezhim() == 'uho':
+            try:
+                open(REZHIM + '.tmp', 'w').write('vsluh\n')
+                os.replace(REZHIM + '.tmp', REZHIM)
+                log('эфир начался — голос снова вслух (в ухо было с прошлого раза)')
+            except OSError:
+                pass
+        self.efir_bylo = idyot
+
+    def zapisat_kuda(self, kuda):
+        """Где звучит голос — в /tmp/golos.kuda (только когда меняется): efir status скажет, слышно ли Аву в эфире."""
+        if kuda == self.kuda:
+            return
+        self.kuda = kuda
+        try:
+            open(KUDA + '.tmp', 'w').write('%d %s\n' % (time.time(), kuda))
+            os.replace(KUDA + '.tmp', KUDA)
+        except OSError:
+            pass
 
     def priyom(self):
         try:
@@ -641,6 +722,9 @@ class Golos:
             if glavnyy:                    # свидетелю zamer: молчит нарочно, не сломалась
                 metka('molchit', ns, 'выключена, оборвано или устарело')
             return                         # оборвали после, устарело или Ава молчит
+        if vid == 'chat':
+            self.v_chat(ns, t, raw)
+            return
         if vid == 'pre':
             _, tekst = iz_transkripta(raw)
         else:
@@ -678,8 +762,62 @@ class Golos:
             self.titry.perevesti(ns, [f for p in ps for f in p])
         with self.cv:
             for i, p in enumerate(ps):
-                self.q.append(Kusok(p, ns, t, i == 0 and not dalshe, dosluh and i == len(ps) - 1))
+                k = Kusok(p, ns, t, i == 0 and not dalshe, dosluh and i == len(ps) - 1)
+                if vid == 'ved':
+                    k.golos = VOICE_VED    # соведущая — голосом Серафины (12.10), остальное как у Авы
+                self.q.append(k)
             self.cv.notify_all()
+
+    def v_chat(self, ns, t, raw):
+        """Сообщение чата вслух (12.10, Александр: «дословно мне, вне очереди размышлений, не теряя
+        мысль»): встаёт перед несказанным ответом (за уже ждущими сообщениями чата); звучащую порцию
+        igra оборвёт на границе фраз и доскажет после. Без субтитров (чат и так в кадре), без «дослуха»."""
+        tekst = dlya_uha(raw, predel=400)
+        if not re.search(r'\w', tekst):
+            return
+        with self.cv:
+            i = 1 if self.igrok is not None and self.q and getattr(self.igrok, 'kusok', None) is self.q[0] else 0
+            while i < len(self.q) and self.q[i].chat:
+                i += 1
+            for p in porcii(tekst, pervyy=0):
+                k = Kusok(p, ns, t, False)
+                k.chat = True
+                self.q.insert(i, k)
+                i += 1
+            self.cv.notify_all()
+        log('чат вслух: %d знаков' % len(tekst))
+
+    def srez_dlya_chata(self):
+        """Ждёт чат, а звучит ответ: оборвать порцию в паузе перед следующей фразой (по меткам синтеза),
+        несказанные фразы — новой порцией сразу после чата: Ава договорит с той фразы, на которой
+        остановилась. Порция из одной фразы или без меток — доиграет целиком, чат — следом."""
+        igrok = self.igrok
+        with self.cv:
+            if (len(self.q) < 2 or not self.q[1].chat or self.q[0].chat
+                    or getattr(igrok, 'kusok', None) is not self.q[0]):
+                return
+            k, c = self.q[0], self.q[1]
+            if not c.mp3.get(c.temp):
+                return                     # чат ещё синтезируется — ответ пусть звучит
+            nachala = k.nachala.get(getattr(igrok, 'temp', None)) or []
+            proshlo = time.time() - getattr(igrok, 't0', time.time())
+            j = next((i for i, n in enumerate(nachala) if i > 0 and n > proshlo), None)
+            if j is None or j >= len(k.predl) or proshlo < nachala[j] - SREZ_ZAPAS:
+                return
+        self.stop_igrok()
+        with self.cv:
+            if not self.q or self.q[0] is not k:
+                return
+            self.q.pop(0)
+            self.ubrat_mp3(k)
+            nov = Kusok(k.predl[j:], k.uid, k.t, False, k.dosluh)
+            nov.bystro, nov.golos = k.bystro, k.golos
+            i = 0
+            while i < len(self.q) and self.q[i].chat:
+                i += 1
+            self.q.insert(i, nov)
+            self.cv.notify_all()
+        log('чат вслух: порцию обрываю перед фразой %d из %d — договорю после' % (j + 1, len(k.predl)))
 
     # --- управление ---
     def upravlenie(self):
@@ -724,6 +862,7 @@ class Golos:
             self.vybrosit(lambda k: k.t < granica)
             self.dl = time.time()
             log('пауза затянулась — прерванное не договариваю')
+        self.novyy_efir()
 
     def pauza(self):
         return max(self.pz, self.vnesh) > self.dl
@@ -776,7 +915,7 @@ class Golos:
             if j == 0:
                 return
             nov = Kusok(k.predl[j:], k.uid, k.t, False, k.dosluh)
-            nov.bystro = k.bystro
+            nov.bystro, nov.golos = k.bystro, k.golos
             self.ubrat_mp3(k)
             self.q[0] = nov
             self.cv.notify_all()
@@ -784,6 +923,8 @@ class Golos:
 
     # --- игра ---
     def igra(self):
+        if self.igrok:
+            self.srez_dlya_chata()
         if self.igrok:
             end = self.igrok.konec()
             if end is None:
@@ -803,11 +944,15 @@ class Golos:
                 self.s_prervannoy(igrok, time.time() - getattr(igrok, 't0', time.time()))
                 self.bystree(self.vnesh)
                 log('мост оборвал — пауза')
-            elif getattr(igrok, 'oba', False):
-                self.most_sloman_do = time.time() + MOST_SLOMAN
+            elif getattr(igrok, 'oba', False):     # «вслух» мостом (oba или старое vsluh) не вышло
+                v_efire = self.efir_bylo is True
+                sek = MOST_SLOMAN_EFIR if v_efire else MOST_SLOMAN
+                self.most_sloman_do = time.time() + sek
                 self.titry.otmena()
-                log('мост не сыграл вслух (%s) — %d мин через play-audio' % (
-                    getattr(igrok, 'err', '') or end, MOST_SLOMAN // 60))
+                log('мост не сыграл вслух (%s) — %d с через play-audio%s' % (
+                    getattr(igrok, 'err', '') or end, sek, ', а эфир идёт: в эфир не слышно' if v_efire else ''))
+                if v_efire:
+                    self.ne_slyshno()      # Александру: «Меня не слышно в эфире» — он не думает, что слышат все
                 return                     # порция осталась первой — сыграет play-audio
             else:
                 log('не сыграл:', getattr(igrok, 'err', '') or end)
@@ -838,15 +983,20 @@ class Golos:
             metka('zvuk', k.uid, self.rezhim)
             k.pervyy = False
         temp = k.temp
+        m = None if self.rezhim == 'uho' else self.cherez_most()
         if self.rezhim == 'uho':
             self.igrok = self.Most(put, 'uho')
-        elif self.cherez_most():
-            self.igrok = self.Most(put, 'oba')   # мост: в шлем и прямо в эфир, рот знает сам
-            self.igrok.oba = True
+            kuda = 'uho'
+        elif m:
+            self.igrok = self.Most(put, m)       # мост: «oba» — в шлем и прямо в эфир; «vsluh» — его пишет захват
+            self.igrok.oba = True                # «вслух» мостом: не сыграл — самооткат на play-audio
+            kuda = 'most-' + m
         else:
-            self.igrok = self.Termux(put)
+            self.igrok = self.Termux(put)        # в эфир моста не попадает (см. Termux)
+            kuda = 'termux'
+        self.zapisat_kuda(kuda)
         self.igrok.kusok, self.igrok.temp = k, temp
-        if self.rezhim != 'uho':           # субтитр — только вслух: «в ухо» зрители не слышат
+        if self.rezhim != 'uho' and not k.chat:  # субтитр — только вслух: «в ухо» зрители не слышат; чат — и так в кадре
             self.titry.pokazat(k, getattr(self.igrok, 't0', time.time()), k.nachala.get(temp) or [0.0],
                                k.dlit.get(temp) or 0.0)
 
@@ -870,7 +1020,7 @@ class Golos:
             tl = getattr(self.sintez, 'tl', None)
             if tl is not None:
                 tl.metki = None                # фраза из кэша — без чужих меток прошлого синтеза
-            ok = self.gotovyy(k.tekst, temp, put)
+            ok = self.gotovyy(k.tekst, temp, put, k.golos)
             nachala, dlit = None, 0.0
             if ok:
                 try:
@@ -891,21 +1041,24 @@ class Golos:
             if pervyy:
                 metka('sintez', k.uid, '%.2f' % (time.time() - t0))
 
-    def gotovyy(self, tekst, temp, put):
+    def gotovyy(self, tekst, temp, put, golos=None):
         """Синтез с кэшем: короткая фраза, уже сказанная раньше, берётся
-        готовым файлом — без похода в сеть (сотни мс). None — сказать нечего."""
+        готовым файлом — без похода в сеть (сотни мс). None — сказать нечего.
+        golos — чей голос (None — Ава; соведущая — VOICE_VED)."""
         if not re.search(r'\w', tekst):
             return None                    # одни знаки и смайлы: edge-tts всё равно промолчит
+        sintez = (lambda: self.sintez(tekst, temp, put)) if golos is None else \
+            (lambda: self.sintez(tekst, temp, put, golos=golos))
         if len(tekst) > 80:
-            return self.sintez(tekst, temp, put)
-        f = kesh(tekst, temp)
+            return sintez()
+        f = kesh(tekst, temp, golos)
         try:
             shutil.copyfile(f, put)
             os.utime(f)
             return True
         except OSError:
             pass
-        ok = self.sintez(tekst, temp, put)
+        ok = sintez()
         if not ok:
             return ok
         try:
@@ -932,6 +1085,22 @@ class Golos:
             return
         log('синтез не вышел — сказала «Четыре»')
         self.igrok = self.Most(put, 'uho') if self.rezhim == 'uho' else self.Termux(put)
+        self.igrok.vne_ocheredi = True
+
+    def ne_slyshno(self):
+        """Эфир идёт, а голос ушёл на play-audio (мост не сыграл): Александру — «Меня не слышно в эфире»
+        из кэша, через play-audio (зрители не слышат), не чаще раза в минуту (12.10)."""
+        if time.time() - self.ne_slyshno_t < 60 or not os.path.exists(kesh(NE_SLYSHNO, TEMP)):
+            return
+        self.ne_slyshno_t = time.time()
+        put = os.path.join(MP3, 'ne-slyshno.mp3')
+        try:
+            shutil.copyfile(kesh(NE_SLYSHNO, TEMP), put)
+        except OSError:
+            return
+        log('сказала Александру: «Меня не слышно в эфире»')
+        self.zapisat_kuda('termux')
+        self.igrok = self.Termux(put)
         self.igrok.vne_ocheredi = True
 
     def progret(self):
