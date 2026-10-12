@@ -17,7 +17,7 @@ case "$1" in
 esac
 j=$(curl -s --max-time 5 "$U/nalet$q") || {
   echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
-printf '%s' "$j" | python3 -c '
+printf '%s' "$j" | python3 -S -c '
 import json, sys
 try:
     d = json.load(sys.stdin)

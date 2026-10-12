@@ -1,20 +1,26 @@
-#!/bin/sh
+#!/bin/bash
 # golos-hook — хук Stop Claude Code: ответ Плюса звучит голосом Авы.
 # Кладёт ответ (JSON хука) в очередь голоса-демона golos и сразу выходит:
 # golos сам уберёт код, ссылки и разметку и скажет по предложениям.
 # Молчать: touch /root/.golos-off. В «рации» хук молчит — там говорит поток.
-[ -n "$GOLOS_RACIYA" ] && exit 0
-[ -e /root/.golos-off ] && exit 0
-Q=/tmp/golos/q
-mkdir -p $Q
-n=$(date +%s%N)
 # golos-hook pre — хук PreToolUse: вступление перед инструментом («Сейчас
 # посмотрю») звучит сразу, пока инструмент работает; golos найдёт его в журнале.
+# 12.10 (этап 1 плана эфира): встроенными командами bash — под proot каждый запуск программы в
+# 3–5 раз дороже, а хук рождается на каждый инструмент Плюса; было 5 запусков (mkdir, date, cat,
+# mv, flock), осталось 1 (mv — чтобы голос не прочёл недописанное). Замер: 55 → 28 мс.
+[ -n "$GOLOS_RACIYA" ] && exit 0
+[ -e /root/.golos-off ] && exit 0
+Q=${GOLOS_HOOK_Q:-/tmp/golos/q}
+[ -d "$Q" ] || mkdir -p "$Q"
+n=${EPOCHREALTIME/./}000                  # наносекунды, как date +%s%N
 v=hook
 [ "$1" = pre ] && v=pre
-cat > "$Q/$n.$v.tmp" && mv "$Q/$n.$v.tmp" "$Q/$n.$v"
-[ $v = hook ] && printf '%s\thook\t%s\t\n' "${n%??????}" "$n" >> /tmp/zamer.log
-if flock -n /tmp/golos-demon.lock true; then
+IFS= read -r -N 4000000 t || true      # -N читает блоками; -d '' — по байту (под proot ×сотни мс)
+printf '%s' "$t" > "$Q/$n.$v.tmp" && mv "$Q/$n.$v.tmp" "$Q/$n.$v"
+[ $v = hook ] && printf '%s\thook\t%s\t\n' "${n%??????}" "$n" >> "${GOLOS_HOOK_ZAMER:-/tmp/zamer.log}"
+# жив ли голос-демон: по pid и имени (после перезапуска шлема pid мог достаться чужому)
+P=; c=; { read -r P < /tmp/golos.pid; IFS= read -r -N 400 c < "/proc/$P/cmdline"; } 2> /dev/null
+if [[ $c != *golos* ]]; then                         # не жив — поднять (замок не даст двух)
   setsid nohup ${GOLOS_BIN:-/usr/local/bin/golos} >> /tmp/golos.log 2>&1 < /dev/null &
 fi
 exit 0

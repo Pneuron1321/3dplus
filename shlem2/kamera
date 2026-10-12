@@ -21,7 +21,7 @@ U=${KAMERA_URL:-http://localhost:8766}
 molchit() { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
 
 skazat() {
-  printf '%s' "$1" | python3 -c '
+  printf '%s' "$1" | python3 -S -c '
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -71,7 +71,7 @@ case "$1" in
     skazat "$j" ;;
   svyaz|podklyuchit|aifon)
     j=$(curl -s --max-time 10 "$U/kamera/stranica") || molchit
-    printf '%s' "$j" | python3 -c '
+    printf '%s' "$j" | python3 -S -c '
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -96,7 +96,7 @@ print("На айфоне в Safari открой %s и нажми «Добави�
   bolshe|menshe)
     case "$2" in *[!0-9.]*) echo "kamera bolshe 15 — на 15 % больше (число процентов)."; exit 1 ;; esac
     j=$(curl -s --max-time 5 "$U/kamera") || molchit
-    r=$(printf '%s' "$j" | python3 -c '
+    r=$(printf '%s' "$j" | python3 -S -c '
 import json, sys
 d = float(json.load(sys.stdin).get("dolya") or 0.25)
 b = sys.argv[1] == "bolshe"
@@ -132,7 +132,7 @@ print(round(min(0.5, max(0.1, d)), 4))' "$1" "$2") || exit 1
   snimaet|telefon)
     case "$2" in vkl|da|1|'') t=1 ;; vykl|net|0) t=0 ;; *) echo "kamera snimaet vkl | kamera snimaet vykl"; exit 1 ;; esac
     j=$(curl -s --max-time 5 "$U/nalet/upr?telefon=$t") || molchit
-    printf '%s' "$j" | python3 -c '
+    printf '%s' "$j" | python3 -S -c '
 import json, sys
 try:
     d = json.load(sys.stdin)

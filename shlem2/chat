@@ -17,7 +17,7 @@ if [ "$1" = ekran ]; then
   p=/chat; [ -n "$q" ] && p=/chat/upr$q
   j=$(curl -s --max-time 5 "$U$p") || { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
   case "$2" in proba|test) sleep 1; j=$(curl -s --max-time 5 "$U/chat") || true ;; esac   # нарисовалось ли
-  printf '%s' "$j" | python3 -c '
+  printf '%s' "$j" | python3 -S -c '
 import json, os, sys
 try:
     d = json.load(sys.stdin)

@@ -11,7 +11,7 @@ U=${NALET_URL:-http://localhost:8766}
 molchit() { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
 
 skazat() {
-  printf '%s' "$1" | python3 -c '
+  printf '%s' "$1" | python3 -S -c '
 import json, sys
 try:
     d = json.load(sys.stdin)

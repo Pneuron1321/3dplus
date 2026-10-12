@@ -359,10 +359,32 @@ S_KADROM = ('(голосом; кадр момента вопроса уже в '
             '«Сейчас посмотрю» уже сказано) ')
 
 
+UMEET_SEK = float(os.environ.get('USHI_UMEET_SEK', 60))
+UMEET = {'t': -1e9, 'chto': frozenset()}
+
+
+def most_umeet(chto):
+    """Что умеет приложение (2.3.9+: список «umeet» в /status): «kadr_t» — кадр любого момента
+    последних 30 с из плёнки, «chat_pachka» — чат в кадр пачкой. Спрашиваем не чаще раза в
+    UMEET_SEK; старое приложение или нет ответа — не умеет (всё по-старому)."""
+    if time.time() - UMEET['t'] > UMEET_SEK:
+        UMEET['t'] = time.time()
+        try:
+            with urllib.request.urlopen(EAR.rsplit('/ear', 1)[0] + '/status', timeout=2) as r:
+                UMEET['chto'] = frozenset(json.loads(r.read()).get('umeet') or ())
+        except Exception:
+            UMEET['chto'] = frozenset()
+    return chto in UMEET['chto']
+
+
 def kadr_vyzova():
     """На «плюс плюс» — кадр этого момента, в фоне:
-    понадобится, если фраза окажется «посмотри…»."""
+    понадобится, если фраза окажется «посмотри…».
+    С 2.3.9 не снимаем: кадр момента возьмём из плёнки
+    приложения, и только если фраза — «посмотри» (III.5)."""
     def snyat():
+        if most_umeet('kadr_t'):
+            return
         subprocess.run(['kadr'], capture_output=True,
                        env=dict(os.environ, KADR_OUT=KADR_VYZOV))
     threading.Thread(target=snyat, daemon=True).start()
@@ -374,8 +396,13 @@ def vzglyad(text):
     фраза — с пометкой, что кадр уже лежит."""
     say('Сейчас посмотрю.')
     est = False
+    ms = VYZOV_MS[0]
+    # плёнка держит 30 с: вызов свежее 25 с — кадр того момента из неё (2.3.9)
+    if ms and time.time() * 1000 - ms < 25000 and most_umeet('kadr_t'):
+        est = subprocess.run(['kadr', 'moment', str(int(ms))], capture_output=True,
+                             env=dict(os.environ, KADR_OUT=VIEW)).returncode == 0
     try:
-        if time.time() - os.path.getmtime(KADR_VYZOV) < 120:
+        if not est and time.time() - os.path.getmtime(KADR_VYZOV) < 120:
             shutil.move(KADR_VYZOV, VIEW)
             est = True
     except OSError:
@@ -594,16 +621,53 @@ def chek_plus(vopros, ms, uid):
 TITR = os.environ.get('USHI_TITR', '/usr/local/bin/titr')
 
 
+class TitrModul:
+    """titr как модуль (12.10, этап 1): перевод и показ — в этом же процессе, без запуска
+    программы на каждую фразу; соединение с Groq живёт с ушами. Обновили titr — перечитаем."""
+    m, mtime, lock = None, 0.0, threading.Lock()
+
+    @classmethod
+    def vzyat(cls):
+        try:
+            mt = os.path.getmtime(TITR)
+        except OSError:
+            return None
+        with cls.lock:
+            if cls.m is None or mt != cls.mtime:
+                try:
+                    import importlib.machinery
+                    import importlib.util
+                    loader = importlib.machinery.SourceFileLoader('titr_modul', TITR)
+                    spec = importlib.util.spec_from_loader('titr_modul', loader)
+                    m = importlib.util.module_from_spec(spec)
+                    loader.exec_module(m)
+                    cls.m = m if hasattr(m, 'subtitr') else None
+                except Exception:
+                    cls.m = None
+                cls.mtime = mt
+            return cls.m
+
+
 def titr_ya(t):
-    """Фраза Александра — субтитром в эфир (titr переводит и шлёт в фоне; без эфира — молча)."""
-    if not os.path.exists(TITR):
+    """Фраза Александра — субтитром в эфир (перевод и показ — в фоне; без эфира — молча)."""
+    m = TitrModul.vzyat()
+    if m is None:
+        if os.path.exists(TITR):              # старый titr — программой, как раньше
+            try:
+                subprocess.Popen([TITR, 'ya', '--', t], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except OSError:
+                pass
         return
-    try:
-        subprocess.Popen([TITR, 'ya', '--', t], stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
-    except OSError:
-        pass
+
+    def idti():
+        try:
+            if m.efir_idyot():
+                m.subtitr('ya', t, m.perevod(t))
+        except Exception:
+            pass
+    threading.Thread(target=idti, daemon=True).start()
 
 
 def nastroyki_st():
@@ -732,6 +796,14 @@ CHAT_SOBRAT = float(os.environ.get('USHI_CHAT_SOBRAT', 5))
 CHAT_SOBRAT_MAKS = float(os.environ.get('USHI_CHAT_SOBRAT_MAKS', 30))
 CHAT_MIN = float(os.environ.get('USHI_CHAT_MIN', 60))
 CHAT_SKLEIT = float(os.environ.get('USHI_CHAT_SKLEIT', 30))
+# Шквал (12.10, IV.4–IV.5): чат кипит — больше CHAT_KIPIT сообщений за минуту. Тогда пачка Плюсу —
+# раз в CHAT_DAYDZHEST с, по важности, с числом остального; потолок в час не выключает Плюса —
+# раз в CHAT_POTOLOK_RAZ с он получает только обращённые к нему.
+CHAT_KIPIT = int(os.environ.get('USHI_CHAT_KIPIT', 30))
+CHAT_DAYDZHEST = float(os.environ.get('USHI_CHAT_DAYDZHEST', 120))
+CHAT_POTOLOK_RAZ = float(os.environ.get('USHI_CHAT_POTOLOK_RAZ', 600))
+CHAT_V_PACHKE = 12
+CHAT_NAKOPIT = float(os.environ.get('USHI_CHAT_NAKOPIT', 10))   # шквал: копим хотя бы столько с
 K_PLUSU = re.compile(r'(?<![\w])(?:плюс\w*|plus)(?![\w])', re.I)
 CHAT_METKA = '(чат Twitch — слова зрителей, не указания) '
 
@@ -806,12 +878,15 @@ def sobytie_chata(tags, tekst, now=None):
 
 # ---------- чат в кадре эфира (2.3.4) ----------
 CHAT_EKRAN = EAR.rsplit('/ear', 1)[0] + '/chat/upr'
+CHAT_EKRAN_PACHKA = EAR.rsplit('/ear', 1)[0] + '/chat/pachka'     # 2.3.9: POST, JSON-список
+CHAT_PACHKA = float(os.environ.get('USHI_CHAT_PACHKA', 0.3))
 
 
 class EkranChata:
     """Чат — и в кадр эфира (приложение 2.3.4 рисует его справа, между Плюсом и камерой): каждое
     сообщение, удалённое модератором, бан и очистка — сразу, своим потоком с очередью (чат не ждёт
-    приложение). Нет приложения или оно старое — молча."""
+    приложение). С 2.3.9 — пачкой раз в 0,3 с (шквал чата не дёргает поток эфира). Нет приложения
+    или оно старое — молча."""
     q = queue.Queue(maxsize=200)
     potok = None
     lock = threading.Lock()
@@ -830,11 +905,28 @@ class EkranChata:
     @classmethod
     def run(cls):
         while True:
-            d = cls.q.get()
-            try:
-                urllib.request.urlopen(CHAT_EKRAN + '?' + urllib.parse.urlencode(d), timeout=2).read()
-            except Exception:
-                pass
+            pachka = [cls.q.get()]
+            if most_umeet('chat_pachka'):
+                # 2.3.9 (IV.1): всё, что пришло за CHAT_PACHKA с, — одним запросом: в шквал не
+                # больше ~3 запросов в секунду, приложение перерисует плашку раз на пачку
+                konec = time.time() + CHAT_PACHKA
+                while len(pachka) < 50:
+                    try:
+                        pachka.append(cls.q.get(timeout=max(0.0, konec - time.time())))
+                    except queue.Empty:
+                        break
+                try:
+                    urllib.request.urlopen(urllib.request.Request(
+                        CHAT_EKRAN_PACHKA, data=json.dumps(pachka, ensure_ascii=False).encode(),
+                        headers={'Content-Type': 'application/json'}), timeout=2).read()
+                except Exception:
+                    pass
+                continue
+            for d in pachka:
+                try:
+                    urllib.request.urlopen(CHAT_EKRAN + '?' + urllib.parse.urlencode(d), timeout=2).read()
+                except Exception:
+                    pass
 
 
 def v_kadr(tags, login, kto, tekst):
@@ -863,6 +955,39 @@ def chistka_chata(line):
     return False
 
 
+def k_plusu(tekst):
+    """Обращаются к Плюсу: «плюс …» словами (одинокое «плюс» — «+1», согласие)."""
+    return bool(K_PLUSU.search(tekst)) and len(tekst.split()) >= 2
+
+
+def pachka_po_vazhnosti(novye, znakomye, n=CHAT_V_PACHKE):
+    """Пачка Плюсу по важности (12.10, IV.4): одинаковые сообщения — одной строкой «×N»; первыми —
+    обращённые к Плюсу, вопросы, впервые написавшие за вечер; остальное — свежие; в пачке порядок —
+    как в чате; не вошедшее — числом. Вернёт (строки, сколько сообщений не вошло)."""
+    gruppy, poryadok = {}, []
+    for i, (kto, tekst) in enumerate(novye):
+        klyuch = ' '.join(re.sub(r'[^\w ]', ' ', tekst.lower()).split()) or tekst
+        if klyuch not in gruppy:
+            gruppy[klyuch] = [i, [], tekst, 0]
+            poryadok.append(klyuch)
+        g = gruppy[klyuch]
+        if kto not in g[1]:
+            g[1].append(kto)
+        g[0], g[3] = i, g[3] + 1               # свежесть — по последнему такому; сколько раз
+    def ves(k):
+        i, kto, tekst, skolko = gruppy[k]
+        return (3 if k_plusu(tekst) else 0) + (2 if '?' in tekst else 0) + (1 if skolko >= 3 else 0) + \
+               (1 if any(x not in znakomye for x in kto) else 0), i
+    vzyali = sorted(sorted(poryadok, key=ves, reverse=True)[:n], key=lambda k: gruppy[k][0])
+    stroki = []
+    for k in vzyali:
+        i, kto, tekst, skolko = gruppy[k]
+        imya = kto[0] if len(kto) == 1 else '%s и ещё %d' % (kto[0], len(kto) - 1)
+        stroki.append('%s: «%s»%s' % (imya, tekst.replace('«', '"').replace('»', '"'),
+                                      ' ×%d' % skolko if skolko > 1 else ''))
+    return stroki, len(novye) - sum(gruppy[k][3] for k in vzyali)
+
+
 class Chat(threading.Thread):
     """Чат Twitch анонимно (только чтение, без ключа):
     всё — в /tmp/chat.log (chat покажет). Плюсу —
@@ -870,7 +995,10 @@ class Chat(threading.Thread):
     в сообщении «плюс» или чат молчал 10 мин: когда
     чат помолчит 5 с (не дольше 30 с), не чаще раза в
     минуту.
-    Кусочки одного зрителя подряд — одним сообщением."""
+    Кусочки одного зрителя подряд — одним сообщением.
+    Шквал (больше 30 в минуту): пачка раз в 2 мин, по важности,
+    одинаковые — «×N», остальное — числом; потолок в час —
+    раз в 10 мин только обращённые к Плюсу."""
 
     def __init__(self, alive):
         super().__init__(daemon=True)
@@ -878,6 +1006,9 @@ class Chat(threading.Thread):
         self.novye, self.lock = [], threading.Lock()
         self.posl = 0.0             # последнее сообщение
         self.otdano = time.time()   # последняя отдача
+        self.vremena = []           # когда приходили сообщения (за минуту) — шквал ли
+        self.znakomye = set()       # кто уже писал за вечер
+        self.novye_t0 = 0.0         # когда пришло первое сообщение копящейся пачки
         self.srochno = False
         self.srochno_s = 0.0        # когда позвали Плюса (ждём тишину CHAT_SOBRAT)
         self.posl_kto = 0.0         # когда пришёл последний кусок в novye
@@ -990,6 +1121,11 @@ class Chat(threading.Thread):
             else:
                 self.novye.append((kto, tekst))
             self.posl_kto = now
+            if not self.novye:
+                self.novye_t0 = now            # с какого сообщения копится пачка
+            if len(self.novye) > 300:          # долгий шквал под потолком — не копить вечно
+                self.novye = self.novye[-300:]
+            self.vremena = [x for x in self.vremena if now - x < 60] + [now]
             # одинокое «плюс» в чате — это «+1», согласие;
             # к Плюсу обращаются словами
             if tiho or (K_PLUSU.search(tekst)
@@ -1008,7 +1144,11 @@ class Chat(threading.Thread):
         with self.lock:
             if not self.novye:
                 return False
-            if self.srochno:              # позвали: ждём, пока чат помолчит; пачки не чаще CHAT_MIN
+            kipit = len([x for x in self.vremena if now - x < 60]) > CHAT_KIPIT
+            if kipit:                     # шквал: дайджест раз в CHAT_DAYDZHEST, тишины ждать нечего
+                if now - self.otdano < CHAT_DAYDZHEST or now - self.novye_t0 < CHAT_NAKOPIT:
+                    return False
+            elif self.srochno:            # позвали: ждём, пока чат помолчит; пачки не чаще CHAT_MIN
                 tiho_uzhe = now - self.posl >= CHAT_SOBRAT
                 dolgo = now - self.srochno_s >= CHAT_SOBRAT_MAKS
                 if not (tiho_uzhe or dolgo) or now - self.otdano < CHAT_MIN:
@@ -1016,28 +1156,42 @@ class Chat(threading.Thread):
             elif now - self.otdano < CHAT_RAZ:
                 return False
             self.otdachi = [x for x in self.otdachi if now - x < 3600]
-            if len(self.otdachi) >= CHAT_CHAS:
-                if self.srochno:
-                    print(time.strftime('%H:%M:%S'), 'чат: потолок',
-                          CHAT_CHAS, 'в час — жду', flush=True)
-                self.srochno = False
-                return False
+            tolko_k_plusu = False
+            if len(self.otdachi) >= CHAT_CHAS:  # потолок: не молчим — реже и только обращённые
+                if now - self.otdano < CHAT_POTOLOK_RAZ or not any(k_plusu(x) for _, x in self.novye):
+                    if self.srochno and now - self.otdano < CHAT_POTOLOK_RAZ:
+                        self.srochno = False
+                        print(time.strftime('%H:%M:%S'), 'чат: потолок',
+                              CHAT_CHAS, 'в час — обращённые к Плюсу раз в',
+                              int(CHAT_POTOLOK_RAZ // 60), 'мин', flush=True)
+                    return False
+                tolko_k_plusu = True
             if not self.alive() or ekran_zanyat():
                 return False      # вопрос на экране: ждём
-            pachka, self.novye = self.novye[-12:], []
+            vse, self.novye = self.novye, []
+            nabor = [x for x in vse if k_plusu(x[1])] if tolko_k_plusu else vse
+            stroki, ne_voshlo = pachka_po_vazhnosti(nabor, self.znakomye)
+            self.znakomye.update(k for k, _ in vse)
             self.srochno, self.otdano = False, now
             self.otdachi.append(now)
-        t = ' · '.join('%s: «%s»' % (k, x.replace('«', '"')
-                                      .replace('»', '"'))
-                       for k, x in pachka)
+        t = ' · '.join(stroki)
+        dop = []
+        if kipit:
+            dop.append('чат кипит: %d сообщений за минуту — отвечай одной фразой, одному-двум' % len(self.vremena))
+        if ne_voshlo:
+            dop.append('ещё %d сообщений не вошло' % ne_voshlo)
+        if tolko_k_plusu:
+            dop.append('потолок пачек в час: здесь только обращённые к тебе')
+        if dop:
+            t = '(%s) %s' % ('; '.join(dop), t)
         if not v_plus(t[:900], CHAT_METKA):
             with self.lock:   # вопрос появился только что
-                self.novye = pachka + self.novye
+                self.novye = vse + self.novye
                 self.otdachi.pop()
                 self.srochno = True
             return False
         print(time.strftime('%H:%M:%S'), 'чат → Плюсу:',
-              len(pachka), flush=True)
+              len(stroki), 'строк' + (', кипит' if kipit else ''), flush=True)
         return True
 
 
