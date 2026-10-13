@@ -2,3 +2,10 @@ node_modules/
 renders/qa.png
 renders/qa.json
 __pycache__/
+
+# приложение 2: сборка и ключ подписи (в репозитории — только зашифрованный debug.keystore.enc)
+quest-bridge/app/debug.keystore
+quest-bridge/**/build/
+quest-bridge/.gradle/
+quest-bridge/app/src/main/assets/model-ru/
+quest-bridge/local.properties

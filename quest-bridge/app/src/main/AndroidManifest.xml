@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- сокет FrameServer (даже на 127.0.0.1) требует INTERNET -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- имя plus.local для айфона (mDNS): Wi-Fi иначе отбрасывает групповые пакеты -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- уши: микрофон в фоне — только через службу переднего плана типа microphone -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- «Запустить Плюса»: Termux RUN_COMMAND (Termux спросит разрешение) -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Android 11+: без этого приложение «не видит» Termux и не может его позвать -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="Quest Claude Bridge 2"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".CaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".EarService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- ответ Termux на «Запустить Плюса» (через PendingIntent) -->
+        <receiver
+            android:name=".Shlem$Reply"
+            android:exported="false" />
+
+    </application>
+</manifest>

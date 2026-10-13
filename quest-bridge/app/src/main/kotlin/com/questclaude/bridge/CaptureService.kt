@@ -1,0 +1,606 @@
+package com.questclaude.bridge
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.graphics.Typeface
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.Image
+import android.media.ImageReader
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+/**
+ * Захват вида шлема. Android требует для MediaProjection службу переднего плана
+ * типа mediaProjection у любого приложения с targetSdk ≥ 29 (Android 10), не только
+ * с Android 14: без неё getMediaProjection() бросает SecurityException
+ * (MediaProjectionManagerService.requiresForegroundService, AOSP android14-release).
+ *
+ * Кадры приходят от композитора с частотой экрана; в JPEG жмём не чаще MAX_FPS
+ * и на фоновом потоке — главный поток и батарея свободны. Последний кадр отдаёт
+ * FrameServer на 127.0.0.1:PORT.
+ */
+class CaptureService : Service() {
+
+    companion object {
+        const val EXTRA_CODE = "code"
+        const val EXTRA_DATA = "data"
+        const val ACTION_STOP = "com.questclaude.bridge.STOP"
+        const val PORT = Hub.PORT
+        const val MAX_FPS = 2            // для ИИ больше не нужно
+        const val OUT_WIDTH = 768        // ширина кадра для Claude: ≈450 токенов за взгляд
+        const val CAPTURE_W = 1920
+        const val CAPTURE_H = 1080
+        const val X2_WIDTH = 1086        // «зум зум»: вдвое больше точек, ≈900 токенов
+        const val BIG_WIDTH = 1536       // «зум зум зум»: вчетверо, ≈1800 токенов
+        const val STALE_MS = 3000L       // нет кадров дольше — захват «застыл» (системная видеозапись)
+        // во время эфира глазам — столько кадров в секунду (в JPEG — MAX_FPS); 2.3.9: было 4 — лишние два
+        // кадра 1920×1080 в секунду видеокарта рисовала впустую; в разговоре — 1 (Nalozhenie)
+        const val EYE_FPS = 2
+        private const val KLYUCH = "efir-klyuch"   // ключ эфира — в закрытой папке приложения
+        private const val MIC = "efir-mic"         // громкость голоса в эфире — запомненная
+        private const val NALET = "nalet-sek"      // налёт: всего секунд в эфире
+        private const val POKAZ = "nalozhenie"     // плашки в эфире: «lico nalet radar», 1/0
+        private const val CEL = "donat-cel"        // цель доната: сумма, собрано, валюта, показ, на что
+        /** Первая цель (Александр 08.10): $700 на Meta Quest 3 для отца. */
+        private const val CEL_PERVAYA = "700.0\t0.0\t$\t1\tMeta Quest 3 for Dad"
+        private const val TOP = "donat-top"        // топ-донатор: сколько, валюта, показ, ник
+        private const val CHAT = "chat-pokaz"      // чат Twitch в кадре: 1 — показывать, 0 — нет
+        private const val SEVER = "kompas-sever"   // поправка компаса («север здесь»), если компас настоящий
+        private const val CHANNEL = "capture"
+
+        @Volatile var running = false
+        @Volatile var status = "Готов."
+        /** Камера телефона — для кнопки в приложении (адрес с ключом); живёт, пока идёт захват. */
+        @Volatile var kamera: Kamera? = null
+    }
+
+    private var projection: MediaProjection? = null
+    private var display: VirtualDisplay? = null
+    private var reader: ImageReader? = null
+    private var worker: HandlerThread? = null
+    private var handler: Handler? = null
+    private var serving = false
+
+    private var full: Bitmap? = null
+    private var small: Bitmap? = null
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private var lastEncodeMs = 0L
+    private var arrived = 0L
+    private var encoded = 0L
+    private val lock = Any()                 // full и размеры кадра: поток захвата и сервер
+    private var lastW = 0
+    private var lastH = 0
+    @Volatile private var lastArrivalMs = 0L
+    private var revived = false
+    private var razvilka: Razvilka? = null      // эфир: кадр захвата — и в кодировщик, и в глаза
+    private var efir: Efir? = null
+    private lateinit var nalet: Nalet
+    private lateinit var cel: Cel
+    private lateinit var top: Top
+    private lateinit var chat: Chat
+    /** Субтитры и итоги вечера — живут со службой, рисует Nalozhenie во время эфира. */
+    private val titry = Titry()
+    private val itogi = Itogi()
+    private val igra = Igra()
+    private var nalozhenie: Nalozhenie? = null   // лицо Плюса и налёт, радар — по углам эфира
+    private var kompas: Kompas? = null
+    @Volatile private var pokaz = Nalozhenie.Pokaz()
+    /** Тепло шлема (2.3.9): отдаёт ли Quest его приложению — проба; статус — в /efir «teplo». */
+    private var teploSlushatel: android.os.PowerManager.OnThermalStatusChangedListener? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null || intent.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (running) return START_NOT_STICKY
+
+        // Сначала служба переднего плана, потом проекция — иначе SecurityException.
+        startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        Pamyat.start(this)
+        Pamyat.zapis("глаза: захват начат")
+
+        val code = intent.getIntExtra(EXTRA_CODE, 0)
+        val data: Intent? = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_DATA)
+        }
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        val p = try {
+            data?.let { manager.getMediaProjection(code, it) }
+        } catch (e: SecurityException) {
+            fail("Система не дала захват: ${e.message}")
+            return START_NOT_STICKY
+        }
+        if (p == null) {
+            fail("Нет разрешения на захват.")
+            return START_NOT_STICKY
+        }
+        projection = p
+
+        val thread = HandlerThread("capture").also { it.start() }
+        worker = thread
+        val handler = Handler(thread.looper)
+        this.handler = handler
+
+        // Android 14: колбэк — до createVirtualDisplay, иначе IllegalStateException.
+        p.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                status = "Захват остановлен системой."
+                stopSelf()
+            }
+        }, handler)
+
+        val r = newReader(handler)
+        reader = r
+        display = p.createVirtualDisplay(
+            "QuestClaudeBridge", CAPTURE_W, CAPTURE_H, resources.displayMetrics.densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, r.surface, null, handler
+        )
+
+        try {
+            if (Hub.say == null) Hub.say = Golos(cacheDir)
+            Hub.acquire("capture")
+            serving = true
+        } catch (e: Exception) {
+            fail("Порт $PORT занят: ${e.message}")
+            return START_NOT_STICKY
+        }
+        Hub.variant = { kind -> variant(kind) }
+        Hub.plenkaRisunok = { t, n -> plenka(t, n) }
+        Hub.efir = upr
+        val wifi = applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
+        val gruppa = wifi?.createMulticastLock("plus-kamera")?.apply { setReferenceCounted(false) }
+        kamera = Kamera(filesDir) { on -> if (on) gruppa?.acquire() else if (gruppa?.isHeld == true) gruppa.release() }
+            .also { it.start(); Hub.kamera = it }
+        nalet = Nalet({ try { File(filesDir, NALET).readText().trim().toLong() } catch (e: Exception) { 0L } },
+            { sek -> try { File(filesDir, NALET).writeText(sek.toString()) } catch (e: Exception) { } })
+        pokaz = try {
+            File(filesDir, POKAZ).readText().trim().split(' ')
+                .let { Nalozhenie.Pokaz(it[0] != "0", it.getOrNull(1) != "0", it.getOrNull(2) != "0", it.getOrNull(3) != "0") }
+        } catch (e: Exception) { Nalozhenie.Pokaz() }
+        cel = Cel({ try { File(filesDir, CEL).readText() } catch (e: Exception) { CEL_PERVAYA } },
+            { t -> try { File(filesDir, CEL).writeText(t) } catch (e: Exception) { } })
+        top = Top({ try { File(filesDir, TOP).readText() } catch (e: Exception) { null } },
+            { t -> try { File(filesDir, TOP).writeText(t) } catch (e: Exception) { } })
+        chat = Chat({ try { File(filesDir, CHAT).readText() } catch (e: Exception) { null } },
+            { t -> try { File(filesDir, CHAT).writeText(t) } catch (e: Exception) { } })
+        kompas = Kompas(this)
+        try {
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            Hub.teplo = pm.currentThermalStatus
+            teploSlushatel = android.os.PowerManager.OnThermalStatusChangedListener { t ->
+                Hub.teplo = t
+                Pamyat.zapis("тепло шлема: $t")
+            }.also { pm.addThermalStatusListener(mainExecutor, it) }
+        } catch (e: Exception) {
+            Hub.teplo = -1                                   // Quest не отдаёт — диспетчер смотрит на кадры
+        }
+        Hub.nalet = naletUpr
+        Hub.plashki = plashkiUpr
+        Hub.capturing = true
+        Hub.stale = false
+        running = true
+        lastArrivalMs = SystemClock.uptimeMillis()
+        handler.postDelayed(watchdog, 1000)
+        status = "ЗАХВАТ ИДЁТ\nждём первый кадр…\nкадр: http://127.0.0.1:$PORT/frame.jpg"
+        return START_NOT_STICKY
+    }
+
+    /**
+     * Сторож. Системная видеозапись Quest перенастраивает зеркало, и кадры перестают
+     * приходить, а onStop не приходит (найдено 04.10). Тогда пробуем переподключить
+     * поверхность (второй createVirtualDisplay на той же проекции Android 14 запрещает);
+     * не помогло — уведомление «нажми». /status отдаёт "stale":true.
+     */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (!running) return
+            val silent = SystemClock.uptimeMillis() - lastArrivalMs
+            if (silent > STALE_MS && !Hub.stale) {
+                Hub.stale = true
+                revive()
+            } else if (silent > 2 * STALE_MS && !revived) {
+                revived = true
+                status = "ЗАХВАТ ЗАСТЫЛ\nнажми «Остановить», потом «Начать захват»"
+                getSystemService(NotificationManager::class.java)
+                    .notify(1, notification("Захват застыл — открой и нажми «Начать захват»"))
+            }
+            handler?.postDelayed(this, 1000)
+        }
+    }
+
+    private fun newReader(h: Handler): ImageReader =
+        ImageReader.newInstance(CAPTURE_W, CAPTURE_H, PixelFormat.RGBA_8888, 2).also { r ->
+            r.setOnImageAvailableListener({ onImage(it) }, h)
+        }
+
+    private fun revive() {
+        val d = display ?: return
+        val h = handler ?: return
+        razvilka?.let { rz ->                  // эфир: захват переподключаем к развилке
+            d.surface = null
+            d.surface = rz.input
+            return
+        }
+        val old = reader
+        val r = newReader(h)
+        d.surface = r.surface
+        reader = r
+        old?.close()
+    }
+
+    private fun onImage(r: ImageReader) {
+        // после revive() в очереди может остаться вызов от закрытого ImageReader
+        val image = try { r.acquireLatestImage() } catch (e: IllegalStateException) { null } ?: return
+        try {
+            arrived++
+            lastArrivalMs = SystemClock.uptimeMillis()
+            if (Hub.stale) {
+                Hub.stale = false
+                if (revived) {
+                    revived = false
+                    getSystemService(NotificationManager::class.java).notify(1, notification())
+                }
+            }
+            val now = SystemClock.uptimeMillis()
+            // в эфире кадры глазам идут ровно EYE_FPS раз в секунду — с запасом на дрожь, иначе каждый второй мимо
+            val porog = if (razvilka != null) 1000L / MAX_FPS - 150 else 1000L / MAX_FPS
+            if (now - lastEncodeMs < porog) return
+            lastEncodeMs = now
+            encode(image)
+        } catch (e: Exception) {
+            status = "Ошибка кадра: ${e.message}"
+        } finally {
+            image.close()
+        }
+    }
+
+    private fun encode(image: Image) {
+        synchronized(lock) { encodeLocked(image) }
+    }
+
+    private fun encodeLocked(image: Image) {
+        val plane = image.planes[0]
+        val stridePx = plane.rowStride / plane.pixelStride     // строка буфера бывает шире кадра
+        var f = full
+        if (f == null || f.width != stridePx || f.height != image.height) {
+            f?.recycle()
+            f = Bitmap.createBitmap(stridePx, image.height, Bitmap.Config.ARGB_8888)
+            full = f
+        }
+        plane.buffer.rewind()
+        f!!.copyPixelsFromBuffer(plane.buffer)
+        lastW = image.width
+        lastH = image.height
+
+        val outH = (image.height * OUT_WIDTH / image.width) and 1.inv()
+        var s = small
+        if (s == null || s.height != outH) {
+            s?.recycle()
+            s = Bitmap.createBitmap(OUT_WIDTH, outH, Bitmap.Config.ARGB_8888)
+            small = s
+        }
+        Canvas(s!!).drawBitmap(f, Rect(0, 0, image.width, image.height), Rect(0, 0, OUT_WIDTH, outH), paint)
+
+        val jpeg = ByteArrayOutputStream(96 * 1024).also { s.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
+        encoded++
+        val ms = System.currentTimeMillis()
+        Hub.frame = FrameServer.Frame(jpeg, image.width, image.height, ms, encoded)
+        Hub.plenka.add(ms, jpeg)
+        status = "ЗАХВАТ ИДЁТ\n${image.width}×${image.height} → ${OUT_WIDTH}×$outH\n" +
+            "кадров от системы: $arrived · в JPEG: $encoded (${jpeg.size / 1024} КБ)\n" +
+            "кадр: http://127.0.0.1:$PORT/frame.jpg" + (efir?.let { "\n" + it.kratko() } ?: "") +
+            (kamera?.let { "\n" + it.kratko() } ?: "") +
+            (if (::nalet.isInitialized) "\nналёт: ${Nalet.koiny(nalet.vsegoSek)} (за эфир +${Nalet.koiny(nalet.efirSek)})" else "")
+    }
+
+    // ---------- эфир ----------
+
+    private val upr = object : FrameServer.EfirUpr {
+        override fun start(q: Map<String, String>) = try { naPotoke { efirStart(q) } } catch (e: Exception) { oshibka(e.message ?: "?") }
+        override fun stop() = try { naPotoke { efirStop() } } catch (e: Exception) { oshibka(e.message ?: "?") }
+        override fun status() = efir?.status() ?:
+            "{\"state\":\"off\",\"klyuch\":${File(filesDir, KLYUCH).exists()},\"mic\":${micZapomnen()},\"teplo\":${Hub.teplo}}"
+        override fun key(k: String) = try { File(filesDir, KLYUCH).writeText(k); true } catch (e: Exception) { false }
+        override fun mic(g: Float): String {
+            val v = Efir.Opts.glush(g)
+            try { File(filesDir, MIC).writeText(v.toString()) } catch (e: Exception) { }
+            efir?.mikrofon = v
+            return efir?.status() ?: "{\"state\":\"off\",\"mic\":$v}"
+        }
+    }
+
+    /** Плашки эфира: налёт, лицо, радар — /nalet, /nalet/upr, скрипты nalet и radar. */
+    private val naletUpr = object : FrameServer.NaletUpr {
+        override fun status(): String {
+            val k = kompas
+            return nalet.status().dropLast(1) +
+                ",\"lico\":${pokaz.lico},\"pokaz\":${pokaz.nalet},\"radar\":${pokaz.radar},\"telefon\":${pokaz.telefon}," +
+                "\"snimaet\":${pokaz.telefon && razvilka?.kameraIdet() == true},\"v_efire\":${nalozhenie != null}," +
+                "\"kompas\":\"${k?.tip ?: "none"}\",\"kurs\":${FrameServer.json(Radar.podpis(k?.kurs, k?.tip ?: "none"))}," +
+                "\"datchiki\":${FrameServer.json(k?.spisok() ?: "")}}"
+        }
+        override fun upr(q: Map<String, String>): String {
+            val p = pokaz
+            fun da(k: String, b: Boolean) = q[k]?.let { it != "0" } ?: b
+            pokaz = Nalozhenie.Pokaz(da("lico", p.lico), da("pokaz", p.nalet), da("radar", p.radar), da("telefon", p.telefon))
+            try {
+                File(filesDir, POKAZ).writeText(listOf(pokaz.lico, pokaz.nalet, pokaz.radar, pokaz.telefon).joinToString(" ") { if (it) "1" else "0" })
+            } catch (e: Exception) { }
+            q["koiny"]?.replace(',', '.')?.toDoubleOrNull()?.takeIf { it >= 0 && it < 10_000_000 }?.let { nalet.ustanovit(it) }
+            if (q["sever"] == "1") kompas?.let { k ->
+                k.sever()
+                if (k.tip == "absolute") try { File(filesDir, SEVER).writeText(k.popravka.toString()) } catch (e: Exception) { }
+            }
+            return status()
+        }
+    }
+
+    /** Субтитры, цель доната, итоги вечера, табло соведущего, топ-донатор — /titr, /cel…, /itogi…, /igra…, /top…. */
+    private val plashkiUpr = object : FrameServer.PlashkiUpr {
+        override fun titr(q: Map<String, String>) = titry.upr(q)
+        override fun cel(q: Map<String, String>?) = if (q == null) cel.status() else cel.upr(q)
+        override fun itogi(q: Map<String, String>?) = if (q == null) itogi.status() else itogi.upr(q)
+        override fun igra(q: Map<String, String>?) = if (q == null) igra.status() else igra.upr(q)
+        override fun top(q: Map<String, String>?) = if (q == null) top.status() else top.upr(q)
+        override fun chat(q: Map<String, String>?): String = chatOtvet(if (q == null) chat.status() else chat.upr(q))
+        override fun chatPachka(qs: List<Map<String, String>>): String = chatOtvet(chat.pachka(qs))
+
+        private fun chatOtvet(s: String): String {
+            val n = nalozhenie                                   // в кадре ли чат на самом деле (2.3.8)
+            return s.dropLast(1) + ",\"v_efire\":${n != null},\"na_ekrane\":${n?.chatNaEkrane ?: 0}," +
+                "\"mesto\":${razvilka?.chatMesto ?: 0},\"oshibka\":${n?.oshibka?.let { FrameServer.json(it) } ?: "null"}}"
+        }
+    }
+
+    private fun micZapomnen() = try { File(filesDir, MIC).readText().trim().toFloat() } catch (e: Exception) { Efir.Opts.MIC }
+
+    private fun oshibka(msg: String) = "{\"state\":\"off\",\"oshibka\":${FrameServer.json(msg)}}"
+
+    /** Выполнить на потоке захвата (там живут display и reader) и дождаться. */
+    private fun <T> naPotoke(block: () -> T): T {
+        val h = handler ?: throw IllegalStateException("захват не идёт")
+        if (Looper.myLooper() == h.looper) return block()
+        var r: Result<T>? = null
+        val done = CountDownLatch(1)
+        h.post { r = runCatching(block); done.countDown() }
+        check(done.await(10, TimeUnit.SECONDS)) { "захват не ответил" }
+        return r!!.getOrThrow()
+    }
+
+    private fun efirStart(q: Map<String, String>): String {
+        efir?.let { return it.status() }
+        val key = File(filesDir, KLYUCH).takeIf { it.exists() }?.readText()?.trim().orEmpty()
+        if (key.isEmpty()) return oshibka("нет ключа эфира: в Termux `kluch twitch`, потом `efir`")
+        val opts = try { Efir.Opts.iz(q, micZapomnen()) } catch (e: Exception) { return oshibka(e.message ?: "настройки эфира") }
+        val p = projection ?: return oshibka("захват не идёт")
+        val d = display ?: return oshibka("захват не идёт")
+        val h = handler ?: return oshibka("захват не идёт")
+        val rz = try { Razvilka(CAPTURE_W, CAPTURE_H) } catch (e: Exception) { return oshibka("видеокарта: ${e.message}") }
+        val r = newReader(h)
+        try {
+            rz.add(r.surface, EYE_FPS, stamp = false)
+            rz.glazaSurface = r.surface
+            rz.fps(r.surface, EYE_FPS)
+        } catch (e: Exception) {
+            rz.release(); r.close()
+            return oshibka("развилка: ${e.message}")
+        }
+        d.surface = rz.input
+        reader?.close()
+        reader = r
+        razvilka = rz
+        Hub.dispetcher = Dispetcher()                    // «тесно» — заново на каждый эфир
+        val e = Efir(p, rz, opts, key)
+        try {
+            e.start()
+        } catch (ex: Exception) {
+            e.stop()
+            vernutPryamo()
+            return oshibka("эфир не запустился: ${ex.message}")
+        }
+        efir = e
+        kamera?.podklyuchit(rz)
+        val k = kompas ?: Kompas(this).also { kompas = it }
+        nalozhenie = Nalozhenie(this, nalet, k, rz, { efir }, { pokaz }, titry, cel, itogi, igra, top, chat,
+            glaza = { f -> reader?.surface?.let { s -> razvilka?.fps(s, f) } }).also { it.start() }
+        if (k.tip == "absolute") k.popravka = try { File(filesDir, SEVER).readText().trim().toFloat() } catch (e: Exception) { 0f }
+        getSystemService(NotificationManager::class.java).notify(1, notification("ЭФИР · Twitch · ${opts.w}×${opts.h} · глаза Плюса работают"))
+        return e.status()
+    }
+
+    private fun efirStop(): String {
+        nalozhenie?.stop()
+        nalozhenie = null
+        kamera?.otklyuchit()
+        efir?.stop()
+        efir = null
+        if (razvilka != null) vernutPryamo()
+        if (running) getSystemService(NotificationManager::class.java).notify(1, notification())
+        return "{\"state\":\"off\"}"
+    }
+
+    /** Без эфира: захват снова прямо в ImageReader глаз, развилку — прочь. */
+    private fun vernutPryamo() {
+        val d = display
+        val h = handler
+        val old = reader
+        if (d != null && h != null) {
+            val r = newReader(h)
+            d.surface = r.surface
+            reader = r
+        }
+        razvilka?.release()
+        razvilka = null
+        if (old !== reader) old?.close()
+    }
+
+    /**
+     * Тот же момент, что и последний кадр 768 px, но крупнее — по запросу, на потоке
+     * сервера. "x2" — весь вид 1086 px (вдвое больше точек), "big" — 1536 px (вчетверо),
+     * "zoom" — центр вида (куда смотрит голова) в полном разрешении, 960×540.
+     */
+    private fun variant(kind: String): ByteArray? = synchronized(lock) {
+        val f = full ?: return null
+        val w = lastW
+        val h = lastH
+        if (w == 0 || h == 0) return null
+        val src = if (kind == "zoom") Rect(w / 4, h / 4, w * 3 / 4, h * 3 / 4) else Rect(0, 0, w, h)
+        val outW = when (kind) { "zoom" -> src.width(); "x2" -> X2_WIDTH; else -> BIG_WIDTH }
+        val outH = (src.height() * outW / src.width()) and 1.inv()
+        val out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(f, src, Rect(0, 0, outW, outH), paint)
+        val jpeg = ByteArrayOutputStream(256 * 1024).also { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+        out.recycle()
+        jpeg
+    }
+
+    /**
+     * Плёнка одной картинкой 1536×864 (≈1800 токенов, как четыре обычных кадра):
+     * двенадцать кадров 384×216 по порядку слева направо, сверху вниз (−3,0 … +2,5 с)
+     * и последний (+3,0 с) обычного размера 768×432 в правом нижнем углу. Подписи
+     * времени внизу слева. Момент вызова (0 с) — в красной рамке. Кадра не было —
+     * серая клетка «нет кадра».
+     * Короткая («чек чек», 7 кадров −1,5 … +1,5 с) — 1536×432 (≈900 токенов): четыре
+     * кадра 384×216 сверху, три снизу, в пустой клетке — что это за плёнка.
+     */
+    private fun plenka(t: Long, n: Int = 13): ByteArray? {
+        val pol = Plenka.polovina(n)
+        val kadry = Hub.plenka.around(t, pol, pol)
+        if (kadry.all { it == null }) return null
+        val tw = OUT_WIDTH / 2
+        val th = tw * 9 / 16
+        val korotkaya = kadry.size <= 8
+        val out = Bitmap.createBitmap(tw * 4, th * (if (korotkaya) 2 else 4), Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        c.drawColor(Color.DKGRAY)
+        val obvodka = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 22f; typeface = Typeface.DEFAULT_BOLD; color = Color.BLACK
+            style = Paint.Style.STROKE; strokeWidth = 5f
+        }
+        val bukvy = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; typeface = Typeface.DEFAULT_BOLD; color = Color.WHITE }
+        val ramka = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 6f; color = Color.RED }
+        val melko = BitmapFactory.Options().apply { inSampleSize = 2 }      // 768 → 384 прямо при чтении
+        val posl = kadry.lastIndex
+        val vyzov = (pol / Plenka.STEP_MS).toInt()
+        kadry.forEachIndexed { i, k ->
+            val krupno = !korotkaya && i == posl
+            val dst = if (krupno) Rect(tw * 2, th * 2, tw * 4, th * 4) else {
+                val slot = if (korotkaya || i < 8) i else 8 + (i - 8) / 2 * 4 + (i - 8) % 2  // обход большого угла
+                Rect(slot % 4 * tw, slot / 4 * th, slot % 4 * tw + tw, slot / 4 * th + th)
+            }
+            val b = k?.let { BitmapFactory.decodeByteArray(it.jpeg, 0, it.jpeg.size, if (krupno) null else melko) }
+            if (b != null) {
+                c.drawBitmap(b, null, dst, paint)
+                b.recycle()
+            }
+            var pod = Plenka.podpis(i, pol)
+            if (i == vyzov) pod += " · вопрос"
+            if (i == posl) pod += " · сейчас"
+            if (b == null) pod += " · нет кадра"
+            // подпись внизу слева: вверху у игр обычно здоровье и карта (проба 05.10: подпись
+            // сверху закрыла полоску здоровья, и модель ошиблась на полсекунды)
+            c.drawText(pod, dst.left + 8f, dst.bottom - 10f, obvodka)
+            c.drawText(pod, dst.left + 8f, dst.bottom - 10f, bukvy)
+            if (i == vyzov) c.drawRect(dst.left + 3f, dst.top + 3f, dst.right - 3f, dst.bottom - 3f, ramka)
+        }
+        if (korotkaya) {                                   // пустая восьмая клетка
+            val x = tw * 3 + 12f
+            for ((j, s) in listOf("чек чек", "7 кадров через 0,5 с", "−1,5 … +1,5 с").withIndex())
+                c.drawText(s, x, th + 40f + j * 34f, bukvy)
+        }
+        val jpeg = ByteArrayOutputStream(256 * 1024).also { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+        out.recycle()
+        return jpeg
+    }
+
+    private fun fail(message: String) {
+        status = message
+        stopSelf()
+    }
+
+    private fun notification(text: String = "Захват вида шлема · порт $PORT"): Notification {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Захват вида", NotificationManager.IMPORTANCE_LOW))
+        val open = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        return Notification.Builder(this, CHANNEL)
+            .setContentTitle("Quest Claude Bridge 2")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.presence_video_online)
+            .setContentIntent(open)
+            .setOngoing(true)
+            .build()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        Pamyat.trim(level)
+    }
+
+    override fun onDestroy() {
+        Pamyat.zapis("глаза: захват остановлен (${status.lineSequence().firstOrNull().orEmpty()})")
+        running = false
+        Hub.capturing = false
+        Hub.stale = false
+        Hub.variant = { null }
+        Hub.plenkaRisunok = { _, _ -> null }
+        handler?.removeCallbacks(watchdog)
+        Hub.efir = null
+        Hub.kamera = null
+        Hub.nalet = null
+        Hub.plashki = null
+        teploSlushatel?.let { try { getSystemService(android.os.PowerManager::class.java).removeThermalStatusListener(it) } catch (e: Exception) { } }
+        teploSlushatel = null
+        nalozhenie?.stop()
+        nalozhenie = null
+        kamera?.stop()
+        kamera = null
+        efir?.stop()
+        efir = null
+        razvilka?.let { display?.surface = null; it.release() }
+        razvilka = null
+        if (serving) Hub.release("capture")
+        serving = false
+        display?.release()
+        reader?.close()
+        projection?.stop()
+        worker?.quitSafely()
+        synchronized(lock) {
+            full?.recycle()
+            small?.recycle()
+            full = null; small = null
+        }
+        display = null; reader = null; projection = null; worker = null; handler = null
+        if (status.startsWith("ЗАХВАТ")) status = "Остановлено."
+        super.onDestroy()
+    }
+}

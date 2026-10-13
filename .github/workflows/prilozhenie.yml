@@ -1,0 +1,80 @@
+# Приложение 2 для шлема (Quest Claude Bridge 2) — сборка APK здесь, в открытом репозитории: для открытых
+# репозиториев минуты GitHub бесплатны (закрытый quest-claude упёрся в лимит в октябре 2026).
+# Код — копия quest-bridge из закрытого репозитория, без ключа подписи. Ключ (debug.keystore) лежит рядом
+# зашифрованным (debug.keystore.enc, AES-256); пароль — секрет репозитория PODPIS (Settings → Secrets and
+# variables → Actions), его ставит владелец. Один ключ на все сборки — обновление встаёт поверх старого.
+# Готовый APK — в выпусках: app-<версия>, файл plus2-<версия>.apk; хранятся два последних выпуска app-*.
+name: prilozhenie
+on:
+  push:
+    paths: ['quest-bridge/**', '.github/workflows/prilozhenie.yml']
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # выпуск с APK (Releases)
+    defaults:
+      run:
+        working-directory: quest-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ключ подписи (расшифровать паролем из секрета PODPIS) — первым, без него сборка бесполезна
+        env:
+          PODPIS: ${{ secrets.PODPIS }}
+        run: |
+          if [ -z "$PODPIS" ]; then
+            echo "::error title=Нет секрета PODPIS::Пароль ключа подписи не задан: Settings → Secrets and variables → Actions → New repository secret, имя PODPIS. Без него APK не встанет поверх старого."
+            exit 1
+          fi
+          P=$(printf '%s' "$PODPIS" | tr -d '[:space:]')
+          P="$P" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:P \
+            -in app/debug.keystore.enc -out app/debug.keystore ||
+            { echo "::error title=Неверный пароль::Секрет PODPIS не подходит к debug.keystore.enc."; exit 1; }
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: gradlew исполняемый
+        run: chmod +x gradlew
+      - uses: actions/cache@v4
+        with:
+          path: |
+            quest-bridge/app/src/main/assets/model-ru
+          key: vosk-small-ru-0.22
+      - name: Модели Vosk
+        run: sh ears/modeli.sh
+      - name: ffmpeg для проверки эфира
+        run: command -v ffmpeg || (sudo apt-get update -q && sudo apt-get install -y -q ffmpeg > /dev/null)
+      - name: Тесты FrameServer, ушей и эфира
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+      - name: Сборка APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+      - name: Проверка APK (манифест и подпись в лог)
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
+          ls -la "$APK"
+          "${BT}aapt2" dump badging "$APK" | grep -E "^package|sdkVersion|targetSdkVersion|launchable"
+          "${BT}apksigner" verify --print-certs "$APK" | grep -E "SHA-256 digest" | head -1
+          unzip -l "$APK" | grep -E "lib/|assets/model-ru/uuid|plus-ruki-telefon"
+          rm -f app/debug.keystore
+      - name: APK в выпуск (Releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
+          F="plus2-$V.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$F"
+          gh release view "app-$V" > /dev/null 2>&1 ||
+            gh release create "app-$V" --target "$GITHUB_SHA" --prerelease \
+              --title "Quest Claude Bridge 2 — $V" --notes "APK приложения 2 для шлема, версия $V."
+          gh release upload "app-$V" "$F" --clobber
+          echo "::notice::APK: https://github.com/$GITHUB_REPOSITORY/releases/download/app-$V/$F"
+      - name: Хранить два последних выпуска app-*
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("app-"))] | sort_by(.createdAt) | reverse | .[2:] | .[].tagName' |
+            while read -r t; do gh release delete "$t" --yes --cleanup-tag && echo "выпуск $t удалён"; done
