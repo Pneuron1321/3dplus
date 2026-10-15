@@ -28,6 +28,20 @@ class RaskladkaTest {
         assertTrue(Raskladka.plitki(0, 2).isEmpty())
     }
 
+    /** Без камеры — строка с именем (ниже квадрата), столбик всё равно по центру; пузырь — по середине строки. */
+    @Test fun bezKameryStroka() {
+        val p = Raskladka.plitki(listOf(true, false, true), 3)
+        assertEquals(listOf(210f, Raskladka.STROKA, 210f), p.map { it.h })
+        assertTrue(p.all { it.s == 210f && it.x == Raskladka.KRAY })
+        assertEquals(p[0].niz + Raskladka.ZAZOR, p[1].y, 0.01f)
+        assertEquals(p[1].niz + Raskladka.ZAZOR, p[2].y, 0.01f)
+        assertEquals(p[0].y - Raskladka.VERH, Raskladka.NIZ - p[2].niz, 0.5f)
+        assertEquals(p[1].y + Raskladka.STROKA / 2, p[1].centrY, 0f)
+        assertTrue(!p[1].video && p[0].video)
+        val vse = Raskladka.plitki(listOf(false, false), 2)                     // оба без камер — две строки
+        assertEquals(2 * Raskladka.STROKA + Raskladka.ZAZOR, vse[1].niz - vse[0].y, 0.01f)
+    }
+
     @Test fun puzyrSpravaOtPlitki() {
         val p = Raskladka.plitki(1, 2).single()
         assertEquals(p.pravo + Raskladka.PUZYR_OTSTUP, Raskladka.puzyrX(p), 0f)

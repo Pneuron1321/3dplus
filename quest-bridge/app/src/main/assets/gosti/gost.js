@@ -19,6 +19,12 @@
     netDostupa: 'Браузер не дал камеру или микрофон. Разреши доступ в настройках сайта и обнови страницу.',
     vBrauzere: 'Здесь нет доступа к камере и микрофону (встроенный браузер приложения). Открой ссылку в Safari (iPhone) или Chrome (Android): ⋯ → «Открыть в браузере».',
     kameraEfir: 'Моя камера в эфире: вкл/выкл', kameraNet: 'Камера не включилась — разреши доступ к ней в настройках сайта.',
+    kameraZapret: 'Модератор выключил тебе камеру в эфире.', kameraRazresh: 'Модератор снова разрешил камеру — включи 📷, если хочешь.',
+    kamVyklK: '📷 выкл', kamVklK: '📷 вкл',
+    mikPropal: 'Микрофон пропал (звонок? другое приложение?) — поднимаю…', mikNet: 'Микрофон не вернулся: проверь, не занят ли он звонком, и обнови страницу.',
+    mikZanyat: 'Микрофон занят (звонок?) — вернётся сам, когда освободится.',
+    kamPropala: 'Камера пропала — поднимаю…', kamNet2: 'Камера не вернулась: не занята ли она другим приложением? Голос в эфире идёт.',
+    naushnikiSmena: '🎧 Наушники отключились? Без них эфир услышит эхо твоего динамика.',
     tolkoZvuk: 'Камера недоступна — входишь только со звуком.',
     prevyuZhdi: 'Картинка эфира появится, когда начнётся эфир.', prevyuNet: 'Этот браузер не показывает картинку эфира — смотри стрим на Twitch, звук идёт отсюда.',
     prevyuVykl: 'Картинка эфира выключена (тесная сеть шлема) — смотри стрим на Twitch.',
@@ -26,11 +32,11 @@
     zaglushen: 'Модератор выключил тебе микрофон.', mestNet: 'Мест в кадре нет — включить камеру или микрофон нельзя.',
     efirIdet: 'Эфир идёт.', efirNet: 'Эфир ещё не начался — можно поговорить.',
     perepodkl: 'Связь прервалась — переподключаюсь…',
-    prichina: { vygnali: 'Тебя убрали из эфира.', zakryto: 'Комната закрыта — эфир с гостями закончился.', klyuch: 'Ссылка устарела или неверна. Попроси новую.',
+    prichina: { zamena: 'Ты подключился заново из другого окна или сети.', vygnali: 'Тебя убрали из эфира.', zakryto: 'Комната закрыта — эфир с гостями закончился.', klyuch: 'Ссылка устарела или неверна. Попроси новую.',
       otkaz: 'Тебя не впустили.', ochered: 'Слишком много ждущих. Попробуй позже.', polno: 'В комнате нет мест.', mest_net: 'Мест в кадре нет.',
       bystro: 'Соединение закрыто: слишком много данных.', sam: 'Ты вышел из эфира.' },
     konecZag: 'Эфир для тебя закончился', vpustit: 'Впустить', otklonit: 'Нет', skrytK: 'Убрать', pokazatK: 'Показать',
-    zaglK: 'Без звука', vklK: 'Со звуком', vygnatK: 'Выгнать', zhdet: 'ждёт', moder: 'модератор', hozyain: 'хозяин', gost: 'гость',
+    zaglK: '🎤 выкл', vklK: '🎤 вкл', vygnatK: 'Выгнать', zhdet: 'ждёт', moder: 'модератор', hozyain: 'хозяин', gost: 'гость',
     vpuskA: 'Впуск: сам', vpuskR: 'Впуск: вручную', mest: 'Мест в кадре: ', skopirovano: 'Ссылка скопирована.',
     poslatModeru: 'Ссылка модератора', poslatGostyu: 'Заходи в эфир Плюса как гость:', tekstModeru: 'Ты модератор эфира Плюса:',
     netSsylki: 'Ссылка будет, когда поднимется туннель.', vy: ' (ты)', rtt: 'связь', bufer: 'буфер', ms: 'мс',
@@ -49,6 +55,12 @@
     netDostupa: 'The browser blocked camera or microphone. Allow access in site settings and reload.',
     vBrauzere: 'No camera or microphone here (an app\'s built-in browser). Open the link in Safari (iPhone) or Chrome (Android): ⋯ → “Open in browser”.',
     kameraEfir: 'My camera on stream: on/off', kameraNet: 'The camera did not start — allow it in site settings.',
+    kameraZapret: 'The moderator turned off your camera on stream.', kameraRazresh: 'The moderator allowed your camera again — turn on 📷 if you like.',
+    kamVyklK: '📷 off', kamVklK: '📷 on',
+    mikPropal: 'Microphone lost (a call? another app?) — restoring…', mikNet: 'The microphone did not come back: is a call using it? Reload the page.',
+    mikZanyat: 'Microphone busy (a call?) — it comes back by itself.',
+    kamPropala: 'Camera lost — restoring…', kamNet2: 'The camera did not come back: is another app using it? Your voice is still on stream.',
+    naushnikiSmena: '🎧 Headphones unplugged? Without them the stream hears your speaker as an echo.',
     tolkoZvuk: 'Camera unavailable — joining with audio only.',
     prevyuZhdi: 'The stream picture appears when the stream starts.', prevyuNet: 'This browser cannot show the stream picture — watch on Twitch, audio comes from here.',
     prevyuVykl: 'Stream picture is off (tight headset network) — watch on Twitch.',
@@ -56,11 +68,11 @@
     zaglushen: 'The moderator muted your microphone.', mestNet: 'No free spots on screen — camera and mic cannot be turned on.',
     efirIdet: 'Stream is live.', efirNet: 'Stream has not started yet — you can talk.',
     perepodkl: 'Connection lost — reconnecting…',
-    prichina: { vygnali: 'You were removed from the stream.', zakryto: 'The room is closed — the guest session is over.', klyuch: 'This link is outdated or wrong. Ask for a new one.',
+    prichina: { zamena: 'You reconnected from another window or network.', vygnali: 'You were removed from the stream.', zakryto: 'The room is closed — the guest session is over.', klyuch: 'This link is outdated or wrong. Ask for a new one.',
       otkaz: 'You were not admitted.', ochered: 'Too many people waiting. Try later.', polno: 'The room is full.', mest_net: 'No free spots on screen.',
       bystro: 'Connection closed: too much data.', sam: 'You left the stream.' },
     konecZag: 'The stream is over for you', vpustit: 'Admit', otklonit: 'No', skrytK: 'Hide', pokazatK: 'Show',
-    zaglK: 'Mute', vklK: 'Unmute', vygnatK: 'Kick', zhdet: 'waiting', moder: 'moderator', hozyain: 'host', gost: 'guest',
+    zaglK: '🎤 off', vklK: '🎤 on', vygnatK: 'Kick', zhdet: 'waiting', moder: 'moderator', hozyain: 'host', gost: 'guest',
     vpuskA: 'Admission: auto', vpuskR: 'Admission: manual', mest: 'Spots on screen: ', skopirovano: 'Link copied.',
     poslatModeru: 'Moderator link', poslatGostyu: 'Join Plus\'s stream as a guest:', tekstModeru: 'You are the moderator of Plus\'s stream:',
     netSsylki: 'The link appears when the tunnel is up.', vy: ' (you)', rtt: 'link', bufer: 'buffer', ms: 'ms',
@@ -81,6 +93,7 @@
   const S = {
     ws: null, rol: '', sost: '', id: 0, zheton: sessionStorage.getItem('plus-z') || '', vnutri: false,
     kamera: true, mikrofon: true, zaglushen: false, skryt: false, cvet: -1, efir: false,
+    kameraZapret: false, kameraDoZapreta: false, pongMs: 0, skrytoMs: 0,
     ctx: null, rabota: null, zahvat: null, vyvod: null, usil: null, stream: null, facing: 'user',
     venc: null, vencCfg: null, nuzhenKlyuch: true, avcc: null, kadrT: null, kadrN: 0, jpegZanyat: false,
     vdec: null, vdecKodek: '', vdecAvcc: false, zhdemKlyuch: true, kodek: '',
@@ -191,9 +204,59 @@
   }
 
   // ---------- камера и микрофон ----------
+  const ZVUK = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
+  const videoTreb = () => ({ width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 24 }, facingMode: S.facing });
+
+  // Источник кадров для кодировщика — свой, всегда живой: не display:none (iOS заморозил бы декодер на первом
+  // кадре — урок студии), а крошечный и почти прозрачный; окошки «я» на экранах — только чтобы видеть себя.
+  const istochnik = document.createElement('video');
+  istochnik.muted = true; istochnik.autoplay = true; istochnik.playsInline = true; istochnik.setAttribute('playsinline', '');
+  istochnik.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+  document.body.appendChild(istochnik);
+  function budit() {                                                     // жест или возврат из фона — оживить видео
+    for (const v of [istochnik, $('ya'), $('ya2')]) if (v.srcObject && v.paused) v.play().catch(() => {});
+  }
+
+  // Страж дорожек (урок студии): на iPhone дорожка умирает молча — входящий звонок, сон, другое приложение.
+  // Умерла — поднимаем сами (три попытки, пауза растёт) и говорим гостю прямо; не вышло — говорим, что делать.
+  const popytki = { audio: 0, video: 0 };
+  function strazh() {
+    if (!S.stream) return;
+    for (const t of S.stream.getTracks()) {
+      if (t.strazh) continue;
+      t.strazh = true;
+      t.onended = () => { if (S.stream && S.stream.getTracks().includes(t) && !S.ushel) podnyat(t.kind); };
+      if (t.kind === 'audio') { t.onmute = () => { if (S.vnutri) zametka(T.mikZanyat); }; t.onunmute = () => sostoyanie(); }
+    }
+  }
+  async function podnyat(kind) {
+    const n = popytki[kind]++;
+    zametka(kind === 'audio' ? T.mikPropal : T.kamPropala);
+    await new Promise((ok) => setTimeout(ok, [400, 1500, 4000][Math.min(n, 2)]));
+    try {
+      const star = kind === 'audio' ? S.stream.getAudioTracks()[0] : S.stream.getVideoTracks()[0];
+      if (star) S.stream.removeTrack(star);
+      if (kind === 'audio') {
+        const t = (await navigator.mediaDevices.getUserMedia({ audio: ZVUK })).getAudioTracks()[0];
+        t.enabled = S.mikrofon; S.stream.addTrack(t);
+        try { if (S.src) S.src.disconnect(); } catch (x) { }
+        S.src = S.ctx.createMediaStreamSource(new MediaStream([t])); S.src.connect(S.zahvat);
+      } else {
+        if (!S.kamera) { popytki.video = 0; pokazatSebya(); return; }
+        S.stream.addTrack((await navigator.mediaDevices.getUserMedia({ video: videoTreb() })).getVideoTracks()[0]);
+        S.nuzhenKlyuch = true;
+      }
+      popytki[kind] = 0;
+      pokazatSebya(); otpravitSam(); sostoyanie();
+    } catch (x) {
+      if (popytki[kind] < 3) podnyat(kind);
+      else { zametka(kind === 'audio' ? T.mikNet : T.kamNet2); if (kind === 'video') { S.kamera = false; pokazatSebya(); otpravitSam(); } }
+    }
+  }
+
   async function mediaVkl() {
-    const zvuk = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
-    const video = { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 24 }, facingMode: S.facing };
+    const zvuk = ZVUK;
+    const video = videoTreb();
     let s = null;
     try {
       s = await navigator.mediaDevices.getUserMedia({ audio: zvuk, video: S.kamera ? video : false });
@@ -212,6 +275,9 @@
 
   function pokazatSebya() {
     const vt = S.stream && S.stream.getVideoTracks()[0];
+    istochnik.srcObject = vt ? new MediaStream([vt]) : null;
+    if (vt) istochnik.play().catch(() => {});
+    strazh();
     for (const [v, n] of [['ya', 'yaNet'], ['ya2', 'ya2Net']]) {
       $(v).srcObject = vt ? new MediaStream([vt]) : null;
       $(v).classList.toggle('zad', S.facing === 'environment');
@@ -225,7 +291,7 @@
     const stary = S.stream && S.stream.getVideoTracks()[0];
     if (!stary) { pokazatSebya(); return; }                              // камера выключена — включится уже этой стороной
     try {
-      const n = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 }, facingMode: S.facing } });
+      const n = await navigator.mediaDevices.getUserMedia({ video: videoTreb() });
       if (stary) { S.stream.removeTrack(stary); stary.stop(); }
       S.stream.addTrack(n.getVideoTracks()[0]);
       S.nuzhenKlyuch = true;
@@ -234,25 +300,40 @@
   }
 
   function knopki() {
-    for (const id of ['knKamera', 'knKam2']) $(id).classList.toggle('vkl', S.kamera);
+    for (const id of ['knKamera', 'knKam2']) { $(id).classList.toggle('vkl', S.kamera && !S.kameraZapret); $(id).classList.toggle('zapret', S.kameraZapret); }
     for (const id of ['knMikrofon', 'knMik2']) $(id).classList.toggle('vkl', S.mikrofon && !S.zaglushen);
   }
 
   // Камера в эфире вкл/выкл: выключенная гаснет совсем (огонёк камеры тоже), включённая — заново.
   async function kameraTumbler() {
-    S.kamera = !S.kamera;
+    if (S.kameraZapret) { zametka(T.kameraZapret); return; }             // выключил модератор — включит он же
+    await kameraStavit(!S.kamera);
+    otpravitSam();
+  }
+
+  async function kameraStavit(vkl) {
+    S.kamera = vkl;
     const vt = S.stream && S.stream.getVideoTracks()[0];
     if (!S.kamera && vt) { S.stream.removeTrack(vt); vt.stop(); }
     if (S.kamera && S.stream && !vt) {
       try {
-        const n = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 24 }, facingMode: S.facing } });
-        S.stream.addTrack(n.getVideoTracks()[0]);
+        S.stream.addTrack((await navigator.mediaDevices.getUserMedia({ video: videoTreb() })).getVideoTracks()[0]);
         zametka('');
       } catch (x) { S.kamera = false; zametka(T.kameraNet); }
     }
     if (S.kamera) S.nuzhenKlyuch = true;
     pokazatSebya();
-    otpravitSam();
+  }
+
+  // Модератор выключил / снова разрешил камеру: выключил — гаснет, как своей кнопкой; разрешил — возвращается,
+  // только если была включена до запрета (иначе — просто сказать, что можно).
+  async function primenitZapret(da) {
+    if (da === S.kameraZapret) return;
+    S.kameraZapret = da;
+    if (da) { S.kameraDoZapreta = S.kamera; if (S.kamera) await kameraStavit(false); }
+    else if (S.kameraDoZapreta) { S.kameraDoZapreta = false; await kameraStavit(true); }
+    else zametka(T.kameraRazresh);
+    knopki(); otpravitSam(); sostoyanie();
   }
 
   function mikrofonTumbler() {
@@ -305,8 +386,8 @@
 
   function kadrKamery() {
     const ws = S.ws;
-    const v = $('ya2');
-    if (!ws || ws.readyState !== 1 || !S.vnutri || !S.kamera || S.cvet < 0 || S.skryt) return;
+    const v = istochnik;
+    if (!ws || ws.readyState !== 1 || !S.vnutri || !S.kamera || S.kameraZapret || S.cvet < 0 || S.skryt) return;
     if (!v.videoWidth || v.readyState < 2) return;
     if (ws.bufferedAmount > 150000) { S.nuzhenKlyuch = true; return; }        // сеть тесная — кадр мимо
     const sw = v.videoWidth, sh = v.videoHeight, st = Math.min(sw, sh);
@@ -458,13 +539,18 @@
     ws.binaryType = 'arraybuffer';
     S.ws = ws;
     ws.onopen = () => {
-      S.perepodkl = 0;
+      S.perepodkl = 0; S.pongMs = Date.now();
       ws.send(JSON.stringify({ t: 'vhod', k: klyuch, imya: $('imya').value.trim(), zheton: S.zheton,
         kamera: S.kamera && !!(S.stream && S.stream.getVideoTracks()[0]), mikrofon: S.mikrofon && !!S.stream, h264: umeet.vdec }));
       if (S.pingT) clearInterval(S.pingT);
-      S.pingT = setInterval(() => { if (ws.readyState === 1) ws.send(JSON.stringify({ t: 'ping', c: Date.now() })); }, 4000);
+      S.pingT = setInterval(() => {
+        if (ws.readyState !== 1) return;
+        if (Date.now() - S.pongMs > 15000) { mertvyy(ws); return; }       // сервер молчит 15 с — сокет мёртв
+        ws.send(JSON.stringify({ t: 'ping', c: Date.now() }));
+      }, 4000);
     };
     ws.onmessage = (e) => {
+      if (S.ws !== ws) return;                                              // старое (заменённое) соединение — молчит
       if (typeof e.data === 'string') { soobshchenie(JSON.parse(e.data)); return; }
       const d = new Uint8Array(e.data);
       if (d[0] === 11 && S.rabota) { const b = e.data.slice(3); S.rabota.postMessage({ t: 'dekod', d: b }, [b]); }
@@ -488,11 +574,24 @@
     };
   }
 
+  // Сокет умер молча (урок студии: iOS после фона держит его «открытым»): не ждём — звоним заново с жетоном,
+  // сервер отдаст новому соединению место старого.
+  function mertvyy(ws) {
+    if (S.ws !== ws) return;
+    clearInterval(S.pingT);
+    S.ws = null;
+    try { ws.onclose = null; ws.close(); } catch (x) { }
+    if (S.ushel) return;
+    zametka(T.perepodkl);
+    setTimeout(soedinit, 300);
+  }
+
   function soobshchenie(m) {
     switch (m.t) {
       case 'privet':
         S.rol = m.rol; S.sost = m.sost; S.id = m.id; S.cvet = m.cvet; S.efir = !!m.efir; S.mest = m.mest;
         S.zheton = m.zheton || ''; sessionStorage.setItem('plus-z', S.zheton);
+        S.zaglushen = !!m.zaglushen; S.skryt = !!m.skryt; primenitZapret(!!m.kamera_zapret);
         S.vnutri = m.sost === 'vnutri';
         if (!m.kamera && S.kamera && S.rol !== 'hozyain') { S.kamera = false; pokazatSebya(); }
         if (!m.mikrofon && S.mikrofon && S.rol !== 'hozyain') { S.mikrofon = false; knopki(); }
@@ -509,7 +608,7 @@
         break;
       case 'sostav':
         S.lyudi = m.lyudi || []; S.mest = m.mest || S.mest; if (m.vpusk) S.vpusk = m.vpusk;
-        { const ya = S.lyudi.find((x) => x.id === S.id); if (ya) { S.cvet = ya.cvet; S.skryt = ya.skryt; S.zaglushen = ya.zaglushen; } }
+        { const ya = S.lyudi.find((x) => x.id === S.id); if (ya) { S.cvet = ya.cvet; S.skryt = ya.skryt; S.zaglushen = ya.zaglushen; primenitZapret(!!ya.kamera_zapret); } }
         risovatLyudey(); risovatPult(); sostoyanie(); knopki();
         break;
       case 'govoryat':
@@ -518,11 +617,12 @@
       case 'video': videoNastroit(m.kodek); break;
       case 'kluch': S.nuzhenKlyuch = true; break;
       case 'zaglushen': S.zaglushen = !!m.da; knopki(); sostoyanie(); break;
+      case 'kamera_zapret': primenitZapret(!!m.da); break;
       case 'skryt': S.skryt = !!m.da; sostoyanie(); break;
       case 'mest_net': zametka(T.mestNet); break;
       case 'efir': S.efir = !!m.idyot; $('tochka').classList.toggle('efir', S.efir); sostoyanie();
         if (!S.efir) { S.kodek = ''; prevyuTekst(T.prevyuZhdi); } break;
-      case 'pong': S.rttMs = Date.now() - m.c; stroka(); break;
+      case 'pong': S.pongMs = Date.now(); S.rttMs = Date.now() - m.c; stroka(); break;
       case 'proch': S.ushel = true; konec(T.prichina[m.prichina] || m.prichina); break;
       case 'upr_otvet':
         $('pultOtvet').textContent = m.otvet && m.otvet.ok === false ? (m.otvet.oshibka || '') : '';
@@ -536,6 +636,7 @@
     t.push(S.efir ? T.efirIdet : T.efirNet);
     if (S.rol !== 'hozyain') t.push(S.cvet >= 0 ? (S.skryt ? T.skryt : T.vKadre) : T.zaKadrom);
     if (S.zaglushen) t.push(T.zaglushen);
+    if (S.kameraZapret) t.push(T.kameraZapret);
     zametka(t.join(' '));
   }
 
@@ -569,7 +670,7 @@
       c.style.background = x.cvet >= 0 ? CVET[x.cvet] : '#555'; c.style.color = c.style.background;
       const n = document.createElement('span'); n.className = 'imya'; n.textContent = x.imya + (x.id === S.id ? T.vy : '');
       const r = document.createElement('span'); r.className = 'rol';
-      r.textContent = (x.rol === 'moder' ? T.moder + ' · ' : '') + (x.mikrofon && !x.zaglushen ? '🎤' : '🔇') + (x.kamera ? ' 📷' : '');
+      r.textContent = (x.rol === 'moder' ? T.moder + ' · ' : '') + (x.mikrofon && !x.zaglushen ? '🎤' : '🔇') + (x.kamera && !x.kamera_zapret ? ' 📷' : '');
       li.append(c, n, r); ul.append(li);
     }
   }
@@ -599,7 +700,8 @@
       if (x.cvet >= 0) b.style.color = CVET[x.cvet];
       d.append(b,
         knopka(x.skryt ? T.pokazatK : T.skrytK, '', () => upr(x.skryt ? 'pokazat' : 'skryt', x.id)),
-        knopka(x.zaglushen ? T.vklK : T.zaglK, '', () => upr(x.zaglushen ? 'vklyuchit' : 'zaglushit', x.id)));
+        knopka(x.zaglushen ? T.vklK : T.zaglK, x.zaglushen ? 'vyk' : '', () => upr(x.zaglushen ? 'vklyuchit' : 'zaglushit', x.id)),
+        knopka(x.kamera_zapret ? T.kamVklK : T.kamVyklK, x.kamera_zapret ? 'vyk' : '', () => upr(x.kamera_zapret ? 'kamera_vkl' : 'kamera_vykl', x.id)));
       if (!(S.rol === 'moder' && x.rol === 'moder')) d.append(knopka(T.vygnatK, 'kr', () => upr('vygnat', x.id)));
       pl.append(d);
     }
@@ -652,7 +754,33 @@
     $('knNovaya').onclick = () => upr('novaya');
     $('knVpusk').onclick = () => upr('vpusk', undefined, S.vpusk === 'avto' ? 'ruchnoy' : 'avto');
     $('knMest').onclick = () => upr('mest', undefined, String(S.mest % 3 + 1));
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && S.vnutri) { S.lock = null; budilnik(); if (S.ctx && S.ctx.state === 'suspended') S.ctx.resume(); } });
+    // Уроки студии: iOS усыпляет звук и роняет Wake Lock в фоне, а сокет может умереть молча — на возврате
+    // будим всё; был в фоне дольше 8 с — пинг, и если сервер не ответил за 2,5 с — переподключаемся сами.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { S.skrytoMs = Date.now(); return; }
+      budit();
+      if (S.ctx && S.ctx.state === 'suspended') S.ctx.resume();
+      if (!S.vnutri) return;
+      S.lock = null; budilnik();
+      const ws = S.ws;
+      if (ws && ws.readyState === 1 && S.skrytoMs && Date.now() - S.skrytoMs > 8000) {
+        const t0 = Date.now();
+        try { ws.send(JSON.stringify({ t: 'ping', c: t0 })); } catch (x) { }
+        setTimeout(() => { if (S.pongMs < t0) mertvyy(ws); }, 2500);
+      }
+    });
+    document.addEventListener('pointerdown', () => { if (S.ctx && S.ctx.state === 'suspended') S.ctx.resume().catch(() => {}); budit(); });
+    // Страж наушников (урок студии): выход звука сменился посреди эфира — предупредить про эхо (не везде видно)
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      const podpis = async () => { try { return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput').map((d) => d.deviceId).join('|'); } catch (x) { return ''; } };
+      let bylo = null;
+      podpis().then((p) => { bylo = p; });
+      navigator.mediaDevices.addEventListener('devicechange', async () => {
+        const p = await podpis();
+        if (bylo !== null && p !== bylo && S.vnutri && S.rol !== 'hozyain') zametka(T.naushnikiSmena);
+        bylo = p;
+      });
+    }
   }
 
   // для проверки на столе (?proba): состояние страницы

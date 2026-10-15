@@ -748,7 +748,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vUv;
             uniform samplerExternalOES sTex;
             $MASKA
-            void main() { float a = maska(); gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
+            void main() { float a = maska() * ${Raskladka.VIDEO_A}; gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
         """.trimIndent()
         private val FRAGMENT_PLITKA_2D = """
             precision mediump float;
@@ -756,7 +756,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vUv;
             uniform sampler2D sTex;
             $MASKA
-            void main() { float a = maska(); gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
+            void main() { float a = maska() * ${Raskladka.VIDEO_A}; gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
         """.trimIndent()
 
         /** Квадрат из середины кадра w×h: матрица текстурных координат (по столбцам), умножается справа. */

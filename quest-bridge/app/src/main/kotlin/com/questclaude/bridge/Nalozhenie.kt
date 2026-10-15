@@ -57,9 +57,9 @@ import kotlin.math.sin
  * к Плюсу и донаты — в первую очередь. Раз в секунду шагает диспетчер «тесно» (Dispetcher); тесно самой
  * игре — роза стоит, лицо реже (10 кадров в речи, иначе 5), глаза — 1 кадр в секунду.
  *
- * Гости (2.5.0, docs/GOSTI.md): слева посередине — плитки (видео рисует развилка), поверх — слой "lg":
- * рамка, свечение цветом гостя, пока он говорит, имя на плашке, значок выключенного микрофона; без
- * камеры — круг с первой буквой. Справа от плитки — слой "lb": пузырь с его субтитрами (как сказано
+ * Гости (2.5.0, docs/GOSTI.md): слева посередине — плитки (видео рисует развилка, прозрачное на 15 %), поверх —
+ * слой "lg": рамка, свечение цветом гостя, пока он говорит, имя на плашке, значок выключенного микрофона; без
+ * камеры — полупрозрачная строка с именем и огоньком голоса (круг с буквой — только пока кадры не дошли). Справа от плитки — слой "lb": пузырь с его субтитрами (как сказано
  * и перевод). Внизу — Александр (голубой), Плюс (золотой), игра (зелёный), а гости — если «все внизу».
  */
 class Nalozhenie(
@@ -652,6 +652,7 @@ class Nalozhenie(
         for ((u, p) in ek) {
             val cvet = CVET_GOSTYA.getOrElse(u.cvet) { CVET_GOSTYA[0] }
             val r = RectF(p.x, p.y - Raskladka.SLOY_Y, p.pravo, p.niz - Raskladka.SLOY_Y)
+            if (!p.video) { strokaGostya(u, r, cvet); continue }
             val rad = Raskladka.RADIUS
             if (!g.videoVidno(u.id)) {                                            // без камеры — буква
                 gp.style = Paint.Style.FILL; gp.color = Color.argb(225, 18, 20, 30)
@@ -692,6 +693,42 @@ class Nalozhenie(
                 gp.style = Paint.Style.STROKE; gp.strokeWidth = 2.5f; gp.color = Color.WHITE
                 lgc.drawLine(cx - 4.5f, cy - 4.5f, cx + 4.5f, cy + 4.5f, gp)
             }
+        }
+    }
+
+    /**
+     * Гость без камеры (2.5.0, Александр 15.10): не квадрат с буквой, а строка — полупрозрачная плашка во всю
+     * ширину столбика: слева огонёк голоса его цвета (говорит — горит и светится, молчит — тусклый), имя,
+     * справа значок выключенного микрофона.
+     */
+    private fun strokaGostya(u: Komnata.Uchastnik, r: RectF, cvet: Int) {
+        val rad = r.height() / 2f
+        gp.style = Paint.Style.FILL; gp.color = Color.argb(120, 14, 16, 24)
+        lgc.drawRoundRect(r, rad, rad, gp)
+        val (cr, cg, cb) = Triple(Color.red(cvet), Color.green(cvet), Color.blue(cvet))
+        gp.style = Paint.Style.STROKE
+        if (u.govorit) {                                                     // говорит — кант его цвета
+            gp.strokeWidth = 3f; gp.color = Color.argb(200, cr, cg, cb)
+        } else { gp.strokeWidth = 1.5f; gp.color = Color.argb(60, 255, 255, 255) }
+        lgc.drawRoundRect(r, rad, rad, gp)
+        val cx = r.left + rad; val cy = r.centerY()
+        gp.style = Paint.Style.FILL
+        if (u.govorit) for ((rr, a) in listOf(13f to 50, 10f to 90)) { gp.color = Color.argb(a, cr, cg, cb); lgc.drawCircle(cx, cy, rr, gp) }
+        gp.color = Color.argb(if (u.govorit) 255 else 110, cr, cg, cb)
+        lgc.drawCircle(cx, cy, 7f, gp)
+        val zag = !u.mikrofon || u.zaglushen
+        gt.textSize = 20f; gt.textAlign = Paint.Align.LEFT
+        val x0 = cx + rad - 4f
+        val mesto = r.right - x0 - 14f - (if (zag) 24f else 0f)
+        var imya = u.imya
+        while (imya.length > 1 && gt.measureText(imya) > mesto) imya = imya.dropLast(1)
+        if (imya.length < u.imya.length) imya = imya.dropLast(1) + "…"
+        gt.color = Color.argb(235, cr, cg, cb)
+        lgc.drawText(imya, x0, cy + 7f, gt)
+        if (zag) {                                                           // микрофон выключен
+            val zx = r.right - rad; gp.color = Color.argb(220, 235, 70, 70); lgc.drawCircle(zx, cy, 8f, gp)
+            gp.style = Paint.Style.STROKE; gp.strokeWidth = 2.5f; gp.color = Color.WHITE
+            lgc.drawLine(zx - 4.5f, cy - 4.5f, zx + 4.5f, cy + 4.5f, gp)
         }
     }
 

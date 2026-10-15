@@ -63,4 +63,6 @@ color:var(--seryy);font-size:15px}
 .zhdut .kto b,.pultKto b{flex:1;min-width:120px}
 .pultKto button,.zhdut button{padding:8px 11px;font-size:14px}
 button.da{background:#1d5a2c}button.kr{background:#5a1c1c}
+button.vyk{background:#4a3416;box-shadow:inset 0 0 0 1px var(--oranzh)}
+.krug.zapret{opacity:.35;background:#3a1b1b}
 @media (max-width:420px){.krug{width:46px;height:46px;font-size:19px}.polzunok span{width:80px}}

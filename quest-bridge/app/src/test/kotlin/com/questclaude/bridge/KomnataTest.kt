@@ -212,4 +212,55 @@ class KomnataTest {
         t += Komnata.VOZVRAT_MS + 1
         assertTrue(true)
     }
+
+    /** Модератор выключает и разрешает гостю камеру (как микрофон): гостю — сообщение, в составе — флаг. */
+    @Test fun moderatorKameraGostya() {
+        val (m, _) = voyti(kl.moder, "Мод")
+        val (g, gs) = voyti(kl.gost, "Макс")
+        k.upr(m, "vpustit", g!!.id)
+        assertTrue(g.sVideo)
+        assertTrue(k.upr(m, "kamera_vykl", g.id).contains("\"ok\":true"))
+        assertTrue(g.kameraZapret); assertFalse(g.sVideo); assertTrue(g.kamera)      // своя кнопка не тронута
+        assertTrue(gs.posl("kamera_zapret")!!.contains("\"da\":true"))
+        assertTrue(gs.posl("sostav")!!.contains("\"kamera_zapret\":true"))
+        k.upr(m, "kamera_vkl", g.id)
+        assertFalse(g.kameraZapret); assertTrue(g.sVideo)
+        assertTrue(gs.posl("kamera_zapret")!!.contains("\"da\":false"))
+        val (g2, _) = voyti(kl.gost, "Лена")
+        assertTrue(k.upr(g2, "kamera_vykl", g.id).contains("нет прав"))         // гость не управляет
+    }
+
+    /** Сеть оборвалась молча (iPhone после фона): старое соединение ещё «живо», а страница пришла с жетоном —
+     *  место, цвет и запреты модератора переходят новому, старое закрывается, гость не попадает в ожидание. */
+    @Test fun zhetonZabiraetMestoUPrizraka() {
+        val (m, _) = voyti(kl.moder, "Мод")
+        val (g, gs) = voyti(kl.gost, "Макс")
+        k.upr(m, "vpustit", g!!.id)
+        k.upr(m, "zaglushit", g.id); k.upr(m, "kamera_vykl", g.id)
+        val cvet = g.cvet
+        val dalshe = k.sobytiyaPosle(0).size
+        val s2 = Svyaz()
+        val g2 = k.vhod(s2, kl.gost, "кто угодно", true, true, zheton = g.zheton)!!
+        assertEquals("vnutri", g2.sost)
+        assertEquals("Макс", g2.imya)
+        assertEquals(cvet, g2.cvet)
+        assertTrue(g2.zaglushen); assertTrue(g2.kameraZapret)                    // запреты не сбросить переподключением
+        assertEquals("zamena", gs.zakryto)
+        assertEquals(listOf(m!!.id, g2.id).sorted(), k.vnutri().map { it.id }.sorted())   // призрака нет
+        k.uhod(g)                                                                 // старое соединение закрылось позже
+        assertEquals(2, k.vnutri().size)
+        assertTrue(k.sobytiyaPosle(0).drop(dalshe).none { it.vid == "vyshel" })   // в ухо «вышел» не сказали
+        assertTrue(s2.posl("privet")!!.contains("\"zaglushen\":true") && s2.posl("privet")!!.contains("\"kamera_zapret\":true"))
+    }
+
+    /** Обрыв и возврат по жетону: глушение и выключенная модератором камера остаются. */
+    @Test fun zapretyPerezhivayutVozvrat() {
+        val (m, _) = voyti(kl.moder, "Мод")
+        val (g, _) = voyti(kl.gost, "Макс")
+        k.upr(m, "vpustit", g!!.id)
+        k.upr(m, "zaglushit", g.id); k.upr(m, "skryt", g.id)
+        k.uhod(g)
+        val g2 = k.vhod(Svyaz(), kl.gost, "Макс", true, true, zheton = g.zheton)!!
+        assertTrue(g2.zaglushen); assertTrue(g2.skryt); assertFalse(g2.kameraZapret)
+    }
 }

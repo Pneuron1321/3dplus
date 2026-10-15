@@ -8,7 +8,9 @@ package com.questclaude.bridge
  * Плитки — слева посередине, столбиком: между табло (левый верх, до 129) и розой ветров (левый низ,
  * 150 + отступ), по центру этого промежутка. Квадрат: одно-два места — 240, три — 210; зазор 14.
  * Размер — по числу мест (не прыгает, когда кто-то вышел), место по высоте — по числу плиток в кадре.
- * Пузыри субтитров гостя — справа от его плитки, по её середине.
+ * Без камеры (Александр 15.10: «круг займёт много места») — не квадрат, а строка с именем высотой STROKA
+ * и огоньком голоса, полупрозрачная; видео в квадрате — прозрачное на 15 % (VIDEO_A).
+ * Пузыри субтитров гостя — справа от его плитки (строки), по её середине.
  *
  * Нижние субтитры — по центру свободного низа: между розой и окном камеры (если окно внизу), а не по
  * центру кадра — длинная строка уходила под окно камеры.
@@ -21,6 +23,10 @@ object Raskladka {
     const val RADIUS = 18f
     const val PUZYR_OTSTUP = 16f
     const val PUZYR_SHIR = 560f
+    /** Строка гостя без камеры: высота (ширина — как у квадрата, столбик ровный). */
+    const val STROKA = 44f
+    /** Непрозрачность видео в плитке (прозрачность 15 %). */
+    const val VIDEO_A = 0.85f
     /** Слои гостей (картинки плашек): "lg" — рамки и имена (SLOY_LG×SLOY_H), "lb" — пузыри (SLOY_LB×SLOY_H);
      *  левый верх обоих — (0; SLOY_Y) в точках 1080p. */
     const val SLOY_Y = 130f
@@ -28,23 +34,27 @@ object Raskladka {
     const val SLOY_LG = 300
     const val SLOY_LB = 900
 
-    /** Плитка: левый верх и сторона квадрата (точки 1080p). */
-    class Plitka(val x: Float, val y: Float, val s: Float) {
-        val niz: Float get() = y + s
+    /** Плитка: левый верх, ширина [s] (точки 1080p); с камерой — квадрат s×s, без — строка s×STROKA. */
+    class Plitka(val x: Float, val y: Float, val s: Float, val video: Boolean = true) {
+        val h: Float get() = if (video) s else STROKA
+        val niz: Float get() = y + h
         val pravo: Float get() = x + s
-        val centrY: Float get() = y + s / 2
-        override fun toString() = "Plitka($x, $y, $s)"
+        val centrY: Float get() = y + h / 2
+        override fun toString() = "Plitka($x, $y, $s${if (video) "" else ", строка"})"
     }
 
     fun storona(mest: Int) = if (mest >= 3) 210f else 240f
 
-    /** Плитки [n] гостей в кадре при [mest] местах. */
-    fun plitki(n: Int, mest: Int): List<Plitka> {
-        if (n <= 0) return emptyList()
+    /** Плитки [n] гостей в кадре при [mest] местах (все с камерой). */
+    fun plitki(n: Int, mest: Int): List<Plitka> = plitki(List(maxOf(0, n)) { true }, mest)
+
+    /** Плитки гостей в кадре по порядку: [video] — у кого камера (квадрат), у кого нет (строка с именем). */
+    fun plitki(video: List<Boolean>, mest: Int): List<Plitka> {
+        if (video.isEmpty()) return emptyList()
         val s = storona(mest)
-        val vsego = n * s + (n - 1) * ZAZOR
-        val y0 = VERH + maxOf(0f, (NIZ - VERH - vsego) / 2f)
-        return (0 until n).map { Plitka(KRAY, y0 + it * (s + ZAZOR), s) }
+        val vsego = video.sumOf { (if (it) s else STROKA).toDouble() }.toFloat() + (video.size - 1) * ZAZOR
+        var y = VERH + maxOf(0f, (NIZ - VERH - vsego) / 2f)
+        return video.map { v -> Plitka(KRAY, y, s, v).also { y += it.h + ZAZOR } }
     }
 
     /** Левый край пузыря субтитров у плитки. */

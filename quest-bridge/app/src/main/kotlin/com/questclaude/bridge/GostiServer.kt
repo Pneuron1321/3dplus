@@ -241,9 +241,9 @@ class GostiServer(
             when (d[0].toInt()) {
                 1 -> if (d.size > 3 && ya.mikrofon && !ya.zaglushen)
                     media.zvuk(ya, ((d[1].toInt() and 0xff) shl 8) or (d[2].toInt() and 0xff), d, 3, d.size - 3)
-                2 -> if (d.size > 6 && ya.kamera) media.video(ya, d[1].toInt() and 1 != 0, chislo(d, 2), d, 6, d.size - 6, 'h')
-                3 -> if (d.size > 5 && ya.kamera) media.video(ya, true, chislo(d, 1), d, 5, d.size - 5, 'j')
-                4 -> if (d.size > 6 && ya.kamera) media.video(ya, d[1].toInt() and 1 != 0, chislo(d, 2), d, 6, d.size - 6, 'v')
+                2 -> if (d.size > 6 && ya.sVideo) media.video(ya, d[1].toInt() and 1 != 0, chislo(d, 2), d, 6, d.size - 6, 'h')
+                3 -> if (d.size > 5 && ya.sVideo) media.video(ya, true, chislo(d, 1), d, 5, d.size - 5, 'j')
+                4 -> if (d.size > 6 && ya.sVideo) media.video(ya, d[1].toInt() and 1 != 0, chislo(d, 2), d, 6, d.size - 6, 'v')
             }
         }
 

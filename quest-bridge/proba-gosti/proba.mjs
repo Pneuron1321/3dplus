@@ -87,6 +87,37 @@ try {
   if (o4 - o3 < 10 || !(await kamU())) throw new Error('камера не вернулась: кадров за 2 с ' + (o4 - o3));
   shag('Android: камера снова в эфире (' + (o4 - o3) + ' кадров за 2 с), кодек ' + (await a.evaluate(() => window.__plus.S.vencCfg && window.__plus.S.vencCfg.codec)));
   await a.screenshot({ path: out + '/android-v-efire.png' });
+  // модератор: камера и микрофон гостя (выкл — гаснет у гостя, своя кнопка не включает; вкл — камера вернулась сама)
+  const ryad = () => m.locator('#pultLyudi .pultKto', { hasText: 'Pixel' });
+  await ryad().locator('button').nth(2).click();                                  // 📷 выкл
+  await a.waitForFunction(() => window.__plus.S.kameraZapret === true && window.__plus.S.stream.getVideoTracks().length === 0, null, { timeout: 5000 });
+  await a.click('#knKam2');
+  await new Promise((r) => setTimeout(r, 600));
+  if (await a.evaluate(() => window.__plus.S.stream.getVideoTracks().length) !== 0) throw new Error('гость включил камеру сам при запрете');
+  const z1 = await otpr(); await new Promise((r) => setTimeout(r, 1500));
+  if (await otpr() - z1 > 1) throw new Error('кадры идут при запрете');
+  shag('модератор выключил гостю камеру: погасла, своя кнопка не включает, кадров нет');
+  await m.waitForFunction(() => { const r = [...document.querySelectorAll('#pultLyudi .pultKto')].find((e) => /Pixel/.test(e.textContent)); return r && /📷 (вкл|on)/.test(r.textContent); }, null, { timeout: 5000 });
+  await ryad().locator('button').nth(2).click();                                  // 📷 вкл
+  await a.waitForFunction(() => window.__plus.S.kameraZapret === false && window.__plus.S.stream.getVideoTracks().length === 1, null, { timeout: 6000 });
+  const z2 = await otpr(); await new Promise((r) => setTimeout(r, 2000));
+  if (await otpr() - z2 < 10) throw new Error('камера не вернулась после разрешения');
+  shag('модератор разрешил камеру — вернулась сама (была включена)');
+  await ryad().locator('button').nth(1).click();                                  // 🎤 выкл
+  await a.waitForFunction(() => window.__plus.S.zaglushen === true, null, { timeout: 5000 });
+  await m.waitForFunction(() => { const r = [...document.querySelectorAll('#pultLyudi .pultKto')].find((e) => /Pixel/.test(e.textContent)); return r && /🎤 (вкл|on)/.test(r.textContent); }, null, { timeout: 5000 });
+  await ryad().locator('button').nth(1).click();                                  // 🎤 вкл
+  await a.waitForFunction(() => window.__plus.S.zaglushen === false, null, { timeout: 5000 });
+  shag('модератор выключил и включил гостю микрофон');
+  // страж дорожек: микрофон умер (звонок на iPhone) — страница подняла его сама
+  const star = await a.evaluate(() => { const t = window.__plus.S.stream.getAudioTracks()[0]; t.dispatchEvent(new Event('ended')); return t.id; });
+  await a.waitForFunction((id) => { const t = window.__plus.S.stream.getAudioTracks()[0]; return t && t.id !== id && t.readyState === 'live'; }, star, { timeout: 6000 });
+  shag('страж: умерший микрофон поднят заново');
+  // сокет умер молча (iPhone после фона): сервер не отвечает 15 с — страница звонит сама, место за ней
+  const ws0 = await a.evaluate(() => { window.__plus.ws0 = window.__plus.S.ws; window.__plus.S.pongMs = Date.now() - 20000; return true; });
+  await a.waitForFunction(() => window.__plus.S.ws && window.__plus.S.ws !== window.__plus.ws0 && window.__plus.S.ws.readyState === 1 && window.__plus.S.vnutri, null, { timeout: 12000 });
+  await m.waitForFunction(() => window.__plus.S.lyudi.filter((x) => x.imya === 'Pixel').length === 1 && window.__plus.S.lyudi.find((x) => x.imya === 'Pixel').sost === 'vnutri', null, { timeout: 6000 });
+  shag('мёртвый сокет: переподключилась сама, место и цвет — те же, без ожидания (' + ws0 + ')');
   // встроенный браузер приложения без камеры и микрофона — подсказка, куда открыть ссылку
   const w = await stranica(devices['iPhone 13']);
   await w.addInitScript(() => Object.defineProperty(navigator, 'mediaDevices', { value: undefined }));

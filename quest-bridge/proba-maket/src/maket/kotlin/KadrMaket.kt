@@ -107,6 +107,7 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
             .also { pole(it, "kadrNs", System.nanoTime() + 60_000_000_000L) }
     }
     pole(g, "razvilka", rz)
+    rz.bezKamery = g.naEkrane().filterNot { it.first.sVideo }.mapTo(HashSet()) { it.first.id }   // как Gosti.izmenilos
     check(lyudi.all { it.first.vnutri && it.first.cvet >= 0 }) { "не все внутри" }
 
     // ---------- субтитры, чат, донаты, табло ----------
@@ -165,8 +166,11 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
     // видео плиток — скруглённый квадрат (маска как в шейдере плитки)
     for ((u, p) in ek) {
         val gs = lyudi.first { it.first.id == u.id }.second
-        if (g.videoVidno(u.id)) chelovek(sk, p.x, p.y, p.s, p.s, gs.fon.first, gs.fon.second, naushniki = true,
-            radius = Raskladka.RADIUS)
+        if (g.videoVidno(u.id)) {                                     // видео — прозрачное на 15 % (шейдер плитки)
+            sk.saveLayer(p.x, p.y, p.pravo, p.niz, org.jetbrains.skia.Paint().apply { alpha = (255 * Raskladka.VIDEO_A).toInt() })
+            chelovek(sk, p.x, p.y, p.s, p.s, gs.fon.first, gs.fon.second, naushniki = true, radius = Raskladka.RADIUS)
+            sk.restore()
+        }
     }
     val bmp = { imya: String -> vzyat<ABitmap>(n, imya) }
     // слои — в порядке развилки; места — как plashkaNa

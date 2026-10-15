@@ -41,6 +41,7 @@ class Komnata(
         @Volatile var mikrofon = false
         @Volatile var skryt = false                  // убран с экрана модератором
         @Volatile var zaglushen = false              // микрофон выключен модератором
+        @Volatile var kameraZapret = false           // камера выключена модератором (кадры не принимаем)
         @Volatile var cvet = -1                      // 0..2 → g1..g3; -1 — без места
         @Volatile var vnutriMs = 0L
         @Volatile var igra = IGRA                    // громкость игры в его смеси, 0–1
@@ -50,6 +51,8 @@ class Komnata(
         val vnutri: Boolean get() = sost == "vnutri"
         val media: Boolean get() = kamera || mikrofon
         val upravlyaet: Boolean get() = rol == "hozyain" || rol == "moder"
+        /** Камера в кадре: включена у гостя и не выключена модератором. Нет — строка с именем вместо квадрата. */
+        val sVideo: Boolean get() = kamera && !kameraZapret
         /** Голос в субтитрах и цвет: g1…g3; без места — "". */
         val golos: String get() = if (cvet >= 0) "g${cvet + 1}" else ""
     }
@@ -94,7 +97,12 @@ class Komnata(
     class Sobytie(val id: Long, val vid: String, val imya: String, val ms: Long)
 
     /** Кто вышел не по своей воле (оборвалась сеть): жетон → роль, имя, цвет — вернуться сразу внутрь. */
-    private class Vozvrat(val rol: String, val imya: String, val cvet: Int, val ms: Long)
+    /** Место того, у кого оборвалась сеть: вернётся с жетоном — с теми же цветом и запретами модератора. */
+    private class Vozvrat(val rol: String, val imya: String, val cvet: Int, val ms: Long,
+                          val skryt: Boolean = false, val zaglushen: Boolean = false, val kameraZapret: Boolean = false,
+                          val igra: Float = IGRA) {
+        constructor(u: Uchastnik, ms: Long) : this(u.rol, u.imya, u.cvet, ms, u.skryt, u.zaglushen, u.kameraZapret, u.igra)
+    }
     private val vozvraty = HashMap<String, Vozvrat>()
 
     private val lyudi = LinkedHashMap<Int, Uchastnik>()
@@ -127,10 +135,19 @@ class Komnata(
         if (rol == null) { svyaz.zakryt("klyuch"); return null }
         synchronized(zamok) {
             vozvraty.entries.removeAll { chasy() - it.value.ms > VOZVRAT_MS }
+            // Сеть оборвалась молча (iPhone после фона): сервер ещё считает старое соединение живым, а страница
+            // уже пришла с жетоном. Старое — призрак: его место (и запреты модератора) переходят новому.
+            val prizrak = zheton?.takeIf { it.isNotEmpty() }?.let { z -> lyudi.values.firstOrNull { it.zheton == z && it.vnutri } }
+            if (prizrak != null && prizrak.rol == rol) {
+                lyudi.remove(prizrak.id)
+                vozvraty[prizrak.zheton] = Vozvrat(prizrak, chasy())
+                prizrak.svyaz.zakryt("zamena")
+            }
             val v = zheton?.let { vozvraty.remove(it) }?.takeIf { it.rol == rol }
             if (v != null && lyudi.values.count { it.vnutri } < MAKS_VNUTRI) {      // вернулся после обрыва — сразу внутрь
                 val u = Uchastnik(sledId++, rol, v.imya, svyaz, chasy())
                 u.h264 = h264
+                u.skryt = v.skryt; u.zaglushen = v.zaglushen; u.kameraZapret = v.kameraZapret; u.igra = v.igra
                 if (rol != "hozyain") { u.kamera = kamera; u.mikrofon = mikrofon }
                 lyudi[u.id] = u
                 if (u.media && zanyato() >= mest) { u.kamera = false; u.mikrofon = false }
@@ -164,7 +181,7 @@ class Komnata(
     /** Соединение закрылось. */
     fun uhod(u: Uchastnik, sam: Boolean = false): Unit = synchronized(zamok) {
         if (lyudi.remove(u.id) == null) return                                 // выгнали или отказали — возврата нет
-        if (u.vnutri && !sam) vozvraty[u.zheton] = Vozvrat(u.rol, u.imya, u.cvet, chasy())
+        if (u.vnutri && !sam) vozvraty[u.zheton] = Vozvrat(u, chasy())
         if (u.vnutri && u.rol != "hozyain") sobytie("vyshel", u.imya)
         u.cvet = -1
         razoslatSostav()
@@ -214,6 +231,12 @@ class Komnata(
                 val c = u ?: return oshibka("кого?")
                 c.zaglushen = chto == "zaglushit"
                 c.svyaz.tekst("{\"t\":\"zaglushen\",\"da\":${c.zaglushen}}")
+                razoslatSostav(); slushatel?.izmenilos()
+            }
+            "kamera_vykl", "kamera_vkl" -> {                 // камеру гостя — модератор (как микрофон)
+                val c = u ?: return oshibka("кого?")
+                c.kameraZapret = chto == "kamera_vykl"
+                c.svyaz.tekst("{\"t\":\"kamera_zapret\",\"da\":${c.kameraZapret}}")
                 razoslatSostav(); slushatel?.izmenilos()
             }
             "novaya" -> { klyuchi.novyGost(); razoslatSsylki() }
@@ -329,7 +352,8 @@ class Komnata(
     private fun privet(u: Uchastnik) {
         u.svyaz.tekst("{\"t\":\"privet\",\"id\":${u.id},\"rol\":\"${u.rol}\",\"sost\":\"${u.sost}\",\"imya\":${js(u.imya)}," +
             "\"zheton\":\"${u.zheton}\"," +
-            "\"cvet\":${u.cvet},\"kamera\":${u.kamera},\"mikrofon\":${u.mikrofon},\"efir\":$efir,\"mest\":$mest}")
+            "\"cvet\":${u.cvet},\"kamera\":${u.kamera},\"mikrofon\":${u.mikrofon},\"efir\":$efir,\"mest\":$mest," +
+            "\"skryt\":${u.skryt},\"zaglushen\":${u.zaglushen},\"kamera_zapret\":${u.kameraZapret}}")
         if (u.upravlyaet && u.vnutri) ssylkiDlya(u)
     }
 
@@ -363,6 +387,7 @@ class Komnata(
 
     private fun chelovek(u: Uchastnik) = "{\"id\":${u.id},\"imya\":${js(u.imya)},\"rol\":\"${u.rol}\",\"sost\":\"${u.sost}\"," +
         "\"kamera\":${u.kamera},\"mikrofon\":${u.mikrofon},\"skryt\":${u.skryt},\"zaglushen\":${u.zaglushen}," +
+        "\"kamera_zapret\":${u.kameraZapret}," +
         "\"cvet\":${u.cvet},\"govorit\":${u.govorit}}"
 
     private fun sobytie(vid: String, imya: String) {

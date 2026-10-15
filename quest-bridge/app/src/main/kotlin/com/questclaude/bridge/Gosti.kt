@@ -98,10 +98,9 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
     /** Состав или места поменялись: плитки, картинка эфира, плашка. */
     override fun izmenilos() {
         val rz = razvilka
-        val ekran = komnata.naEkrane()
-        val p = Raskladka.plitki(ekran.size, komnata.mest)
-        rz?.bezKamery = ekran.filterNot { it.kamera }.mapTo(HashSet()) { it.id }
-        rz?.plitki = ekran.mapIndexed { i, u -> u.id to p[i] }
+        val ek = naEkrane()
+        rz?.bezKamery = ek.filterNot { it.first.sVideo }.mapTo(HashSet()) { it.first.id }
+        rz?.plitki = ek.map { (u, p) -> u.id to p }
         versiya++
         synchronized(this) {
             val nuzhno = rz != null && kartinka && server != null &&
@@ -161,11 +160,11 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
     /** Гости в кадре и их плитки. */
     fun naEkrane(): List<Pair<Komnata.Uchastnik, Raskladka.Plitka>> {
         val e = komnata.naEkrane()
-        val p = Raskladka.plitki(e.size, komnata.mest)
+        val p = Raskladka.plitki(e.map { it.sVideo }, komnata.mest)
         return e.mapIndexed { i, u -> u to p[i] }
     }
 
-    fun videoVidno(id: Int) = razvilka?.gostVidno(id) == true
+    fun videoVidno(id: Int) = komnata.po(id)?.sVideo == true && razvilka?.gostVidno(id) == true
 
     // ---------- FrameServer.GostiUpr ----------
 
