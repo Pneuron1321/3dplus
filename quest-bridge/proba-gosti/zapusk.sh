@@ -1,7 +1,7 @@
 #!/bin/sh
 # Проба гостей на столе: стенд (Kotlin, JVM) + Chromium (Playwright). Нужны: gradle-проект сборки на столе
 # (H — с android.jar для компиляции и concentus), node с playwright-core, Chromium, ffmpeg.
-#   sh zapusk.sh H ПАПКА_ОТЧЁТА
+#   sh zapusk.sh H ПАПКА_ОТЧЁТА   (H — например quest-bridge/proba-stol; тогда ANDROID_JAR=путь к android.jar)
 set -e
 H=$1; OUT=$2; PORT=${PORT:-18771}
 R=$(cd "$(dirname "$0")/.." && pwd)
@@ -10,7 +10,7 @@ CHROME=${CHROME:-/opt/pw-browsers/chromium-1194/chrome-linux/chrome}
 rm -rf "$OUT"; mkdir -p "$OUT"
 ffmpeg -loglevel error -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=60" -ac 1 "$OUT/ton440.wav"
 cd "$H"
-gradle -q --offline stol -PstolArgs="$PORT $R/app/src/main/assets/gosti $OUT 90" > "$OUT/stend.log" 2>&1 &
+gradle -q --offline stol ${ANDROID_JAR:+-PandroidJar=$ANDROID_JAR} -PstolArgs="$PORT $R/app/src/main/assets/gosti $OUT 90" > "$OUT/stend.log" 2>&1 &
 STEND=$!
 node "$R/proba-gosti/proba.mjs" "$PORT" "$OUT" "$PW" "$CHROME" "$OUT/ton440.wav" || true
 wait $STEND || true
