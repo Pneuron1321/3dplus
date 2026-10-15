@@ -64,6 +64,36 @@ try {
   await m.click('#pultLyudi .pultKto button.kr');
   await vidno(g, 'ekranKonec');
   shag('модератор выгнал гостя: «' + (await g.textContent('#konecPod')) + '»');
+  // Android: гость сам выключает и включает свою камеру в эфире (огонёк гаснет, кадры не уходят)
+  const a = await stranica(Object.assign({}, devices['Pixel 7'] || devices['Pixel 5'], { locale: 'ru-RU' }));
+  await a.goto(baza + '#k=' + kl.gost);
+  await a.fill('#imya', 'Pixel');
+  await a.click('#knRazreshit'); await vidno(a, 'knVoyti'); await a.click('#knVoyti');
+  await vidno(a, 'ekranZhdi');
+  await m.waitForSelector('.zhdut button.da', { timeout: 10000 }); await m.click('.zhdut button.da');
+  await vidno(a, 'ekranEfir');
+  const otpr = () => a.evaluate(() => window.__plus.S.vidOtpr || 0);
+  const kamU = () => m.evaluate(() => { const u = window.__plus.S.lyudi.find((x) => x.imya === 'Pixel'); return u && u.kamera; });
+  await a.waitForFunction(() => (window.__plus.S.vidOtpr || 0) > 10, null, { timeout: 10000 });
+  await a.click('#knKam2');
+  await m.waitForFunction(() => { const u = window.__plus.S.lyudi.find((x) => x.imya === 'Pixel'); return u && u.kamera === false; }, null, { timeout: 5000 });
+  const dorozhek = await a.evaluate(() => window.__plus.S.stream.getVideoTracks().length);
+  const o1 = await otpr(); await new Promise((r) => setTimeout(r, 2000)); const o2 = await otpr();
+  if (dorozhek !== 0 || o2 - o1 > 1) throw new Error('камера не погасла: дорожек ' + dorozhek + ', кадров за 2 с ' + (o2 - o1));
+  shag('Android: гость выключил камеру — дорожка остановлена, кадров нет, модератор видит «камера выкл»');
+  await a.click('#knKam2');
+  await m.waitForFunction(() => { const u = window.__plus.S.lyudi.find((x) => x.imya === 'Pixel'); return u && u.kamera === true; }, null, { timeout: 5000 });
+  const o3 = await otpr(); await new Promise((r) => setTimeout(r, 2000)); const o4 = await otpr();
+  if (o4 - o3 < 10 || !(await kamU())) throw new Error('камера не вернулась: кадров за 2 с ' + (o4 - o3));
+  shag('Android: камера снова в эфире (' + (o4 - o3) + ' кадров за 2 с), кодек ' + (await a.evaluate(() => window.__plus.S.vencCfg && window.__plus.S.vencCfg.codec)));
+  await a.screenshot({ path: out + '/android-v-efire.png' });
+  // встроенный браузер приложения без камеры и микрофона — подсказка, куда открыть ссылку
+  const w = await stranica(devices['iPhone 13']);
+  await w.addInitScript(() => Object.defineProperty(navigator, 'mediaDevices', { value: undefined }));
+  await w.goto(baza + '#k=' + kl.gost);
+  const pod = await w.textContent('#vhodOshibka');
+  if (!/Safari/.test(pod) || !(await w.isDisabled('#knRazreshit'))) throw new Error('нет подсказки для встроенного браузера: ' + pod);
+  shag('встроенный браузер: «' + pod.slice(0, 60) + '…»');
 } catch (x) {
   itog.oshibki.push(String(x && x.stack || x));
   console.log('✗', x && x.message);

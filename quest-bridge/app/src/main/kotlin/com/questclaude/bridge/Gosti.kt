@@ -100,6 +100,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
         val rz = razvilka
         val ekran = komnata.naEkrane()
         val p = Raskladka.plitki(ekran.size, komnata.mest)
+        rz?.bezKamery = ekran.filterNot { it.kamera }.mapTo(HashSet()) { it.id }
         rz?.plitki = ekran.mapIndexed { i, u -> u.id to p[i] }
         versiya++
         synchronized(this) {

@@ -8,6 +8,7 @@ name: prilozhenie
 on:
   push:
     paths: ['quest-bridge/**', '.github/workflows/prilozhenie.yml']
+  workflow_dispatch:                       # «Run workflow» в Actions — собрать заново (например, после секрета PODPIS)
 jobs:
   apk:
     runs-on: ubuntu-latest

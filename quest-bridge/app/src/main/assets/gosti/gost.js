@@ -17,6 +17,8 @@
     netKlyucha: 'В ссылке нет ключа. Попроси ссылку ещё раз.',
     neumeet: 'Этот браузер не умеет звук для эфира (нужны AudioWorklet и WebAssembly). Открой ссылку в Safari или Chrome.',
     netDostupa: 'Браузер не дал камеру или микрофон. Разреши доступ в настройках сайта и обнови страницу.',
+    vBrauzere: 'Здесь нет доступа к камере и микрофону (встроенный браузер приложения). Открой ссылку в Safari (iPhone) или Chrome (Android): ⋯ → «Открыть в браузере».',
+    kameraEfir: 'Моя камера в эфире: вкл/выкл', kameraNet: 'Камера не включилась — разреши доступ к ней в настройках сайта.',
     tolkoZvuk: 'Камера недоступна — входишь только со звуком.',
     prevyuZhdi: 'Картинка эфира появится, когда начнётся эфир.', prevyuNet: 'Этот браузер не показывает картинку эфира — смотри стрим на Twitch, звук идёт отсюда.',
     prevyuVykl: 'Картинка эфира выключена (тесная сеть шлема) — смотри стрим на Twitch.',
@@ -45,6 +47,8 @@
     netKlyucha: 'The link has no key. Ask for the link again.',
     neumeet: 'This browser cannot do stream audio (needs AudioWorklet and WebAssembly). Open the link in Safari or Chrome.',
     netDostupa: 'The browser blocked camera or microphone. Allow access in site settings and reload.',
+    vBrauzere: 'No camera or microphone here (an app\'s built-in browser). Open the link in Safari (iPhone) or Chrome (Android): ⋯ → “Open in browser”.',
+    kameraEfir: 'My camera on stream: on/off', kameraNet: 'The camera did not start — allow it in site settings.',
     tolkoZvuk: 'Camera unavailable — joining with audio only.',
     prevyuZhdi: 'The stream picture appears when the stream starts.', prevyuNet: 'This browser cannot show the stream picture — watch on Twitch, audio comes from here.',
     prevyuVykl: 'Stream picture is off (tight headset network) — watch on Twitch.',
@@ -97,6 +101,7 @@
     const pod = rolPodskazka === 'h' ? T.vhodPodH : rolPodskazka === 'm' ? T.vhodPodM : T.vhodPod;
     $('tVhodZag').textContent = zag; $('tVhodPod').textContent = pod;
     $('tImya').textContent = T.imya; $('tKamera').textContent = T.kamera; $('tMikrofon').textContent = T.mikrofon;
+    $('knKamera').title = T.kameraEfir; $('knKam2').title = T.kameraEfir;
     $('tNaushniki').textContent = T.naushniki; $('knRazreshit').textContent = T.razreshit;
     $('knVoyti').textContent = rolPodskazka === 'h' ? T.pultOtkryt : T.voyti;
     $('tZhdiZag').textContent = T.zhdiZag; $('tZhdiPod').textContent = T.zhdiPod;
@@ -218,6 +223,7 @@
   async function povernut() {
     S.facing = S.facing === 'user' ? 'environment' : 'user';
     const stary = S.stream && S.stream.getVideoTracks()[0];
+    if (!stary) { pokazatSebya(); return; }                              // камера выключена — включится уже этой стороной
     try {
       const n = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15 }, facingMode: S.facing } });
       if (stary) { S.stream.removeTrack(stary); stary.stop(); }
@@ -232,10 +238,18 @@
     for (const id of ['knMikrofon', 'knMik2']) $(id).classList.toggle('vkl', S.mikrofon && !S.zaglushen);
   }
 
-  function kameraTumbler() {
+  // Камера в эфире вкл/выкл: выключенная гаснет совсем (огонёк камеры тоже), включённая — заново.
+  async function kameraTumbler() {
     S.kamera = !S.kamera;
     const vt = S.stream && S.stream.getVideoTracks()[0];
-    if (vt) vt.enabled = S.kamera;
+    if (!S.kamera && vt) { S.stream.removeTrack(vt); vt.stop(); }
+    if (S.kamera && S.stream && !vt) {
+      try {
+        const n = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 24 }, facingMode: S.facing } });
+        S.stream.addTrack(n.getVideoTracks()[0]);
+        zametka('');
+      } catch (x) { S.kamera = false; zametka(T.kameraNet); }
+    }
     if (S.kamera) S.nuzhenKlyuch = true;
     pokazatSebya();
     otpravitSam();
@@ -282,7 +296,7 @@
         const ms = Math.floor(chunk.timestamp / 1000) >>> 0;
         out[2] = ms >>> 24; out[3] = (ms >>> 16) & 255; out[4] = (ms >>> 8) & 255; out[5] = ms & 255;
         out.set(ab, 6);
-        if (S.ws && S.ws.readyState === 1) S.ws.send(out);
+        if (S.ws && S.ws.readyState === 1) { S.ws.send(out); S.vidOtpr = (S.vidOtpr || 0) + 1; }
       },
       error: () => { S.venc = null; S.nuzhenKlyuch = true; },
     });
@@ -318,7 +332,7 @@
           const ms = Math.floor(t) >>> 0;
           out[0] = 3; out[1] = ms >>> 24; out[2] = (ms >>> 16) & 255; out[3] = (ms >>> 8) & 255; out[4] = ms & 255;
           out.set(new Uint8Array(buf), 5);
-          S.ws.send(out);
+          S.ws.send(out); S.vidOtpr = (S.vidOtpr || 0) + 1;
         });
       }, 'image/jpeg', 0.7);
     }
@@ -649,6 +663,10 @@
   knopkiVhoda();
   if (!klyuch) { oshibkaVhoda(T.netKlyucha); $('knRazreshit').disabled = true; return; }
   if (!umeet.zvuk) { oshibkaVhoda(T.neumeet); $('knRazreshit').disabled = true; return; }
+  // встроенный браузер приложения (Instagram, Facebook…) часто без камеры и микрофона — сразу сказать, куда открыть
+  if (rolPodskazka !== 'h' && !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+    oshibkaVhoda(T.vBrauzere); $('knRazreshit').disabled = true; return;
+  }
   if (rolPodskazka === 'h') {                                             // пульт Александра: без камеры и микрофона
     S.kamera = false; S.mikrofon = false;
     for (const id of ['knKamera', 'knMikrofon', 'tNaushniki', 'knRazreshit']) pokaz(id, false);

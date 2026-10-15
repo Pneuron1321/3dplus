@@ -115,6 +115,8 @@ class Razvilka(private val w: Int, private val h: Int) {
     private val gosti = java.util.concurrent.ConcurrentHashMap<Int, Gost>()
     /** Плитки гостей в кадре: id участника и место (Raskladka, точки 1080p); ставит Gosti по составу комнаты. */
     @Volatile var plitki: List<Pair<Int, Raskladka.Plitka>> = emptyList()
+    /** Гости с выключенной камерой (кнопка у гостя): плитка — сразу круг с буквой, последний кадр не висит. */
+    @Volatile var bezKamery: Set<Int> = emptySet()
     private var shOes = Sh(0, 0, 0, 0, 0, 0)                  // программы плиток: видео (OES) и картинка (2D)
     private var sh2d = Sh(0, 0, 0, 0, 0, 0)
     private var released = false
@@ -558,6 +560,7 @@ class Razvilka(private val w: Int, private val h: Int) {
 
     /** Видно ли видео гостя (кадр за последние 2 с) — иначе плашка рисует круг с буквой. */
     fun gostVidno(id: Int): Boolean {
+        if (id in bezKamery) return false
         val g = gosti[id] ?: return false
         return g.kadrNs != 0L && System.nanoTime() - g.kadrNs < 2_000_000_000L
     }
@@ -594,7 +597,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         for ((id, p) in ps) {
             val g = gosti[id] ?: continue
-            if (g.kadrNs == 0L || now - g.kadrNs > 2_000_000_000L) continue        // нет видео — круг с буквой (плашка)
+            if (g.kadrNs == 0L || now - g.kadrNs > 2_000_000_000L || id in bezKamery) continue   // нет видео — круг с буквой (плашка)
             val st = (p.s * s).toInt()
             val x = (p.x * s).toInt()
             val y = o.h - ((p.y + p.s) * s).toInt()
