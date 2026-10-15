@@ -12,6 +12,7 @@
   gosti vygnat ИМЯ        — выгнать (снова — только через ожидание)
   gosti skryt | pokazat ИМЯ — убрать с экрана / вернуть (голос остаётся)
   gosti mikrofon ИМЯ vkl | vykl — микрофон гостя в эфире
+  gosti kamera ИМЯ vkl | vykl   — камера гостя в эфире (выкл — гаснет у него; вкл — вернётся, если была)
   gosti novaya            — новая ссылка гостя (старая перестанет работать)
   gosti vpusk avto | ruchnoy — впускать сами или ждать модератора / Александра
   gosti mest 1|2|3        — мест в кадре (по умолчанию 2)
@@ -334,7 +335,7 @@ def status():
         elif u['rol'] != 'hozyain':
             p.append('в кадре' if u['cvet'] >= 0 and not u['skryt'] else ('убран с экрана' if u['skryt'] else 'за кадром'))
             p.append('микрофон ' + ('выкл модератором' if u['zaglushen'] else ('вкл' if u['mikrofon'] else 'выкл')))
-            p.append('камера ' + ('вкл' if u['kamera'] else 'выкл'))
+            p.append('камера ' + ('выкл модератором' if u.get('kamera_zapret') else ('вкл' if u['kamera'] else 'выкл')))
             if u.get('govorit'):
                 p.append('говорит')
         print('  %s — %s' % (u['imya'], ', '.join(p)))
@@ -414,6 +415,8 @@ def main(a):
         return upr(c, imya)
     if c == 'mikrofon' and len(ost) >= 2 and ost[-1] in ('vkl', 'vykl'):
         return upr('vklyuchit' if ost[-1] == 'vkl' else 'zaglushit', ' '.join(ost[:-1]))
+    if c == 'kamera' and len(ost) >= 2 and ost[-1] in ('vkl', 'vykl'):
+        return upr('kamera_vkl' if ost[-1] == 'vkl' else 'kamera_vykl', ' '.join(ost[:-1]))
     if c == 'novaya':
         return upr('novaya')
     if c == 'vpusk' and ost and ost[0] in ('avto', 'ruchnoy'):
@@ -432,7 +435,7 @@ def main(a):
             return nastroyka(eho=float(ost[0].replace(',', '.')))
         except (ValueError, IndexError):
             pass
-    print('gosti; start | stop | ssylki | vpustit [ИМЯ] | otklonit|vygnat|skryt|pokazat ИМЯ | mikrofon ИМЯ vkl|vykl | '
+    print('gosti; start | stop | ssylki | vpustit [ИМЯ] | otklonit|vygnat|skryt|pokazat ИМЯ | mikrofon|kamera ИМЯ vkl|vykl | '
           'novaya | vpusk avto|ruchnoy | mest 1|2|3 | gromkost N | efir N | kartinka vkl|vykl | eho N')
     return 1
 

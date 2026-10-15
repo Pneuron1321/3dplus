@@ -297,7 +297,8 @@
   - Гость ждёт входа — Александр услышит в ухо сам. «Впусти гостя» — `gosti vpustit` (или
     `gosti vpustit Макс`); «не впускай» — `gosti otklonit ИМЯ`; «выгони Макса» — `gosti vygnat Макс`;
     «убери Макса с экрана / верни» — `gosti skryt|pokazat Макс` (голос остаётся); «выключи Максу
-    микрофон / включи» — `gosti mikrofon Макс vykl|vkl`; «впускай сам» — `gosti vpusk avto`
+    микрофон / включи» — `gosti mikrofon Макс vykl|vkl`; «выключи Максу камеру / включи» —
+    `gosti kamera Макс vykl|vkl` (вкл — вернётся, если у него была включена); «впускай сам» — `gosti vpusk avto`
     (назад — `gosti vpusk ruchnoy`); «три места» — `gosti mest 3`.
   - Звук: «гостей тише/громче в шлеме» — `gosti gromkost 60` (%, 0–150); в эфире — `gosti efir 120`;
     «гости слышат эхо» — `gosti eho 0.35` (сильнее заслонка), «меня гостям обрезает» — `gosti eho 0.15`
