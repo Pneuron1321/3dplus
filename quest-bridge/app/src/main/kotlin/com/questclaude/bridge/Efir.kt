@@ -20,6 +20,9 @@ import kotlin.math.abs
  * воспроизведения на той же проекции) и микрофон ушей (EarService), AAC; отправка — свой
  * RTMP (Rtmp) через очередь с переподключением (Otpravka). Termux для эфира не нужен:
  * Quest убивает Termux по Meta в игре — эфир это переживает.
+ *
+ * 2.5.0: гости — в звук эфира (Mikser.vEfir); фон (игра, Ава, голос донатеру — без микрофона) —
+ * в смесь гостей (Mikser.fon); звук игры — в субтитры (Rech «igra», 16 кГц).
  */
 class Efir(
     private val projection: MediaProjection,
@@ -243,6 +246,22 @@ class Efir(
     }
 
     private var zvukOshibka = ""
+    private var fon = ShortArray(CHUNK)
+    private val igra16 = ShortArray(CHUNK / 3 + 2)
+    private var igraOst = 0                                  // сумма и счёт недобранной тройки (48 → 16 кГц)
+    private var igraOstN = 0
+
+    /** Стерео 48 кГц игры → моно 16 кГц (среднее по три) → Rech «igra»; не слушают — сразу мимо. */
+    private fun igraVRech(b: ShortArray, fr: Int) {
+        val r = Hub.rechi
+        if (!r.efir || !r.igra || !r.demonZhiv) return
+        var n = 0
+        for (j in 0 until fr) {
+            igraOst += (b[2 * j] + b[2 * j + 1]) / 2
+            if (++igraOstN == 3) { igra16[n++] = (igraOst / 3).toShort(); igraOst = 0; igraOstN = 0 }
+        }
+        if (n > 0) r.podat("igra", igra16, n)
+    }
 
     private fun audioLoop(c: MediaCodec) {
         // Звук эфира — впереди распознавания речи и кодировщиков: иначе в тяжёлые моменты рвётся.
@@ -265,9 +284,16 @@ class Efir(
                 got = buf.size
             }
             val fr = got / 2
-            mic.mix(buf, fr, mikrofon)
+            if (r != null) igraVRech(buf, fr)                // звук игры — в субтитры (если демон слушает)
             vstavka.mix(buf, fr)
             vstavkaGolos.mix(buf, fr)
+            Hub.mikser?.let { m ->                           // фон гостям: игра, Ава, донатеру — без микрофона
+                if (fon.size < fr) fon = ShortArray(fr)
+                for (j in 0 until fr) fon[j] = ((buf[2 * j] + buf[2 * j + 1]) / 2).toShort()
+                m.fon(fon, fr)
+            }
+            mic.mix(buf, fr, mikrofon)
+            Hub.mikser?.vEfir(buf, fr)                       // гости — в эфир
             var pts = base + frames * 1_000_000L / RATE
             val real = System.nanoTime() / 1000 - fr * 1_000_000L / RATE
             if (abs(real - pts) > 80_000) { base += real - pts; pts = real }   // часы звука уплыли

@@ -53,6 +53,15 @@ import kotlin.concurrent.thread
  *                              "telefon","snimaet","kompas":"absolute|relative|none","kurs":"247° WSW","datchiki"}
  *   GET /nalet/upr?lico=0|1&pokaz=0|1&radar=0|1&telefon=0|1&sever=1&koiny=123.45 -> показать/скрыть лицо,
  *                              налёт, радар; Плюс снимает телефоном (2.3.5); «север здесь»; перенести налёт
+ *   GET /gosti               -> гости эфира (2.5.0): комната, звук, видео, сеть — без ключей и адреса
+ *   GET /gosti/start, /gosti/stop -> открыть / закрыть комнату (сервер 127.0.0.1:8771 для туннеля)
+ *   GET /gosti/upr?chto=vpustit|otklonit|vygnat|skryt|pokazat|zaglushit|vklyuchit|novaya|vpusk|mest&kto=ИМЯ|id&dop=…
+ *   POST /gosti/adres        -> тело — адрес туннеля https://….trycloudflare.com (пусто — нет туннеля); обратно не отдаётся
+ *   GET /gosti/ssylki        -> открыть на 2 минуты страницу ссылок для айфона (plus.local:8770/gosti)
+ *   GET /gosti/sobytiya?posle=N&zhdat=S -> кто ждёт, вошёл, вышел (для голоса в ухо), ждать до S с
+ *   GET /gosti/nastroyka?shlem=0.8&efir=1&eho=0.25&eho_db=10&kartinka=0|1
+ *   GET /titry/rech?zhdat=S  -> следующая фраза для субтитров (WAV 16 кГц; X-Golos, X-Nachalo, X-Tihih, X-Db), 204 — нет
+ *   GET /titry/upr?ya=0|1&igra=0|1&gosti=0|1&gde=u_plitki|vnizu -> какие голоса слушать, где субтитры гостей
  *
  * Listens on 127.0.0.1 only: the headset view is not exposed to the Wi-Fi.
  * The laptop reaches it through `adb forward tcp:8766 tcp:8766`, and apps on
@@ -75,6 +84,10 @@ class FrameServer(
     private val plashki: () -> PlashkiUpr? = { null },
     /** Кадр плёнки, ближайший к моменту (мс), — /frame.jpg?t= (2.3.9). */
     private val kadrV: (Long) -> ByteArray? = { null },
+    /** Гости эфира (2.5.0). */
+    private val gosti: () -> GostiUpr? = { null },
+    /** Речь для субтитров по каждому голосу (2.5.0). */
+    private val rechi: Rechi? = null,
 ) {
     class Frame(val jpeg: ByteArray, val width: Int, val height: Int, val timeMs: Long, val count: Long)
 
@@ -139,11 +152,23 @@ class FrameServer(
         }
     }
 
+    /** Гости эфира (Gosti; в тестах — подделка). Ответы — JSON; ключи и адрес туннеля сюда не попадают. */
+    interface GostiUpr {
+        fun status(): String
+        fun start(): String
+        fun stop(): String
+        fun upr(q: Map<String, String>): String
+        fun adres(u: String?): String
+        fun ssylki(): String
+        fun sobytiya(posle: Long, zhdatMs: Long): String
+        fun nastroyka(q: Map<String, String>): String
+    }
+
     companion object {
         /** Громкость голоса по умолчанию (Efir.Opts.MIC; здесь — без Android). */
         const val MIC_EFIR = 3f
         /** Что умеет это приложение сверх 2.3.8 — /status «umeet» (скрипты проверяют перед новым). */
-        const val UMEET = "[\"kadr_t\",\"chat_pachka\"]"
+        const val UMEET = "[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\"]"
         /** Как умеет звучать голос — /say/status «rezhimy» (голос-демон: «oba» — «вслух» через приложение). */
         const val REZHIMY = "[\"uho\",\"vsluh\",\"efir\",\"oba\"]"
 
@@ -350,6 +375,47 @@ class FrameServer(
                 else reply(out, 200, "application/json; charset=utf-8",
                     (if (path == "/nalet/upr") n.upr(query) else n.status()).toByteArray(Charsets.UTF_8))
             }
+            "/gosti", "/gosti/start", "/gosti/stop", "/gosti/upr", "/gosti/ssylki", "/gosti/sobytiya", "/gosti/nastroyka" -> {
+                val g = gosti()
+                if (g == null) reply(out, 503, "application/json", "{\"idyot\":false,\"oshibka\":\"захват не идёт\"}".toByteArray(Charsets.UTF_8))
+                else {
+                    if (path == "/gosti/sobytiya") c.soTimeout = 30_000
+                    val json = when (path) {
+                        "/gosti/start" -> g.start()
+                        "/gosti/stop" -> g.stop()
+                        "/gosti/upr" -> g.upr(query)
+                        "/gosti/ssylki" -> g.ssylki()
+                        "/gosti/sobytiya" -> g.sobytiya(query["posle"]?.toLongOrNull() ?: 0L,
+                            ((query["zhdat"]?.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 25.0) * 1000).toLong())
+                        "/gosti/nastroyka" -> g.nastroyka(query)
+                        else -> g.status()
+                    }
+                    reply(out, 200, "application/json; charset=utf-8", json.toByteArray(Charsets.UTF_8))
+                }
+            }
+            "/gosti/adres" -> {
+                val g = gosti()
+                val body = if (length in 1..600) CharArray(length).let { ch ->
+                    var got = 0
+                    while (got < length) { val n = reader.read(ch, got, length - got); if (n < 0) break; got += n }
+                    String(ch, 0, got).trim()
+                } else ""
+                if (g == null) reply(out, 503, "application/json", "{\"ok\":false}".toByteArray())
+                else reply(out, 200, "application/json", g.adres(body.ifEmpty { null }).toByteArray(Charsets.UTF_8))
+            }
+            "/titry/rech" -> {
+                val r = rechi
+                val zhdat = ((query["zhdat"]?.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 25.0) * 1000).toLong()
+                val f = r?.sleduyushaya(zhdat)
+                if (f == null) reply(out, 204, "text/plain", ByteArray(0))
+                else reply(out, 200, "audio/wav", Rechi.wav(f.pcm), "X-Golos: ${f.golos}\r\nX-Nachalo: ${f.nachaloMs}\r\n" +
+                    "X-Tihih: ${String.format(java.util.Locale.ROOT, "%.3f", f.tihih)}\r\nX-Db: ${String.format(java.util.Locale.ROOT, "%.1f", f.db)}\r\n")
+            }
+            "/titry/upr" -> {
+                val r = rechi
+                if (r == null) reply(out, 404, "text/plain", "no rechi".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8", r.upr(query).toByteArray(Charsets.UTF_8))
+            }
             "/pamyat" -> reply(out, 200, "text/plain; charset=utf-8",
                 pamyat(query["n"]?.toIntOrNull() ?: 60).toByteArray(Charsets.UTF_8))
             "/efir/key" -> {
@@ -401,10 +467,10 @@ class FrameServer(
         }
     }
 
-    private fun reply(out: OutputStream, code: Int, type: String, body: ByteArray) {
-        val reason = when (code) { 200 -> "OK"; 503 -> "Service Unavailable"; else -> "Not Found" }
+    private fun reply(out: OutputStream, code: Int, type: String, body: ByteArray, dop: String = "") {
+        val reason = when (code) { 200 -> "OK"; 204 -> "No Content"; 503 -> "Service Unavailable"; else -> "Not Found" }
         out.write(("HTTP/1.1 $code $reason\r\nContent-Type: $type\r\nContent-Length: ${body.size}\r\n" +
-            "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray(Charsets.ISO_8859_1))
+            dop + "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray(Charsets.ISO_8859_1))
         out.write(body)
         out.flush()
     }

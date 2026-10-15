@@ -37,6 +37,12 @@ import java.util.concurrent.TimeUnit
  * 2.3.9 (план эфира III.1–III.2): плашки — через почтовый ящик (Yashchik): sloy() кладёт копию и
  * сразу возвращается, поток развилки забирает в начале кадра экрана не больше одной, только новое.
  * Счётчики для /efir и чёрного ящика: кадры экрана в секунду, время загрузок плашек, частота глаз.
+ *
+ * 2.5.0 (гости эфира): плитки гостей слева посередине (Raskladka) — видео гостя (свой декодер H.264
+ * рисует в свою поверхность, как камера) или картинка JPEG; квадрат со скруглёнными углами,
+ * поверх — плашка "lg" (рамка, имя, свечение, когда говорит), справа — "lb" (пузыри субтитров).
+ * Нижние субтитры "nc" — по центру между розой и окном камеры. Картинка эфира гостям — ещё один
+ * выход (маленький кодировщик Prevyu) со всеми слоями.
  */
 class Razvilka(private val w: Int, private val h: Int) {
     private val thread = HandlerThread("razvilka").apply { start() }
@@ -91,6 +97,26 @@ class Razvilka(private val w: Int, private val h: Int) {
     private class Sloy(val tex: Int) { var w = 0; var h = 0 }
     private val sloi = linkedMapOf<String, Sloy>()
     private val outs = mutableListOf<Out>()
+
+    /** Плитка гостя: видео (OES от декодера) или картинка (JPEG, 2D) — своя текстура на участника. */
+    private class Gost {
+        var oes = 0
+        var st: SurfaceTexture? = null
+        var surf: Surface? = null
+        val mtx = FloatArray(16)
+        val mtxKrop = FloatArray(16)
+        @Volatile var vw = 0
+        @Volatile var vh = 0
+        @Volatile var kadrNs = 0L
+        var tex2d = 0
+        var kw = 0
+        var kh = 0
+    }
+    private val gosti = java.util.concurrent.ConcurrentHashMap<Int, Gost>()
+    /** Плитки гостей в кадре: id участника и место (Raskladka, точки 1080p); ставит Gosti по составу комнаты. */
+    @Volatile var plitki: List<Pair<Int, Raskladka.Plitka>> = emptyList()
+    private var shOes = Sh(0, 0, 0, 0, 0, 0)                  // программы плиток: видео (OES) и картинка (2D)
+    private var sh2d = Sh(0, 0, 0, 0, 0, 0)
     private var released = false
 
     /** Кадров от захвата — для статуса. */
@@ -272,11 +298,15 @@ class Razvilka(private val w: Int, private val h: Int) {
             ksurf?.release()
             kst?.release()
             if (ktex != 0) GLES20.glDeleteTextures(1, intArrayOf(ktex), 0)
+            for (g in gosti.values) gostOsvobodit(g)
+            gosti.clear()
             for (sl in sloi.values) GLES20.glDeleteTextures(1, intArrayOf(sl.tex), 0)
             sloi.clear()
             for (b in yashchik.vse()) b.recycle()
             synchronized(chernoviki) { chernoviki.values.forEach { it.recycle() }; chernoviki.clear() }
             if (program2 != 0) GLES20.glDeleteProgram(program2)
+            if (shOes.p != 0) GLES20.glDeleteProgram(shOes.p)
+            if (sh2d.p != 0) GLES20.glDeleteProgram(sh2d.p)
             if (program != 0) GLES20.glDeleteProgram(program)
             GLES20.glDeleteTextures(1, intArrayOf(tex), 0)
             EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
@@ -315,6 +345,10 @@ class Razvilka(private val w: Int, private val h: Int) {
         aPos2 = GLES20.glGetAttribLocation(program2, "aPos")
         aTex2 = GLES20.glGetAttribLocation(program2, "aTex")
         uMtx2 = GLES20.glGetUniformLocation(program2, "uMtx")
+        fun sh(p: Int) = Sh(p, GLES20.glGetAttribLocation(p, "aPos"), GLES20.glGetAttribLocation(p, "aTex"),
+            GLES20.glGetUniformLocation(p, "uMtx"), GLES20.glGetUniformLocation(p, "uRazmer"), GLES20.glGetUniformLocation(p, "uR"))
+        shOes = sh(program(VERTEX_PLITKA, FRAGMENT_PLITKA))
+        sh2d = sh(program(VERTEX_PLITKA, FRAGMENT_PLITKA_2D))
         tex = oesTexture()
         st = SurfaceTexture(tex)
         st.setDefaultBufferSize(w, h)
@@ -377,6 +411,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             } else kvadrat(tex, mtx)
             if (o.sloi) {
                 okno(o)
+                plitkiNa(o)
                 for ((ugol, sl) in sloi) if (ugol != "vse") plashkaNa(o, ugol, sl)
                 sloi["vse"]?.let { plashkaNa(o, "vse", it) }               // итоги вечера — поверх всего
             }
@@ -414,7 +449,8 @@ class Razvilka(private val w: Int, private val h: Int) {
         var x = if (ugol.startsWith("l")) m else o.w - w - m
         var y = if (ugol.endsWith("n")) m else o.h - h - m
         when (ugol) {
-            "nc" -> { x = (o.w - w) / 2; y = o.h * 5 / 100 }
+            "nc" -> { x = nizCentr(o, w) - w / 2; y = o.h * 5 / 100 }
+            "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }   // слои гостей: от точки (0; SLOY_Y) 1080p
             "vse" -> { x = 0; y = 0; w = o.w; h = o.h }
             "pc" -> {                         // чат: справа, между плашкой Плюса и окном камеры
                 val zazor = (8 * s).toInt()
@@ -446,6 +482,149 @@ class Razvilka(private val w: Int, private val h: Int) {
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
     }
+
+    /**
+     * Центр нижних субтитров (2.5.0): между розой (если она есть) и окном камеры внизу справа (или
+     * слева) — длинная строка не уходит под окно.
+     */
+    private fun nizCentr(o: Out, shir: Int): Int {
+        val s = o.h / 1080f
+        val m = o.h / 100
+        var levo = sloi["ln"]?.takeIf { it.w > 0 }?.let { m + (it.w * s).toInt() } ?: m
+        var pravo = o.w - m
+        val v = vid
+        if (kameraVidna() && v.rezhim == "ugol" && v.gde.endsWith("n")) {
+            val r = Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v)
+            if (v.gde.startsWith("p")) pravo = minOf(pravo, r[0] - m) else levo = maxOf(levo, r[0] + r[2] + m)
+        }
+        return Raskladka.centrNiza(o.w, levo, pravo, shir)
+    }
+
+    // ---------- гости (2.5.0) ----------
+
+    /** Поверхность для декодера видео гостя [id] (одна на гостя; повторный вызов — та же). */
+    fun gostPoverhnost(id: Int): Surface = sync {
+        val g = gosti.getOrPut(id) { Gost() }
+        g.surf ?: run {
+            EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
+            g.oes = oesTexture()
+            val t = SurfaceTexture(g.oes)
+            t.setOnFrameAvailableListener({ kadrGostya(g) }, handler)
+            g.st = t
+            Surface(t).also { g.surf = it }
+        }
+    }
+
+    /** Размер видео гостя (от декодера) — для обрезки в квадрат. */
+    fun gostRazmer(id: Int, w: Int, h: Int) {
+        if (w <= 0 || h <= 0) return
+        handler.post { gosti[id]?.let { it.vw = w; it.vh = h } }
+    }
+
+    /** Кадр-картинка гостя (JPEG, без WebCodecs у браузера): в текстуру на потоке развилки, потом recycle. */
+    fun gostKartinka(id: Int, b: Bitmap) {
+        if (released) { b.recycle(); return }
+        handler.post {
+            if (released) { b.recycle(); return@post }
+            EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
+            val g = gosti.getOrPut(id) { Gost() }
+            if (g.tex2d == 0) {
+                val t = IntArray(1)
+                GLES20.glGenTextures(1, t, 0)
+                g.tex2d = t[0]
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, g.tex2d)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            }
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, g.tex2d)
+            if (b.width == g.kw && b.height == g.kh) GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, b)
+            else GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
+            g.kw = b.width; g.kh = b.height
+            g.kadrNs = System.nanoTime()
+            b.recycle()
+            if (g.kadrNs - lastScreenNs > 50_000_000L) { zabrat(); schet(g.kadrNs); risovat(g.kadrNs, tolkoSloi = true) }
+        }
+    }
+
+    /** Гостя нет (вышел): декодер уже остановлен — текстуры прочь. */
+    fun gostUbrat(id: Int) = sync {
+        if (released) return@sync
+        val g = gosti.remove(id) ?: return@sync
+        EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
+        gostOsvobodit(g)
+    }
+
+    /** Видно ли видео гостя (кадр за последние 2 с) — иначе плашка рисует круг с буквой. */
+    fun gostVidno(id: Int): Boolean {
+        val g = gosti[id] ?: return false
+        return g.kadrNs != 0L && System.nanoTime() - g.kadrNs < 2_000_000_000L
+    }
+
+    private fun gostOsvobodit(g: Gost) {
+        g.st?.setOnFrameAvailableListener(null)
+        g.surf?.release()
+        g.st?.release()
+        if (g.oes != 0) GLES20.glDeleteTextures(1, intArrayOf(g.oes), 0)
+        if (g.tex2d != 0) GLES20.glDeleteTextures(1, intArrayOf(g.tex2d), 0)
+        g.oes = 0; g.tex2d = 0; g.st = null; g.surf = null
+    }
+
+    private fun kadrGostya(g: Gost) {
+        val t = g.st ?: return
+        if (released) return
+        EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
+        t.updateTexImage()
+        t.getTransformMatrix(g.mtx)
+        g.kadrNs = System.nanoTime()
+        g.kw = 0                                                     // видео сильнее картинки
+        if (g.kadrNs - lastScreenNs > 50_000_000L && g.kadrNs - kameraNs > 50_000_000L) {
+            zabrat(); schet(g.kadrNs); risovat(g.kadrNs, tolkoSloi = true)
+        }
+    }
+
+    /** Плитки гостей поверх кадра эфира: квадрат со скруглёнными углами, видео обрезано по центру. */
+    private fun plitkiNa(o: Out) {
+        val ps = plitki
+        if (ps.isEmpty()) return
+        val s = o.h / 1080f
+        val now = System.nanoTime()
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        for ((id, p) in ps) {
+            val g = gosti[id] ?: continue
+            if (g.kadrNs == 0L || now - g.kadrNs > 2_000_000_000L) continue        // нет видео — круг с буквой (плашка)
+            val st = (p.s * s).toInt()
+            val x = (p.x * s).toInt()
+            val y = o.h - ((p.y + p.s) * s).toInt()
+            GLES20.glViewport(x, y, st, st)
+            val video = g.st != null && g.kw == 0
+            val sh = if (video) shOes else sh2d
+            GLES20.glUseProgram(sh.p)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            if (video) {
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, g.oes)
+                android.opengl.Matrix.multiplyMM(g.mtxKrop, 0, g.mtx, 0, krop(g.vw, g.vh), 0)
+            } else {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, g.tex2d)
+                android.opengl.Matrix.multiplyMM(g.mtxKrop, 0, PEREVOROT, 0, krop(g.kw, g.kh), 0)
+            }
+            GLES20.glUniformMatrix4fv(sh.uMtx, 1, false, g.mtxKrop, 0)
+            GLES20.glUniform2f(sh.uRazmer, st.toFloat(), st.toFloat())
+            GLES20.glUniform1f(sh.uR, Raskladka.RADIUS * s)
+            quad.position(0)
+            GLES20.glVertexAttribPointer(sh.aPos, 2, GLES20.GL_FLOAT, false, 16, quad)
+            GLES20.glEnableVertexAttribArray(sh.aPos)
+            quad.position(2)
+            GLES20.glVertexAttribPointer(sh.aTex, 2, GLES20.GL_FLOAT, false, 16, quad)
+            GLES20.glEnableVertexAttribArray(sh.aTex)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        }
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private class Sh(val p: Int, val aPos: Int, val aTex: Int, val uMtx: Int, val uRazmer: Int, val uR: Int)
 
     /** Верх окна камеры (GL — от низа кадра, с рамкой), если окно справа внизу и видно; иначе null. */
     private fun kameraVerh(o: Out): Int? {
@@ -539,6 +718,51 @@ class Razvilka(private val w: Int, private val h: Int) {
             uniform sampler2D sTex;
             void main() { gl_FragColor = texture2D(sTex, vTex); }
         """.trimIndent()
+        /** Плитка гостя: vUv — точка плитки 0…1 (для скруглённых углов). */
+        private val VERTEX_PLITKA = """
+            attribute vec4 aPos;
+            attribute vec4 aTex;
+            uniform mat4 uMtx;
+            varying vec2 vTex;
+            varying vec2 vUv;
+            void main() { gl_Position = aPos; vTex = (uMtx * aTex).xy; vUv = aPos.xy * 0.5 + 0.5; }
+        """.trimIndent()
+        /** Скругление: расстояние до прямоугольника со скруглёнными углами; край — 1 точка сглаживания. */
+        private const val MASKA = """
+            uniform vec2 uRazmer;
+            uniform float uR;
+            float maska() {
+                vec2 p = (vUv - 0.5) * uRazmer;
+                vec2 q = abs(p) - (uRazmer * 0.5 - uR);
+                float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uR;
+                return clamp(0.5 - d, 0.0, 1.0);
+            }
+        """
+        private val FRAGMENT_PLITKA = """
+            #extension GL_OES_EGL_image_external : require
+            precision mediump float;
+            varying vec2 vTex;
+            varying vec2 vUv;
+            uniform samplerExternalOES sTex;
+            $MASKA
+            void main() { float a = maska(); gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
+        """.trimIndent()
+        private val FRAGMENT_PLITKA_2D = """
+            precision mediump float;
+            varying vec2 vTex;
+            varying vec2 vUv;
+            uniform sampler2D sTex;
+            $MASKA
+            void main() { float a = maska(); gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
+        """.trimIndent()
+
+        /** Квадрат из середины кадра w×h: матрица текстурных координат (по столбцам), умножается справа. */
+        fun krop(w: Int, h: Int): FloatArray {
+            if (w <= 0 || h <= 0 || w == h) return floatArrayOf(1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f)
+            return if (w > h) { val k = h.toFloat() / w; floatArrayOf(k, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, (1 - k) / 2, 0f, 0f, 1f) }
+            else { val k = w.toFloat() / h; floatArrayOf(1f, 0f, 0f, 0f, 0f, k, 0f, 0f, 0f, 0f, 1f, 0f, 0f, (1 - k) / 2, 0f, 1f) }
+        }
+
         private val FRAGMENT = """
             #extension GL_OES_EGL_image_external : require
             precision mediump float;

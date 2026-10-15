@@ -75,6 +75,8 @@ class CaptureService : Service() {
         @Volatile var status = "Готов."
         /** Камера телефона — для кнопки в приложении (адрес с ключом); живёт, пока идёт захват. */
         @Volatile var kamera: Kamera? = null
+        /** Гости эфира (2.5.0) — для строки в приложении; живут, пока идёт захват. */
+        @Volatile var gosti: Gosti? = null
     }
 
     private var projection: MediaProjection? = null
@@ -102,7 +104,9 @@ class CaptureService : Service() {
     private lateinit var top: Top
     private lateinit var chat: Chat
     /** Субтитры и итоги вечера — живут со службой, рисует Nalozhenie во время эфира. */
-    private val titry = Titry()
+    private val titry = Titry(yaOtSinhrona = { Hub.rechi.slushaetYa })
+    /** Микрофон — в субтитры (Rech «ya»), пока демон sinhron слушает и идёт эфир (2.5.0). */
+    private val rechYa: (ShortArray, Int) -> Unit = { c, n -> Hub.rechi.podat("ya", c, n) }
     private val itogi = Itogi()
     private val igra = Igra()
     private var nalozhenie: Nalozhenie? = null   // лицо Плюса и налёт, радар — по углам эфира
@@ -179,6 +183,13 @@ class CaptureService : Service() {
         val gruppa = wifi?.createMulticastLock("plus-kamera")?.apply { setReferenceCounted(false) }
         kamera = Kamera(filesDir) { on -> if (on) gruppa?.acquire() else if (gruppa?.isHeld == true) gruppa.release() }
             .also { it.start(); Hub.kamera = it }
+        val gostiFayly = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+        gosti = Gosti(filesDir) { kamera?.stranicaGosti() }.also { g ->
+            g.fayl = { imya -> gostiFayly[imya] ?: try { assets.open("gosti/$imya").use { it.readBytes() }.also { gostiFayly[imya] = it } } catch (e: Exception) { null } }
+            kamera?.gostiStranica = { g.stranicaHtml() }
+            Hub.gosti = g
+        }
+        Hub.micTapy += rechYa
         nalet = Nalet({ try { File(filesDir, NALET).readText().trim().toLong() } catch (e: Exception) { 0L } },
             { sek -> try { File(filesDir, NALET).writeText(sek.toString()) } catch (e: Exception) { } })
         pokaz = try {
@@ -428,9 +439,11 @@ class CaptureService : Service() {
         }
         efir = e
         kamera?.podklyuchit(rz)
+        gosti?.podklyuchit(rz)
+        Hub.rechi.efir = true
         val k = kompas ?: Kompas(this).also { kompas = it }
         nalozhenie = Nalozhenie(this, nalet, k, rz, { efir }, { pokaz }, titry, cel, itogi, igra, top, chat,
-            glaza = { f -> reader?.surface?.let { s -> razvilka?.fps(s, f) } }).also { it.start() }
+            glaza = { f -> reader?.surface?.let { s -> razvilka?.fps(s, f) } }, gosti = gosti).also { it.start() }
         if (k.tip == "absolute") k.popravka = try { File(filesDir, SEVER).readText().trim().toFloat() } catch (e: Exception) { 0f }
         getSystemService(NotificationManager::class.java).notify(1, notification("ЭФИР · Twitch · ${opts.w}×${opts.h} · глаза Плюса работают"))
         return e.status()
@@ -439,7 +452,9 @@ class CaptureService : Service() {
     private fun efirStop(): String {
         nalozhenie?.stop()
         nalozhenie = null
+        Hub.rechi.efir = false
         kamera?.otklyuchit()
+        gosti?.otklyuchit()
         efir?.stop()
         efir = null
         if (razvilka != null) vernutPryamo()
@@ -576,6 +591,11 @@ class CaptureService : Service() {
         handler?.removeCallbacks(watchdog)
         Hub.efir = null
         Hub.kamera = null
+        Hub.micTapy -= rechYa
+        Hub.rechi.efir = false
+        Hub.gosti = null
+        gosti?.let { it.otklyuchit(); it.stop() }
+        gosti = null
         Hub.nalet = null
         Hub.plashki = null
         teploSlushatel?.let { try { getSystemService(android.os.PowerManager::class.java).removeThermalStatusListener(it) } catch (e: Exception) { } }

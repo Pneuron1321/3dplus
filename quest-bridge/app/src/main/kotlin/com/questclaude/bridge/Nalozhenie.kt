@@ -56,6 +56,11 @@ import kotlin.math.sin
  * больше 2 сообщений в секунду — быстрый режим: по строке на сообщение, последние 5, обращённые
  * к Плюсу и донаты — в первую очередь. Раз в секунду шагает диспетчер «тесно» (Dispetcher); тесно самой
  * игре — роза стоит, лицо реже (10 кадров в речи, иначе 5), глаза — 1 кадр в секунду.
+ *
+ * Гости (2.5.0, docs/GOSTI.md): слева посередине — плитки (видео рисует развилка), поверх — слой "lg":
+ * рамка, свечение цветом гостя, пока он говорит, имя на плашке, значок выключенного микрофона; без
+ * камеры — круг с первой буквой. Справа от плитки — слой "lb": пузырь с его субтитрами (как сказано
+ * и перевод). Внизу — Александр (голубой), Плюс (золотой), игра (зелёный), а гости — если «все внизу».
  */
 class Nalozhenie(
     ctx: Context,
@@ -72,6 +77,8 @@ class Nalozhenie(
     private val chat: Chat = Chat({ null }, { }),
     /** Сколько кадров в секунду отдавать глазам Плюса (CaptureService меняет выход развилки). */
     private val glaza: (Int) -> Unit = { },
+    /** Гости эфира (2.5.0): плитки, имена, пузыри субтитров. */
+    private val gosti: Gosti? = null,
 ) {
     /** Что показывать (запоминает CaptureService): лицо, налёт, радар; telefon — Плюс снимает, когда видно окно камеры. */
     class Pokaz(val lico: Boolean = true, val nalet: Boolean = true, val radar: Boolean = true, val telefon: Boolean = true)
@@ -87,6 +94,12 @@ class Nalozhenie(
     private val chatBmp = Bitmap.createBitmap(CW, CH, Bitmap.Config.ARGB_8888)    // справа: чат Twitch
     private val chc = Canvas(chatBmp)
     private val chp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; textSize = CSZ }
+    private val lgBmp = Bitmap.createBitmap(Raskladka.SLOY_LG, Raskladka.SLOY_H, Bitmap.Config.ARGB_8888)   // рамки и имена гостей
+    private val lgc = Canvas(lgBmp)
+    private val lbBmp = Bitmap.createBitmap(Raskladka.SLOY_LB, Raskladka.SLOY_H, Bitmap.Config.ARGB_8888)   // пузыри субтитров гостей
+    private val lbc = Canvas(lbBmp)
+    private val gp = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val gt = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD }
     private var itogiBmp: Bitmap? = null                         // 1920×1080 — только пока итоги на экране
     private val lico = kartinka(ctx, "plus-lico.png")
     private val svet = kartinka(ctx, "plus-lico-svet.png")       // пришелец светится
@@ -157,6 +170,9 @@ class Nalozhenie(
             var rozaMs = 0L
             var chatMs = 0L
             var glazaBylo = 0
+            var gostiBylo = ""
+            var gostiMs = 0L
+            var puzyriBylo = ""
             while (rabotaet) {
                 val now = System.currentTimeMillis()
                 val sost = sostoyanie(now)
@@ -203,11 +219,31 @@ class Nalozhenie(
                 val w = Hub.lastWakeMs
                 if (w != vyzovBylo) { itogi.vyzovov++; vyzovBylo = w }
                 shag("субтитры") {
-                    val ts = titry.seychas()                          // субтитры — внизу по центру
+                    val vnizu = !Hub.rechi.uPlitki || gosti == null
+                    // гости — пузырём у своей плитки; убранный с экрана — внизу со всеми
+                    val plitki = if (vnizu) null else gosti?.naEkrane()?.mapTo(HashSet()) { it.first.golos }
+                    val vse = titry.seychas(gostiVnizu = vnizu, uPlitok = plitki)
+                    val ts = vse.filter { !Titry.gost(it.kto) || plitki == null || it.kto !in plitki }
                     val tKlyuch = ts.joinToString("|") { it.kto + it.doMs + it.tekst }
                     if (tKlyuch != titrBylo) {
                         if (ts.isEmpty()) razvilka.sloy("nc", null) else { titryRisovat(ts); razvilka.sloy("nc", titrBmp) }
                         titrBylo = tKlyuch
+                    }
+                    val pz = if (plitki == null) emptyList() else vse.filter { Titry.gost(it.kto) && it.kto in plitki }
+                    val pKlyuch = pz.joinToString("|") { it.kto + it.doMs + it.tekst } + " " + (gosti?.versiya ?: 0)
+                    if (pKlyuch != puzyriBylo) {
+                        if (pz.isEmpty()) razvilka.sloy("lb", null) else if (puzyri(pz)) razvilka.sloy("lb", lbBmp) else razvilka.sloy("lb", null)
+                        puzyriBylo = pKlyuch
+                    }
+                }
+                shag("гости") {                                       // плитки гостей: рамка, имя, свечение — не чаще 10 раз в секунду
+                    val g = gosti
+                    val ek = g?.naEkrane().orEmpty()
+                    val gKlyuch = if (ek.isEmpty()) "net" else "${g?.versiya} " + ek.joinToString(",") { (u, _) ->
+                        "${u.id}${u.imya}${u.govorit}${u.mikrofon && !u.zaglushen}${g?.videoVidno(u.id)}" }
+                    if (gKlyuch != gostiBylo && (ek.isEmpty() || now - gostiMs >= 100)) {
+                        if (ek.isEmpty()) razvilka.sloy("lg", null) else { plitkiRisovat(ek); razvilka.sloy("lg", lgBmp) }
+                        gostiBylo = gKlyuch; gostiMs = now
                     }
                 }
                 shag("табло") {
@@ -268,7 +304,7 @@ class Nalozhenie(
         rabotaet = false
         potok?.join(1000)
         kompas.stop()
-        try { for (u in listOf("pv", "ln", "lv", "nc", "pc", "vse")) razvilka.sloy(u, null) } catch (e: Exception) { }
+        try { for (u in listOf("pv", "ln", "lv", "nc", "pc", "vse", "lg", "lb")) razvilka.sloy(u, null) } catch (e: Exception) { }
         itogiBmp?.recycle(); itogiBmp = null
         itogi.konecEfira()
         nalet.zapisat()
@@ -546,15 +582,16 @@ class Nalozhenie(
         tt.textSize = TSZ
         class Ryad(val imya: String, val cvetImeni: Int, val cvet: Int, val tekst: String)
         val repliki = ts.map { st ->
-            val imya = if (st.kto == "plus") "PLUS" else "ALEXANDER"
-            val ci = if (st.kto == "plus") Color.rgb(255, 205, 70) else Color.rgb(130, 200, 255)
+            val imya = imyaGolosa(st.kto)
+            val ci = cvetGolosa(st.kto)
             perenos(imya + "  " + st.tekst, TW - 40f, 2).mapIndexed { i, l -> Ryad(if (i == 0) imya else "", ci, Color.WHITE, l) } +
                 (if (st.perevod.isEmpty()) emptyList()
                 else perenos(st.perevod, TW - 40f, 2).map { Ryad("", ci, Color.rgb(190, 225, 255), it) })
         }
         val vse = mutableListOf<Ryad>()
+        val predel = if (ts.any { Titry.gost(it.kto) }) TSTROK_VNIZU else TSTROK   // гость внизу — три голоса
         for (r in repliki.asReversed()) {
-            if (vse.size + r.size > TSTROK) break
+            if (vse.size + r.size > predel) break
             vse.addAll(0, r)
         }
         var y = TH - 10f - (vse.size - 1) * TLH
@@ -586,6 +623,119 @@ class Nalozhenie(
         var last = out[n - 1]
         while (last.isNotEmpty() && tt.measureText("$last…") > shir) last = last.dropLast(1)
         return out.take(n - 1) + "${last.trimEnd()}…"
+    }
+
+    // ---------- гости (2.5.0): плитки и пузыри ----------
+
+    /** Имя голоса в субтитрах: ALEXANDER, PLUS, GAME, гость — его имя большими буквами. */
+    private fun imyaGolosa(kto: String): String = when (kto) {
+        "plus" -> "PLUS"
+        "igra" -> "GAME"
+        "ya" -> "ALEXANDER"
+        else -> gosti?.komnata?.imyaGolosa(kto)?.uppercase() ?: "GUEST"
+    }
+
+    private fun cvetGolosa(kto: String): Int = when (kto) {
+        "plus" -> Color.rgb(255, 205, 70)
+        "igra" -> Color.rgb(140, 225, 140)
+        "ya" -> Color.rgb(130, 200, 255)
+        else -> CVET_GOSTYA.getOrElse((kto.drop(1).toIntOrNull() ?: 1) - 1) { CVET_GOSTYA[0] }
+    }
+
+    /**
+     * Слой "lg" — поверх видео плиток: рамка (говорит — его цвет и свечение), без видео — тёмный квадрат и
+     * круг с первой буквой имени; внизу плитки — имя на тёмной плашке, микрофон выключен — красный значок.
+     */
+    private fun plitkiRisovat(ek: List<Pair<Komnata.Uchastnik, Raskladka.Plitka>>) {
+        lgc.drawColor(0, PorterDuff.Mode.CLEAR)
+        val g = gosti ?: return
+        for ((u, p) in ek) {
+            val cvet = CVET_GOSTYA.getOrElse(u.cvet) { CVET_GOSTYA[0] }
+            val r = RectF(p.x, p.y - Raskladka.SLOY_Y, p.pravo, p.niz - Raskladka.SLOY_Y)
+            val rad = Raskladka.RADIUS
+            if (!g.videoVidno(u.id)) {                                            // без камеры — буква
+                gp.style = Paint.Style.FILL; gp.color = Color.argb(225, 18, 20, 30)
+                lgc.drawRoundRect(r, rad, rad, gp)
+                gp.color = cvet
+                val kr = p.s * 0.21f
+                lgc.drawCircle(r.centerX(), r.centerY() - p.s * 0.06f, kr, gp)
+                gt.textSize = kr * 1.15f; gt.color = Color.rgb(20, 20, 28); gt.textAlign = Paint.Align.CENTER
+                lgc.drawText(u.imya.take(1).uppercase(), r.centerX(), r.centerY() - p.s * 0.06f + kr * 0.4f, gt)
+                gt.textAlign = Paint.Align.LEFT
+            }
+            gp.style = Paint.Style.STROKE
+            if (u.govorit) {                                                      // свечение: три мягких кольца
+                for ((w, a) in listOf(14f to 40, 9f to 80, 5f to 255)) {
+                    gp.strokeWidth = w; gp.color = Color.argb(a, Color.red(cvet), Color.green(cvet), Color.blue(cvet))
+                    lgc.drawRoundRect(r, rad, rad, gp)
+                }
+            } else {
+                gp.strokeWidth = 2f; gp.color = Color.argb(90, 255, 255, 255)
+                lgc.drawRoundRect(r, rad, rad, gp)
+            }
+            // имя — внизу плитки слева, на тёмной плашке
+            gt.textSize = 17f
+            var imya = u.imya
+            val mesto = p.s - 30f - (if (!u.mikrofon || u.zaglushen) 22f else 0f)
+            while (imya.length > 1 && gt.measureText(imya) > mesto) imya = imya.dropLast(1)
+            if (imya.length < u.imya.length) imya = imya.dropLast(1) + "…"
+            val iw = gt.measureText(imya)
+            val zag = if (!u.mikrofon || u.zaglushen) 22f else 0f
+            val pl = RectF(r.left + 8f, r.bottom - 34f, r.left + 8f + iw + 18f + zag, r.bottom - 8f)
+            gp.style = Paint.Style.FILL; gp.color = Color.argb(165, 0, 0, 0)
+            lgc.drawRoundRect(pl, 13f, 13f, gp)
+            gt.color = cvet
+            lgc.drawText(imya, pl.left + 9f, pl.bottom - 8f, gt)
+            if (zag > 0f) {                                                       // микрофон выключен
+                val cx = pl.right - 15f; val cy = pl.centerY()
+                gp.color = Color.rgb(235, 70, 70); lgc.drawCircle(cx, cy, 8f, gp)
+                gp.style = Paint.Style.STROKE; gp.strokeWidth = 2.5f; gp.color = Color.WHITE
+                lgc.drawLine(cx - 4.5f, cy - 4.5f, cx + 4.5f, cy + 4.5f, gp)
+            }
+        }
+    }
+
+    /**
+     * Слой "lb": у каждого гостя с репликой — пузырь справа от плитки, по её середине: как сказано (белым,
+     * до двух строк) и перевод (голубым, до двух строк); слева — полоска и хвостик его цвета.
+     * false — рисовать нечего (гость с репликой уже не в кадре).
+     */
+    private fun puzyri(pz: List<Titry.Stroka>): Boolean {
+        lbc.drawColor(0, PorterDuff.Mode.CLEAR)
+        val g = gosti ?: return false
+        var est = false
+        for ((u, p) in g.naEkrane()) {
+            val st = pz.lastOrNull { it.kto == u.golos } ?: continue
+            val cvet = CVET_GOSTYA.getOrElse(u.cvet) { CVET_GOSTYA[0] }
+            val shir = Raskladka.PUZYR_SHIR - 36f
+            tt.textSize = 24f
+            val ryady = perenos(st.tekst, shir, 2).map { it to true }.toMutableList()
+            tt.textSize = 21f
+            if (st.perevod.isNotEmpty()) ryady += perenos(st.perevod, shir, 2).map { it to false }
+            val shirTeksta = ryady.maxOf { (l, ori) -> tt.textSize = if (ori) 24f else 21f; tt.measureText(l) }
+            val h = 16f + ryady.sumOf { (_, ori) -> (if (ori) 31.0 else 27.0) }.toFloat() + 6f
+            val x0 = Raskladka.puzyrX(p)
+            val cy = p.centrY - Raskladka.SLOY_Y
+            val y0 = (cy - h / 2).coerceIn(0f, Raskladka.SLOY_H - h)
+            val r = RectF(x0, y0, x0 + shirTeksta + 36f, y0 + h)
+            pod.color = Color.argb(185, 8, 10, 16)
+            lbc.drawRoundRect(r, 14f, 14f, pod)
+            val hvost = Path().apply { moveTo(x0 + 1f, cy - 10f); lineTo(x0 - 11f, cy); lineTo(x0 + 1f, cy + 10f); close() }
+            pod.color = cvet
+            lbc.drawPath(hvost, pod)
+            lbc.drawRoundRect(RectF(x0, y0 + 6f, x0 + 5f, y0 + h - 6f), 2.5f, 2.5f, pod)
+            var y = y0 + 8f
+            for ((l, ori) in ryady) {
+                val sz = if (ori) 24f else 21f
+                y += if (ori) 31f else 27f
+                tto.textSize = sz; tto.strokeWidth = 4f
+                lbc.drawText(l, x0 + 20f, y - 7f, tto)
+                tt.textSize = sz; tt.color = if (ori) Color.WHITE else Color.rgb(190, 225, 255)
+                lbc.drawText(l, x0 + 20f, y - 7f, tt)
+            }
+            est = true
+        }
+        return est
     }
 
     // ---------- левый верх: топ-донатор и табло соведущего ----------
@@ -771,10 +921,11 @@ class Nalozhenie(
         const val PLECHI_VBOK = 31.5f
         /** Субтитры (низ по центру): картинка TW×TH, кегль TSZ, строка TLH, не больше TSTROK строк. */
         const val TW = 1100
-        const val TH = 194
+        const val TH = 282
         const val TSZ = 30f
         const val TLH = 44f
         const val TSTROK = 4
+        const val TSTROK_VNIZU = 6                                      // гость внизу (2.5.0): три реплики по две строки
         /** Табло соведущего (левый верх). */
         const val IW = 440
         const val IH = 68
@@ -806,6 +957,8 @@ class Nalozhenie(
          */
         const val RUKI_X = -34.47f
         const val RUKI_Y = 219.92f
+        /** Цвета гостей g1…g3 (2.5.0): плитка, имя и субтитры — одного цвета. */
+        val CVET_GOSTYA = intArrayOf(Color.rgb(255, 140, 200), Color.rgb(255, 170, 90), Color.rgb(190, 160, 255))
         /** Телефон стоя (plus-ruki-telefon-v.png, 307×86, 2.4.0): верх телефона — под открытым ртом (212). */
         const val RUKI_V_X = -25.67f
         const val RUKI_V_Y = 212.88f

@@ -28,7 +28,11 @@ class Kamera(
     private val priyom = RtmpPriyom(RtmpPriyom.PORT, { klyuch }, this)
     private val mdns = MdnsImya({ ip() })
     /** Страница «подключить камеру» для айфона (2 минуты по кнопке) и имя plus.local на то же время. */
-    private val aifon = KameraStranica(KameraStranica.PORT, { adresSKlyuchom() }, pri = { on ->
+    /** Страница ссылок гостей (2.5.0) — та же страница айфона, путь /gosti; ставит служба глаз. */
+    @Volatile var gostiStranica: (() -> String?)? = null
+    private val aifon = KameraStranica(KameraStranica.PORT, { adresSKlyuchom() }, dop = { put ->
+        if (put == "/gosti") gostiStranica?.invoke() else null
+    }, pri = { on ->
         if (on) {
             try { gruppa(true) } catch (e: Exception) { }
             try { mdns.start() } catch (e: Exception) { oshibka = "имя plus.local не заработало: ${e.message}" }
@@ -207,6 +211,16 @@ class Kamera(
             return "{\"oshibka\":${FrameServer.json("страница не открылась: ${e.message}")}}"
         }
         return "{\"adres\":\"http://${MdnsImya.IMYA}:${KameraStranica.PORT}\",\"ip\":\"http://$ip:${KameraStranica.PORT}\"," +
+            "\"sek\":${aifon.ostalos}}"
+    }
+
+    /** Открыть страницу айфона ради ссылок гостей: ответ — адрес /gosti (без ключей). */
+    fun stranicaGosti(): String {
+        val ip = ip() ?: return "{\"oshibka\":\"шлем не в Wi-Fi\"}"
+        try { aifon.otkryt() } catch (e: Exception) {
+            return "{\"oshibka\":${FrameServer.json("страница не открылась: ${e.message}")}}"
+        }
+        return "{\"adres\":\"http://${MdnsImya.IMYA}:${KameraStranica.PORT}/gosti\",\"ip\":\"http://$ip:${KameraStranica.PORT}/gosti\"," +
             "\"sek\":${aifon.ostalos}}"
     }
 

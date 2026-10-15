@@ -29,6 +29,16 @@ object Hub {
     @Volatile var teplo = -1
     /** Микрофон ушей для эфира: EarService отдаёт каждый кусок (16 кГц моно), пока эфир идёт. */
     @Volatile var micTap: ((ShortArray, Int) -> Unit)? = null
+    /** Ещё слушатели микрофона (2.5.0): гости (их смесь), субтитры (Rech «ya»). Кусок — свой, можно хранить. */
+    val micTapy = java.util.concurrent.CopyOnWriteArrayList<(ShortArray, Int) -> Unit>()
+    /** Гости эфира (/gosti…): ставит служба глаз, пока жива. */
+    @Volatile var gosti: FrameServer.GostiUpr? = null
+    /** Смесь гостей — эфир кладёт в неё фон и берёт гостей в свой звук (2.5.0); ставит Gosti, пока комната открыта. */
+    @Volatile var mikser: Mikser? = null
+    /** Гостя слышно в шлеме (за последние 1,2 с): голос гостя из динамиков не должен будить Плюса. */
+    @Volatile var gostiZvuchat = false
+    /** Речь для субтитров по каждому голосу (2.5.0): фразы — демону sinhron (/titry/rech). */
+    val rechi = Rechi()
     /** Эфир (/efir…): ставит служба глаз, пока жива. */
     @Volatile var efir: FrameServer.EfirUpr? = null
     /** Камера телефона (/kamera…): ставит служба глаз, пока жива. */
@@ -53,7 +63,7 @@ object Hub {
                 override fun rot(sek: Double) { say?.rot(sek) }
                 override val govorit get() = say?.govorit ?: false
             }, { t, n -> plenkaRisunok(t, n) }, { lastWakeMs }, { efir }, { n -> Pamyat.hvost(n) }, { kamera }, { nalet },
-                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg })
+                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg }, { gosti }, rechi)
             s.start()
             server = s
         }

@@ -1,0 +1,66 @@
+:root{--fon:#0d0e14;--panel:#171922;--panel2:#1f2230;--tekst:#eceef5;--seryy:#9aa0b4;--siniy:#2d7ff9;
+--rozovyy:#ff8cc8;--oranzh:#ffaa5a;--sirenevyy:#bea0ff;--goluboy:#82c8ff;--zoloto:#ffcd46;--zelenyy:#8ce18c;--krasnyy:#eb4646}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--fon);color:var(--tekst);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+-webkit-text-size-adjust:100%}
+body{min-height:100vh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #222533}
+.logo{font-size:15px;letter-spacing:.5px;color:var(--seryy)}.logo b{color:var(--zoloto);letter-spacing:1.5px}
+.tochka{display:inline-block;width:9px;height:9px;border-radius:50%;background:#555;margin-right:7px;vertical-align:1px}
+.tochka.efir{background:var(--krasnyy);box-shadow:0 0 8px var(--krasnyy)}
+.set{font-size:12px;color:var(--seryy);font-variant-numeric:tabular-nums}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:24px;margin:4px 0 6px}h2{font-size:17px;margin:20px 0 8px;color:var(--seryy);font-weight:600}
+.pod{color:var(--seryy);margin:0 0 14px}
+.ya{display:flex;flex-direction:column;align-items:center;gap:8px;margin:10px 0 16px}
+.kvadrat{position:relative;width:min(64vw,300px);aspect-ratio:1/1;border-radius:18px;overflow:hidden;background:var(--panel);
+box-shadow:0 0 0 2px #2a2d3c}
+.ya.malenkiy .kvadrat{width:110px;border-radius:14px}
+.kvadrat video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.kvadrat video.zad{transform:none}
+.bezvideo{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:48px;background:var(--panel)}
+.bezvideo.vidno{display:flex}
+.uroven{width:min(64vw,300px);height:6px;border-radius:3px;background:#262938;overflow:hidden}
+.ya.malenkiy .uroven{width:110px}
+.uroven i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--zelenyy),var(--zoloto));transition:width .08s}
+.pole{display:block;margin:6px 0 14px}.pole span{display:block;font-size:13px;color:var(--seryy);margin-bottom:5px}
+input{font:inherit;color:inherit}
+.pole input{width:100%;padding:13px 14px;border-radius:12px;border:1px solid #2c3042;background:var(--panel);font-size:18px}
+.ryad{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ryad.obertka{margin-top:12px}
+button{font:inherit;color:var(--tekst);background:var(--panel2);border:0;border-radius:12px;padding:12px 16px;cursor:pointer;
+-webkit-tap-highlight-color:transparent}
+button:active{transform:scale(.98)}
+button[disabled]{opacity:.45}
+.tumbler{opacity:.55}.tumbler.vkl{opacity:1;box-shadow:inset 0 0 0 2px var(--siniy)}
+.glavnaya{display:block;width:100%;margin-top:16px;padding:16px;font-size:19px;font-weight:600;background:var(--siniy)}
+.sovet{margin:14px 0 0;padding:10px 12px;border-radius:10px;background:#1b2a1b;color:#bfe6bf;font-size:14px}
+.oshibka{margin-top:12px;padding:10px 12px;border-radius:10px;background:#3a1b1b;color:#ffc4c4}
+.krutilka{width:44px;height:44px;margin:30px auto;border-radius:50%;border:4px solid #2a2d3c;border-top-color:var(--siniy);
+animation:k 1s linear infinite}@keyframes k{to{transform:rotate(360deg)}}
+.prevyu{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:14px;overflow:hidden}
+.prevyu canvas{width:100%;height:100%;display:block}
+.prevyuNet{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;
+color:var(--seryy);font-size:15px}
+.zametka{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:#2b2516;color:#ffe2a0;font-size:14px}
+.paneli{display:flex;gap:14px;margin-top:14px;align-items:flex-start}
+.upr{flex:1;min-width:0}
+.krug{width:52px;height:52px;border-radius:50%;padding:0;font-size:22px;opacity:.5}
+.krug.vkl{opacity:1;box-shadow:inset 0 0 0 2px var(--siniy)}
+.krug.krasnyy{opacity:1;background:#5a1c1c}
+.polzunok{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:14px;color:var(--seryy)}
+.polzunok span{width:96px;flex:none}.polzunok input{flex:1;accent-color:var(--siniy)}
+.lyudi{list-style:none;margin:0;padding:0}
+.lyudi li{display:flex;align-items:center;gap:10px;padding:9px 12px;margin:6px 0;border-radius:12px;background:var(--panel)}
+.lyudi .cvet{width:12px;height:12px;border-radius:50%;flex:none}
+.lyudi li.govorit .cvet{box-shadow:0 0 0 4px rgba(255,255,255,.18),0 0 10px currentColor}
+.lyudi .imya{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rol{font-size:12px;color:var(--seryy)}
+.pult{margin-top:22px;padding:14px;border-radius:16px;background:#121420;border:1px solid #23263a}
+.pult h2{margin-top:0}
+.zhdut .kto,.pultKto{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin:6px 0;border-radius:12px;background:var(--panel)}
+.zhdut .kto{box-shadow:inset 0 0 0 2px var(--zoloto)}
+.zhdut .kto b,.pultKto b{flex:1;min-width:120px}
+.pultKto button,.zhdut button{padding:8px 11px;font-size:14px}
+button.da{background:#1d5a2c}button.kr{background:#5a1c1c}
+@media (max-width:420px){.krug{width:46px;height:46px;font-size:19px}.polzunok span{width:80px}}

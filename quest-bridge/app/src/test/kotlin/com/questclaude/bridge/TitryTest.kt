@@ -8,7 +8,7 @@ import org.junit.Test
 /** Субтитры: два языка, строки живут своё время, видно не больше двух, новые внизу; мусор — прочь. */
 class TitryTest {
     private var now = 1_000_000L
-    private val t = Titry { now }
+    private val t = Titry({ now })
 
     @Test fun zhivutSvoyoVremya() {
         assertTrue(t.dobavit("ya", "Plus, look at the screen"))
@@ -67,5 +67,38 @@ class TitryTest {
         assertEquals(0, t.seychas().size)
         t.upr(mapOf("vidny" to "1"))
         assertEquals(1, t.seychas().size)
+    }
+
+    /** 2.5.0: внизу — Александр, Плюс, игра (до двух); у каждого гостя — последняя реплика; или все внизу. */
+    @Test fun golosaIGosti() {
+        t.dobavit("igra", "Freeze! Police!", 10.0, "Стоять! Полиция!")
+        t.dobavit("g1", "Ты видел?", 10.0, "Did you see that?")
+        t.dobavit("g1", "Это было круто", 10.0, "That was cool")
+        t.dobavit("g2", "Hi all", 10.0, "Всем привет")
+        t.dobavit("ya", "Смотри", 10.0, "Look")
+        t.dobavit("plus", "Вижу", 10.0, "I see")
+        val s = t.seychas()
+        assertEquals(listOf("g1", "g2", "ya", "plus"), s.map { it.kto })
+        assertEquals("Это было круто", s.first { it.kto == "g1" }.tekst)
+        val vnizu = t.seychas(gostiVnizu = true)
+        assertEquals(Titry.MAKS_VNIZU, vnizu.size)
+        assertEquals(listOf("g2", "ya", "plus"), vnizu.map { it.kto })
+        assertFalse(t.dobavit("g4", "нет такого"))
+        // g2 убран с экрана (плитки нет) — его слова внизу со всеми, g1 — у плитки
+        val bezPlitki = t.seychas(uPlitok = setOf("g1"))
+        assertEquals(listOf("g1", "g2", "ya", "plus"), bezPlitki.map { it.kto })
+        assertEquals(1, bezPlitki.count { it.kto == "g1" })
+    }
+
+    /** Пока sinhron слушает микрофон — фраза ушей (titr ya) не дублируется; от sinhron (ot=s) — да. */
+    @Test fun yaNeDvazhdy() {
+        var slushaet = true
+        val tt = Titry({ now }, { slushaet })
+        assertTrue(tt.upr(mapOf("kto" to "ya", "t" to "abc")).contains("\"dubl\":true"))
+        assertTrue(tt.upr(mapOf("kto" to "ya", "t" to "abc", "ot" to "s")).contains("\"ok\":true"))
+        assertTrue(tt.upr(mapOf("kto" to "plus", "t" to "xyz")).contains("\"ok\":true"))
+        slushaet = false
+        assertTrue(tt.upr(mapOf("kto" to "ya", "t" to "def")).contains("\"ok\":true"))
+        assertEquals(listOf("xyz", "def"), tt.seychas().map { it.tekst })
     }
 }

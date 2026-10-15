@@ -21,6 +21,8 @@ class KameraStranica(
     private val port: Int,
     private val rtmp: () -> String?,          // rtmp://<шлем>:1935/kamera/<ключ>
     private val bind: InetAddress? = null,    // null — все сети шлема; в тестах — 127.0.0.1
+    /** Ещё страницы на то же время (2.5.0: /gosti — ссылки гостей): путь → HTML или null. */
+    private val dop: (String) -> String? = { null },
     private val pri: (Boolean) -> Unit = {},  // открылась / закрылась — имя plus.local живёт столько же
 ) {
     @Volatile private var server: ServerSocket? = null
@@ -78,8 +80,11 @@ class KameraStranica(
         while (true) { val h = r.readLine() ?: break; if (h.isEmpty()) break }
         val put = zapros.split(' ').getOrNull(1)?.substringBefore('?') ?: ""
         val a = rtmp()
+        val d = if (otkryta && put != "/" && put != "/index.html") try { dop(put) } catch (e: Exception) { null } else null
         val (kod, telo) = if ((put == "/" || put == "/index.html") && otkryta && a != null) 200 to html(a)
-            else 404 to "<!doctype html><meta charset=\"utf-8\"><p>Страница закрыта: в приложении 2 нажми «КАМЕРА ТЕЛЕФОНА» ещё раз.</p>"
+            else if (d != null) 200 to d
+            else 404 to "<!doctype html><meta charset=\"utf-8\"><p>Страница закрыта: в приложении 2 нажми «КАМЕРА ТЕЛЕФОНА» ещё раз " +
+                "(ссылки гостей — Плюсу: «покажи ссылки гостей»).</p>"
         val b = telo.toByteArray(Charsets.UTF_8)
         c.getOutputStream().apply {
             write(("HTTP/1.1 $kod ${if (kod == 200) "OK" else "Not Found"}\r\nContent-Type: text/html; charset=utf-8\r\n" +
@@ -121,6 +126,46 @@ class KameraStranica(
         }
 
         private fun esc(s: String) = s.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+        /**
+         * Ссылки гостей эфира для айфона Александра (2.5.0): пульт (его), модератор, гость — «Поделиться»
+         * (Telegram и т. п.) и «Скопировать». Ссылки — с ключами: только здесь, по домашней Wi-Fi, 2 минуты.
+         */
+        fun gostiHtml(hozyain: String?, moder: String?, gost: String?, vnutri: Int): String {
+            if (hozyain == null || moder == null || gost == null) return """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="4"><title>Гости эфира</title>
+<style>body{font:18px -apple-system,system-ui,sans-serif;margin:0;padding:20px 16px;background:#111;color:#eee}</style></head>
+<body><h1>Гости эфира</h1><p>Туннель ещё поднимается (5–10 секунд). Страница обновится сама.</p>
+<p><small>Не поднялся за минуту — скажи Плюсу «гости статус».</small></p></body></html>"""
+            fun karta(id: String, zag: String, pod: String, ssylka: String, cvet: String) = """
+<div class="k"><h2 style="color:$cvet">$zag</h2><p>$pod</p>
+<textarea id="$id" rows="2" readonly>${esc(ssylka)}</textarea>
+<button class="b" onclick="del('$id','$zag')">Поделиться</button><button onclick="kop('$id')">Скопировать</button></div>"""
+            return """<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Гости эфира</title>
+<style>
+body{font:18px -apple-system,system-ui,sans-serif;margin:0;padding:20px 16px 40px;background:#111;color:#eee;line-height:1.4}
+h1{font-size:24px;margin:0 0 6px}h2{font-size:20px;margin:0 0 4px}
+.k{background:#1c1c22;border-radius:14px;padding:14px;margin:14px 0}
+textarea{width:100%;box-sizing:border-box;font:13px ui-monospace,monospace;padding:8px;border-radius:8px;background:#0d0d10;color:#ddd;border:1px solid #333}
+button{font-size:17px;padding:12px 16px;margin:8px 8px 0 0;border-radius:12px;border:0;background:#3a3a44;color:#fff}
+button.b{background:#2d7ff9}small{color:#999}
+</style></head><body>
+<h1>Гости эфира</h1><p><small>В комнате сейчас: $vnutri. Ссылки — с ключами: шли только тем, кого зовёшь.</small></p>
+${karta("m", "Модератор", "Входит сразу, впускает гостей и делится их ссылкой. Отправь тому, кто будет модератором.", moder, "#ffaa5a")}
+${karta("g", "Гость", "Ждёт, пока впустят (модератор или ты: «плюс, впусти гостя»).", gost, "#ff8cc8")}
+${karta("h", "Мой пульт", "Тебе: кто в комнате, впустить, убрать с экрана, выгнать. Открой в Safari.", hozyain, "#82c8ff")}
+<p><small>Ссылки живут, пока открыта комната (gosti start … gosti stop); следующий раз — новые.
+Ссылка гостя утекла — Плюсу «новая ссылка гостя». Страница закроется через 2 минуты.</small></p>
+<script>
+function kop(id){var t=document.getElementById(id);t.focus();t.select();t.setSelectionRange(0,99999);
+try{navigator.clipboard.writeText(t.value)}catch(e){try{document.execCommand('copy')}catch(e2){}}}
+function del(id,zag){var t=document.getElementById(id).value;
+if(navigator.share){navigator.share({title:'Эфир Плюса — '+zag,text:'Заходи в эфир ('+zag.toLowerCase()+'):',url:t}).catch(function(){})}else kop(id)}
+</script></body></html>"""
+        }
 
         fun html(rtmp: String): String {
             val m = esc(moblin(rtmp))

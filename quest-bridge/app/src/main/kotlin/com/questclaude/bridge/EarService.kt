@@ -192,6 +192,7 @@ class EarService : Service() {
                 if (n <= 0) { Thread.sleep(10); continue }
                 val c = b.copyOf(n)
                 Hub.micTap?.invoke(c, n)                 // эфир: голос Александра — без задержки
+                for (t in Hub.micTapy) t(c, n)           // 2.5.0: гости (их смесь) и субтитры (Rech «ya»)
                 val k = Kus(c, Dosluh.seychas())         // время — для секунды после ответа
                 if (!ochered.offer(k)) { ochered.poll(); ochered.offer(k) }   // распознавание отстало на 30 с
             }
@@ -322,6 +323,9 @@ class EarService : Service() {
                             }
                         }
                     }
+                    // 2.5.0: гостя слышно в шлеме — голосом Плюса не будим: его «плюс плюс» (и любая команда)
+                    // из динамиков не должно звать Плюса с инструментами. Кнопки — как всегда.
+                    if (Hub.gostiZvuchat) { hits.clear(); bare.clear(); pending = null }
                     val button = wakeRequested
                     if (button) {
                         wakeRequested = false
@@ -356,7 +360,7 @@ class EarService : Service() {
                         pending = null
                     }
                     if (h == null) {
-                        if (zagovoril && pending == null) {
+                        if (zagovoril && pending == null && !Hub.gostiZvuchat) {
                             early.reset()
                             val from = maxOf(0L, kolco.total - DOSLUH_OT)
                             val pre = kolco.since(from)

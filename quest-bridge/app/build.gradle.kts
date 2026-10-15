@@ -15,8 +15,8 @@ android {
         // 34: правила Android 14 для MediaProjection соблюдены (служба переднего плана,
         // колбэк до createVirtualDisplay, одноразовый токен). Служба нужна с targetSdk 29.
         targetSdk = 34
-        versionCode = 240
-        versionName = "2.4.0"
+        versionCode = 250
+        versionName = "2.5.0"
         // Quest 3 — arm64; остальные ABI Vosk и JNA только раздували бы APK.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -55,5 +55,7 @@ dependencies {
     // кладёт в assets сборка на GitHub (ears/modeli.sh).
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
     implementation("net.java.dev.jna:jna:5.18.1@aar")
+    // Гости эфира (2.5.0): Opus — чистая Java-копия libopus (BSD), без нативных библиотек; проверяется на столе.
+    implementation("io.github.jaredmdobson:concentus:1.0.2")
     testImplementation("junit:junit:4.13.2")
 }

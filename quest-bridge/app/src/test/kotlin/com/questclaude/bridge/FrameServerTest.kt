@@ -97,6 +97,22 @@ class FrameServerTest {
         override fun rot(sek: Double) { rty += sek }
     }
 
+    /** Подделка гостей: помнит адрес туннеля и команды; ключей и адреса наружу не отдаёт. */
+    private val gosti = object : FrameServer.GostiUpr {
+        @Volatile var adresTunnelya: String? = null
+        @Volatile var uprQ: Map<String, String>? = null
+        @Volatile var idut = false
+        override fun status() = "{\"idyot\":$idut}"
+        override fun start(): String { idut = true; return status() }
+        override fun stop(): String { idut = false; return status() }
+        override fun upr(q: Map<String, String>): String { uprQ = q; return "{\"ok\":true}" }
+        override fun adres(u: String?): String { adresTunnelya = u; return "{\"ok\":true,\"tunnel\":${u != null}}" }
+        override fun ssylki() = "{\"adres\":\"http://plus.local:8770/gosti\"}"
+        override fun sobytiya(posle: Long, zhdatMs: Long) = "{\"posl\":$posle,\"zhdat\":$zhdatMs}"
+        override fun nastroyka(q: Map<String, String>) = "{\"eho\":${q["eho"]}}"
+    }
+    private val rechi = Rechi()
+
     private data class Reply(val code: Int, val type: String?, val body: ByteArray)
 
     private fun get(path: String, timeoutMs: Int = 2000): Reply {
@@ -112,7 +128,7 @@ class FrameServerTest {
         server = FrameServer(port, { frame }, { capturing }, { stale }, { variants[it] }, ear, voice,
             { t, n -> plenkaT = t; plenkaN = n; plenka }, { wakeMs }, { if (efirOn) efir else null }, { "" },
             { if (kameraOn) kamera else null }, { nalet }, { if (plashkiOn) plashki else null },
-            { t -> kadrT = t; kadrMoment })
+            { t -> kadrT = t; kadrMoment }, { gosti }, rechi)
         server.start()
     }
 
@@ -200,7 +216,7 @@ class FrameServerTest {
         assertEquals("application/json", s.type)
         assertEquals("{\"capturing\":false,\"width\":0,\"height\":0,\"frames\":0,\"ageMs\":-1," +
             "\"stale\":false,\"ear\":\"off\",\"micDb\":-1,\"lastWakeMs\":0," +
-            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\"]}",
+            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\"]}",
             String(s.body))
         assertEquals(404, get("/frame.jpg").code)
     }
@@ -283,7 +299,7 @@ class FrameServerTest {
         ear.micDb = 42
         val s = String(get("/status").body)
         assertTrue(s, s.endsWith(",\"stale\":true,\"ear\":\"listening\",\"micDb\":42,\"lastWakeMs\":0," +
-            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\"]}"))
+            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\"]}"))
     }
 
     @Test fun earEvents() {
@@ -527,5 +543,38 @@ class FrameServerTest {
         val closed = try { get("/status"); false } catch (e: Exception) { true }
         assertTrue(closed)
         server.start()      // для @After
+    }
+
+    /** 2.5.0: гости — команды, адрес туннеля телом (обратно не отдаётся), события. */
+    @Test fun gostiMarshruty() {
+        assertEquals("{\"idyot\":true}", String(get("/gosti/start").body))
+        assertEquals("{\"idyot\":true}", String(get("/gosti").body))
+        val r = post("/gosti/adres", "https://abc-def.trycloudflare.com".toByteArray())
+        assertEquals(200, r.code)
+        assertEquals("https://abc-def.trycloudflare.com", gosti.adresTunnelya)
+        assertTrue(!String(r.body).contains("trycloudflare"))
+        get("/gosti/upr?chto=vygnat&kto=%D0%9C%D0%B0%D0%BA%D1%81")
+        assertEquals("vygnat", gosti.uprQ!!["chto"])
+        assertEquals("{\"posl\":5,\"zhdat\":3000}", String(get("/gosti/sobytiya?posle=5&zhdat=3").body))
+        assertEquals("{\"eho\":0.3}", String(get("/gosti/nastroyka?eho=0.3").body))
+        assertEquals("{\"idyot\":false}", String(get("/gosti/stop").body))
+    }
+
+    /** 2.5.0: фраза для субтитров — WAV с голосом в заголовке; нет — 204 после ожидания. */
+    @Test fun titryRech() {
+        val c0 = System.currentTimeMillis()
+        assertEquals(204, get("/titry/rech?zhdat=0.3").code)
+        assertTrue(System.currentTimeMillis() - c0 >= 250)
+        rechi.efir = true
+        val pcm = ShortArray(16 * 2000) { i -> ((if ((i / 16) % 250 < 150) 5000.0 else 50.0) * Math.sin(i * 0.09)).toInt().toShort() } +
+            ShortArray(16 * 1000)
+        rechi.podat("igra", pcm, pcm.size)
+        val c = URI("http://127.0.0.1:$port/titry/rech?zhdat=1").toURL().openConnection() as HttpURLConnection
+        assertEquals(200, c.responseCode)
+        assertEquals("igra", c.getHeaderField("X-Golos"))
+        assertTrue(c.getHeaderField("X-Tihih").toFloat() > 0.2f)
+        val b = c.inputStream.readBytes()
+        assertEquals("RIFF", String(b, 0, 4))
+        assertTrue(String(get("/titry/upr?igra=0").body).contains("\"igra\":false"))
     }
 }
