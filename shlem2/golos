@@ -21,6 +21,8 @@
 # Чат вслух (12.10): уши кладут «.chat» — сообщение зрителя дословно, вне очереди: звучащая порция
 # обрывается на границе фраз, чат звучит, потом Ава продолжает со следующей фразы.
 # Соведущая («.ved» от vedushchiy) говорит своим голосом — Серафина (GOLOS_VOICE_VED); остальное — как у Авы.
+# «.uho» (2.5.0, гости эфира: «гость ждёт входа») — только Александру, как «в ухо», при любом режиме;
+# без субтитров и без секунды «дослуха»; в эфир не попадает.
 # Ответ звучит порциями (12.10): короткие предложения склеиваются в порцию до 120 (вторая) и
 # 220 знаков, первая — как раньше, до запятой; внутри — метки фраз из синтеза (edge-tts присылает
 # время каждой фразы): на «плюс плюс» Ава продолжит с начала прерванной фразы, субтитр идёт
@@ -592,6 +594,7 @@ class Kusok:
         self.dosluh = dosluh      # последний кусок ответа: доиграл — уши слушают ещё секунду
         self.chat = False         # сообщение чата вслух: вне очереди, без субтитров
         self.golos = None         # чей голос: None — Ава, VOICE_VED — соведущая
+        self.uho = False          # только Александру (.uho), при любом режиме
         self.bystro = False
         self.mp3 = {}             # темп → путь, False — не вышел, PUSTO — сказать нечего
         self.nachala = {}         # темп → где в звуке начинается каждое предложение (с)
@@ -758,13 +761,14 @@ class Golos:
         # договорила — уши ещё секунду слушают без «плюс плюс» (Александр 09.10). Вступление перед
         # инструментом, приветствие зрителям, «не расслышала» — нет.
         dosluh = vid in DOSLUH
-        if self.chitat_rezhim() != 'uho':  # субтитры — только вслух: перевод всего ответа сразу
+        if self.chitat_rezhim() != 'uho' and vid != 'uho':  # субтитры — только вслух: перевод всего ответа сразу
             self.titry.perevesti(ns, [f for p in ps for f in p])
         with self.cv:
             for i, p in enumerate(ps):
                 k = Kusok(p, ns, t, i == 0 and not dalshe, dosluh and i == len(ps) - 1)
                 if vid == 'ved':
                     k.golos = VOICE_VED    # соведущая — голосом Серафины (12.10), остальное как у Авы
+                k.uho = vid == 'uho'
                 self.q.append(k)
             self.cv.notify_all()
 
@@ -983,8 +987,9 @@ class Golos:
             metka('zvuk', k.uid, self.rezhim)
             k.pervyy = False
         temp = k.temp
-        m = None if self.rezhim == 'uho' else self.cherez_most()
-        if self.rezhim == 'uho':
+        uho = self.rezhim == 'uho' or k.uho
+        m = None if uho else self.cherez_most()
+        if uho:
             self.igrok = self.Most(put, 'uho')
             kuda = 'uho'
         elif m:
@@ -996,7 +1001,7 @@ class Golos:
             kuda = 'termux'
         self.zapisat_kuda(kuda)
         self.igrok.kusok, self.igrok.temp = k, temp
-        if self.rezhim != 'uho' and not k.chat:  # субтитр — только вслух: «в ухо» зрители не слышат; чат — и так в кадре
+        if not uho and not k.chat:  # субтитр — только вслух: «в ухо» зрители не слышат; чат — и так в кадре
             self.titry.pokazat(k, getattr(self.igrok, 't0', time.time()), k.nachala.get(temp) or [0.0],
                                k.dlit.get(temp) or 0.0)
 

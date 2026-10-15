@@ -9,7 +9,7 @@ B=${OBNOVI_BASE:-https://raw.githubusercontent.com/Pneuron1321/3dplus/claude/ten
 D=${OBNOVI_DIR:-/usr/local/bin}
 T=$(mktemp -d)
 n=0
-for f in plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera nalet radar titr donat itogi obzor vedushchiy donaty zriteli golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya nagruzka obnovi; do
+for f in plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera nalet radar titr donat itogi obzor vedushchiy donaty zriteli golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya nagruzka gosti sinhron obnovi; do
   if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f"; then echo "$f: не скачался"; continue; fi
   case $(head -1 "$T/$f") in
     *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$T/$f" ;;
@@ -26,3 +26,13 @@ for f in plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera nalet
 done
 rm -rf "$T"
 echo "Обновлено файлов: $n."
+# Гости эфира (2.5.0): туннель Cloudflare — cloudflared (Go, один файл), ставится один раз с GitHub.
+if [ -z "$OBNOVI_BEZ_CLOUDFLARED" ] && ! [ -x "$D/cloudflared" ] && ! command -v cloudflared > /dev/null 2>&1; then
+  case $(uname -m) in aarch64|arm64) A=arm64 ;; x86_64) A=amd64 ;; *) A= ;; esac
+  if [ -n "$A" ] && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$A" -o "$D/.cloudflared.novyy" &&
+     chmod +x "$D/.cloudflared.novyy" && "$D/.cloudflared.novyy" --version > /dev/null 2>&1; then
+    mv -f "$D/.cloudflared.novyy" "$D/cloudflared" && echo "cloudflared: поставлен (туннель для гостей эфира)"
+  else
+    rm -f "$D/.cloudflared.novyy"; echo "cloudflared: не скачался — гости эфира без туннеля (попробуй obnovi позже)"
+  fi
+fi

@@ -79,7 +79,11 @@
       "Bash(chat:*)",
       "mcp__plus__kadr",
       "mcp__plus__kamera",
-      "mcp__plus__efir"
+      "mcp__plus__efir",
+      "Bash(gosti)",
+      "Bash(gosti:*)",
+      "Bash(sinhron)",
+      "Bash(sinhron:*)"
     ],
     "additionalDirectories": [
       "/root",

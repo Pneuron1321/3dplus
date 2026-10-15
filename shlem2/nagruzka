@@ -134,6 +134,7 @@ ZHURNAL = os.environ.get('NAGRUZKA_LOG', '/tmp/nagruzka.log')
 SHAG = float(os.environ.get('NAGRUZKA_SHAG', 2))
 HZ = os.sysconf('SC_CLK_TCK')
 GRUPPY = ('claude', 'golos', 'ushi', 'obzor', 'vedushchiy', 'raciya')
+GOSTI = ('sinhron', 'gosti', 'cloudflared')       # 2.5.0: гости и субтитры — своим столбцом в конце строки
 
 
 def gruppa(pid):
@@ -146,6 +147,8 @@ def gruppa(pid):
     for g in GRUPPY:
         if g in imena:
             return g
+    if any(g in imena for g in GOSTI):
+        return 'gosti'
     return 'drugoe'
 
 
@@ -185,7 +188,7 @@ def demon():
             os.execv('/bin/sh', ['sh', SKRIPT, 'demon'])          # обновили — новая версия
         t1, e1, m1 = tiki(), efir(), time.time()
         dt_ = max(0.5, m1 - m0)
-        cpu = dict.fromkeys(GRUPPY + ('drugoe',), 0.0)
+        cpu = dict.fromkeys(GRUPPY + ('drugoe', 'gosti'), 0.0)
         for pid, t in t1.items():
             if pid not in imena:
                 imena[pid] = gruppa(pid)
@@ -216,8 +219,9 @@ def demon():
             # 2.3.9: игра или эфир — кадры экрана, мс загрузок плашек в секунду, кадры глаз (в конце строки:
             # старые строки без них читаются как раньше)
             ek = '\t'.join(str(e1.get(k, '')) for k in ('ekran_fps', 'plashki_ms', 'glaza_fps')) if idet else '\t\t'
-            stroka = '%s\t%s\t%s\t%s\t%s\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
-                                                 '\t'.join('%.0f' % cpu[g] for g in GRUPPY + ('drugoe',)), ','.join(metki), ek)
+            stroka = '%s\t%s\t%s\t%s\t%s\t%.0f\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
+                                                     '\t'.join('%.0f' % cpu[g] for g in GRUPPY + ('drugoe',)), ','.join(metki), ek,
+                                                     cpu['gosti'])
             try:
                 if os.path.exists(ZHURNAL) and os.path.getsize(ZHURNAL) > 2_000_000:
                     t = open(ZHURNAL).read()
@@ -257,7 +261,7 @@ def sboi():
                 return float(p[i])
             except (IndexError, ValueError):
                 return None
-        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else '', chislo(14), chislo(15)))
+        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else '', chislo(14), chislo(15), chislo(17)))
     if not zap:
         print('За %g ч эфира в чёрном ящике нет.' % CHASOV)
         return
@@ -271,6 +275,10 @@ def sboi():
     print('Процессор в среднем, % одного ядра:   когда спотыкался   /   когда ровно')
     for g in GRUPPY + ('drugoe',):
         print('  %-11s %18.0f %15.0f' % (g, sred(plohie, g), sred(horoshie, g)))
+    gs = [z for z in zap if z[10] is not None]                # 2.5.0: гости и субтитры (sinhron, gosti, cloudflared)
+    if gs:
+        gp = [z for z in plohie if z[10] is not None]; gh = [z for z in horoshie if z[10] is not None]
+        print('  %-11s %18.0f %15.0f' % ('гости', sum(z[10] for z in gp) / max(1, len(gp)), sum(z[10] for z in gh) / max(1, len(gh))))
     ek = [z for z in zap if z[8] is not None]                 # 2.3.9: кадры экрана — сама игра
     if ek:
         norma_e = statistics.median(z[8] for z in ek)
@@ -395,7 +403,7 @@ sort -t "$(printf '\t')" -k4,4nr -k3,3nr /tmp/.nagr.t | awk -F '\t' '$3 > 0' | h
 # лишние копии того, что должно быть одно
 echo
 LISHN=
-for x in bash:plus python3:ushi python3:golos python3:obzor python3:vedushchiy python3:donaty python3:zriteli python3:raciya python3:nagruzka-demon ffmpeg cloudflared; do
+for x in bash:plus python3:ushi python3:golos python3:obzor python3:vedushchiy python3:donaty python3:zriteli python3:raciya python3:nagruzka-demon python3:sinhron python3:gosti ffmpeg cloudflared; do
   c=$(awk -v x="$x" '$2 == x' /tmp/.nagr.i | wc -l)
   [ "$c" -gt 1 ] && LISHN="$LISHN $x×$c"
 done

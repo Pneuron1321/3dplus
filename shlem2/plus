@@ -20,7 +20,8 @@ import os, sys
 moy, n = int(sys.argv[1]), min(19, int(sys.argv[2]))
 os.setpriority(os.PRIO_PROCESS, moy, n)
 # уже запущенные (до обновления) Claude, tmux и помощники — тоже, каждым потоком
-SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'raciya', b'nagruzka', b'plus-mcp'}
+SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'raciya', b'nagruzka', b'plus-mcp',
+        b'sinhron', b'gosti', b'cloudflared'}
 for d in os.listdir('/proc'):
     if not d.isdigit():
         continue
@@ -70,6 +71,9 @@ while :; do
   setsid nohup /usr/local/bin/vedushchiy demon >> /tmp/vedushchiy.log 2>&1 < /dev/null &
   setsid nohup /usr/local/bin/donaty demon >> /tmp/donaty.log 2>&1 < /dev/null &
   setsid nohup /usr/local/bin/zriteli demon >> /tmp/zriteli.log 2>&1 < /dev/null &
+  # Синхронист (2.5.0): субтитры по каждому голосу — Александр, игра, гости (Whisper и перевод в Groq);
+  # пока нет эфира или фраз, только ждёт приложение. Гости и туннель — по команде: gosti start.
+  [ -x /usr/local/bin/sinhron ] && setsid nohup /usr/local/bin/sinhron demon >> /tmp/sinhron-demon.log 2>&1 < /dev/null &
   # чёрный ящик: раз в 2 с — эфир (кадры, потери, звук) и процессор помощников (nagruzka sboi)
   setsid nohup /usr/local/bin/nagruzka demon >> /tmp/nagruzka-demon.log 2>&1 < /dev/null &
   # Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
