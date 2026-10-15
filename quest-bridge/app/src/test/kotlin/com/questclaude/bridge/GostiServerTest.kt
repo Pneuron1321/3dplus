@@ -7,17 +7,19 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.BufferedInputStream
+import java.io.DataInputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.WebSocket
-import java.nio.ByteBuffer
-import java.util.concurrent.CompletionStage
+import java.util.Base64
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
-/** Сервер гостей на обычной JVM: страница, WebSocket настоящим клиентом Java, вход, звук и картинка, выгнать. */
+/** Сервер гостей на обычной JVM: страница, WebSocket (клиент на сокете — в android.jar нет java.net.http), вход, звук и картинка, выгнать. */
 class GostiServerTest {
     private val port = ServerSocket(0).use { it.localPort }
     private val kl = Komnata.Klyuchi.iz(null) { }
@@ -49,26 +51,47 @@ class GostiServerTest {
         return Triple(code, c.contentType, (if (code < 400) c.inputStream else c.errorStream).readBytes())
     }
 
-    /** Клиент WebSocket: тексты и двоичные — в очереди. */
-    private inner class Klient(origin: String? = null) : WebSocket.Listener {
+    /** Клиент WebSocket на сокете: рукопожатие RFC 6455, кадры сервера (без маски) — в очереди, свои — с маской. */
+    private inner class Klient(origin: String? = null) {
         val teksty = LinkedBlockingQueue<String>()
         val dvoichnye = LinkedBlockingQueue<ByteArray>()
         @Volatile var zakryt = false
-        private val sb = StringBuilder()
-        private val bb = java.io.ByteArrayOutputStream()
-        val ws: WebSocket = HttpClient.newHttpClient().newWebSocketBuilder().apply { if (origin != null) header("Origin", origin) }
-            .buildAsync(URI("ws://127.0.0.1:$port/ws"), this).get(3, TimeUnit.SECONDS)
+        private val sok = Socket("127.0.0.1", port).apply { soTimeout = 3000 }
+        private val out = sok.getOutputStream()
+        private val inp = BufferedInputStream(sok.getInputStream())
 
-        override fun onText(w: WebSocket, data: CharSequence, last: Boolean): CompletionStage<*>? {
-            sb.append(data); if (last) { teksty += sb.toString(); sb.setLength(0) }
-            w.request(1); return null
+        init {
+            val klyuch = Base64.getEncoder().encodeToString(ByteArray(16) { (it * 7).toByte() })
+            out.write(("GET /ws HTTP/1.1\r\nHost: 127.0.0.1:$port\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+                "Sec-WebSocket-Key: $klyuch\r\nSec-WebSocket-Version: 13\r\n" +
+                (if (origin != null) "Origin: $origin\r\n" else "") + "\r\n").toByteArray())
+            out.flush()
+            val zag = StringBuilder()
+            while (!zag.endsWith("\r\n\r\n")) { val c = inp.read(); if (c < 0) break; zag.append(c.toChar()) }
+            if (!zag.startsWith("HTTP/1.1 101")) { sok.close(); throw IOException("нет рукопожатия: " + zag.lineSequence().first()) }
+            check(zag.contains(Ws.otvetKlyuch(klyuch))) { "чужой ответ рукопожатия" }
+            sok.soTimeout = 0
+            thread(isDaemon = true) { chitat() }
         }
-        override fun onBinary(w: WebSocket, data: ByteBuffer, last: Boolean): CompletionStage<*>? {
-            val a = ByteArray(data.remaining()); data.get(a); bb.write(a)
-            if (last) { dvoichnye += bb.toByteArray(); bb.reset() }
-            w.request(1); return null
+
+        private fun chitat() {
+            try {
+                val d = DataInputStream(inp)
+                while (true) {
+                    val b0 = d.readUnsignedByte()
+                    val b1 = d.readUnsignedByte()
+                    check(b1 and 128 == 0) { "сервер замаскировал кадр" }
+                    var n = (b1 and 127).toLong()
+                    if (n == 126L) n = d.readUnsignedShort().toLong() else if (n == 127L) n = d.readLong()
+                    val p = ByteArray(n.toInt()).also { d.readFully(it) }
+                    when (b0 and 15) {
+                        Ws.TEKST -> teksty += String(p, Charsets.UTF_8)
+                        Ws.DVOICHNYY -> dvoichnye += p
+                        Ws.ZAKRYT -> { zakryt = true; return }
+                    }
+                }
+            } catch (e: Exception) { zakryt = true }
         }
-        override fun onClose(w: WebSocket, code: Int, reason: String): CompletionStage<*>? { zakryt = true; return null }
 
         fun zhdat(t: String): String {
             val konec = System.currentTimeMillis() + 3000
@@ -78,8 +101,8 @@ class GostiServerTest {
             }
             throw AssertionError("не дождались $t")
         }
-        fun tekst(s: String) { ws.sendText(s, true).get(2, TimeUnit.SECONDS) }
-        fun bin(b: ByteArray) { ws.sendBinary(ByteBuffer.wrap(b), true).get(2, TimeUnit.SECONDS) }
+        fun tekst(s: String) = synchronized(out) { out.write(Ws.kadrKlienta(Ws.TEKST, s.toByteArray())); out.flush() }
+        fun bin(b: ByteArray) = synchronized(out) { out.write(Ws.kadrKlienta(Ws.DVOICHNYY, b)); out.flush() }
     }
 
     @Test fun stranicaIFayly() {
