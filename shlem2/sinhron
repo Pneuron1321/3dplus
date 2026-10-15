@@ -156,6 +156,7 @@ class Sinhron:
                       'starye': 0, 'skleeno': 0, 'perevodov': 0, 'oshibok': 0}
         self.oshibka = ''
         self.zhiv_most = False
+        self.staroe = False                   # приложение без /titry/rech (старше 2.5.0)
 
     # ---------- приём фраз ----------
 
@@ -168,6 +169,7 @@ class Sinhron:
                 r = c.getresponse()
                 telo = r.read()
                 self.zhiv_most = True
+                self.staroe = r.status == 404
                 if r.status == 200 and telo[:4] == b'RIFF':
                     f = Fraza(r.getheader('X-Golos', ''), telo, float(r.getheader('X-Tihih', '0.5')),
                               float(r.getheader('X-Db', '-30')), time.time())
@@ -176,6 +178,8 @@ class Sinhron:
                         self.schet['fraz'] += 1
                         self.lock.notify_all()
                 c.close()
+                if r.status not in (200, 204):        # приложение старше 2.5.0 (404) или сбой — не долбить шлем
+                    time.sleep(10 * SEK)
             except Exception:
                 self.zhiv_most = False
                 time.sleep(3 * SEK)
@@ -442,7 +446,7 @@ class Sinhron:
                 d = dict(self.schet, rpm=rpm(), ash=ash(), zvuk=None if self.zvuk is None else round(self.zvuk),
                          ostalos_den=self.ostalos_den, ostalos_perevod=self.ostalos_perevod,
                          v_ocheredi=len(self.ochered), pauza=max(0, round(self.pauza_do - time.time())),
-                         most=self.zhiv_most, oshibka=self.oshibka, model=MODEL,
+                         most=self.zhiv_most, staroe=self.staroe, oshibka=self.oshibka, model=MODEL,
                          perevod=PEREVOD[self.perevod_model].strip(), ms=int(time.time() * 1000))
                 tmp = SOST + '.novyy'
                 with open(tmp, 'w') as f:
@@ -542,6 +546,8 @@ def main(a):
           'устарели %d, склеено %d; перевод — %s.' % (
               s.get('fraz', 0), s.get('zaprosov', 0), s.get('subtitrov', 0), s.get('muzyka', 0), s.get('vydumki', 0),
               s.get('tishina', 0), s.get('starye', 0), s.get('skleeno', 0), s.get('perevod')))
+    if s.get('staroe'):
+        print('Приложение 2 старше 2.5.0 — фраз по голосам не отдаёт: субтитры начнутся с APK 2.5.0.')
     if s.get('pauza'):
         print('Пауза по лимиту Groq: ещё %d с.' % s['pauza'])
     if s.get('oshibka'):
