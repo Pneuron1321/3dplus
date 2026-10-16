@@ -4,8 +4,10 @@
 субтитров: если на английском — вторые на русском, если на русском — вторые на английском».
   Приложение 2 режет речь каждого голоса на фразы (/titry/rech, WAV 16 кГц): ya — микрофон
   Александра, igra — звук игры, g1…g3 — гости. Здесь: Whisper large-v3-turbo в Groq (свой лимит,
-  отдельно от слуха Плюса на large-v3), язык — сам; фильтр выдумок Whisper и тишины; перевод пачкой
-  (английский → русский, остальное → английский); готовое — /titr?kto=…&ot=s.
+  отдельно от слуха Плюса на large-v3), язык — сам; подсказка — имена письмом языка голоса, игре —
+  никакой; услышал один язык, а написал другим — ещё раз с языком; фильтр выдумок Whisper, тишины и
+  повтора подсказки; перевод пачкой (английский → русский, остальное → английский), второй ряд тем же
+  языком — не показывать; готовое — /titr?kto=…&ot=s.
   Бесплатный Groq: Whisper — 20 запросов в минуту, 2000 в день и 7200 секунд звука в час, причём
   запрос короче 10 с считается за 10 с. Бюджет — две корзины: запросов (SINHRON_RPM, файл
   /root/.sinhron-rpm, по умолчанию 18 в минуту) и секунд звука (файл /root/.sinhron-ash, по умолчанию
@@ -62,7 +64,12 @@ GALLYU = re.compile(
     r'дякую за перегляд|subtitles? by|please subscribe|like and subscribe|transcribed by|'
     r'^\W*(?:музыка|аплодисменты|music|applause|смех|laughter)\W*$', re.I)
 KOROTKIE = re.compile(r'^\W*(?:спасибо|thank you|thanks|you|ага|угу|да|bye|пока)\W*$', re.I)
-NAMES = ('Плюс, Саша, Александр, GTA, Twitch. ')
+# Подсказка Whisper — имена письмом того языка, на котором голос говорил в прошлый раз. Игре — никакой:
+# 16.10 русская подсказка заставила Whisper писать английскую игру по-русски («Мы близко к победе» —
+# и перевод «на русский» второй строкой), а на шуме он повторял саму подсказку («Саша, Александр, Твич»).
+NAMES = 'Плюс, Саша, Александр, GTA, Twitch. '
+NAMES_EN = 'Plus, Sasha, Alexander, GTA, Twitch. '
+IMENA = set('плюс саша александр gta гта twitch твич plus sasha alexander'.split())
 
 
 def log(*a):
@@ -109,6 +116,27 @@ def v_uho(tekst):
         pass
 
 
+def pismo(t):
+    """'kir' — кириллица, 'lat' — латиница (чего больше), None — букв нет."""
+    kir = len(re.findall(r'[а-яёіїєґ]', t, re.I))
+    lat = len(re.findall(r'[a-z]', t, re.I))
+    return None if not (kir or lat) else 'kir' if kir > lat else 'lat'
+
+
+def slova(t):
+    return re.findall(r'\w+', t.lower())
+
+
+def ekho(t, podskazka):
+    """Whisper на шуме повторяет подсказку: кусок — почти одни имена из неё или её длинный кусок."""
+    s = slova(t)
+    imen = sum(w in IMENA for w in s)
+    if s and len(s) <= 6 and imen >= 2 and imen >= len(s) - 1:
+        return True
+    n = ' '.join(s)
+    return len(n) >= 20 and n in ' '.join(slova(podskazka))
+
+
 def most(put, timeout=4):
     with urllib.request.urlopen(MOST + put, timeout=timeout) as r:
         return r.read().decode('utf-8', 'replace')
@@ -151,6 +179,7 @@ class Sinhron:
         self.ostalos_perevod = None
         self.perevod_model = 0
         self.prompt = {}                      # прошлая фраза голоса — подсказка Whisper
+        self.yaz = {}                         # язык прошлой фразы голоса — письмо имён в подсказке
         self.poslednee = {}                   # (golos) → (текст, когда) — не повторять одно и то же
         self.schet = {'fraz': 0, 'zaprosov': 0, 'subtitrov': 0, 'muzyka': 0, 'vydumki': 0, 'tishina': 0,
                       'starye': 0, 'skleeno': 0, 'perevodov': 0, 'oshibok': 0}
@@ -265,27 +294,54 @@ class Sinhron:
             self.oshibka = 'нет ключа Groq (! kluch)'
             time.sleep(10 * SEK)
             return
-        d, zag = self.whisper(f, key)
+        porog = 0.4 if f.golos == 'igra' else 0.6
+        pod = self.podskazka(f.golos)
+        d, zag = self.whisper(f, key, pod=pod)
         self.schet['zaprosov'] += 1
         yazyk = LANGS.get((d.get('language') or '').lower(), (d.get('language') or '')[:2].lower())
-        tekst = self.otbor(d, 0.4 if f.golos == 'igra' else 0.6)
+        tekst = self.otbor(d, porog, pod)
         if not tekst:
             return
+        nado = None
         if f.golos == 'ya' and yazyk not in ('ru', 'uk', 'en'):     # как у слуха: Александр — по-русски
-            d2, _ = self.whisper(f, key, 'ru')
+            nado = 'ru'
+        elif yazyk in ('ru', 'uk', 'en') and pismo(tekst) not in (None, 'lat' if yazyk == 'en' else 'kir'):
+            nado = yazyk          # услышал английский, а написал по-русски (или наоборот) — ещё раз, с языком
+        if nado:
+            pod = self.podskazka(f.golos, nado)
+            d2, _ = self.whisper(f, key, nado, pod)
             self.schet['zaprosov'] += 1
-            tekst = (d2.get('text') or tekst).strip()
+            tekst = self.otbor(d2, porog, pod)
+            yazyk = nado
+            if not tekst:
+                return
+        p = pismo(tekst)                      # перевод — по тому, чем написано: два русских ряда не показывать
+        if p == 'kir' and yazyk == 'en':
             yazyk = 'ru'
+        elif p == 'lat' and yazyk in ('ru', 'uk'):
+            yazyk = 'en'
         pr = self.poslednee.get(f.golos)
         if pr and pr[0] == tekst and time.time() - pr[1] < 6:
             return
         self.poslednee[f.golos] = (tekst, time.time())
         self.prompt[f.golos] = tekst[-200:]
+        self.yaz[f.golos] = yazyk
         with self.lock:
             self.perevod.append((f.golos, tekst, yazyk, time.time()))
             self.lock.notify_all()
 
-    def otbor(self, d, porog):
+    def podskazka(self, golos, yazyk=None):
+        """Игре — пусто; остальным — имена письмом языка (заданного или прошлой фразы) и прошлая фраза,
+        если она тем же письмом."""
+        if golos == 'igra':
+            return ''
+        en = (yazyk or self.yaz.get(golos)) == 'en'
+        pr = self.prompt.get(golos, '')
+        if pismo(pr) != ('lat' if en else 'kir'):
+            pr = ''
+        return ((NAMES_EN if en else NAMES) + pr)[-220:]
+
+    def otbor(self, d, porog, podskazka=''):
         """Текст без выдумок и тишины — по каждому куску Whisper отдельно: в склейке одна пустая фраза
         не должна съесть остальные. Пусто — нечего показывать (счётчики — почему)."""
         segs = d.get('segments')
@@ -299,7 +355,7 @@ class Sinhron:
             cr = sg.get('compression_ratio', 1) or 1
             if len(t) < 2:
                 continue
-            if GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4:
+            if GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4 or ekho(t, podskazka):
                 self.schet['vydumki'] += 1
                 log('выдумка', t[:60])
                 continue
@@ -309,10 +365,11 @@ class Sinhron:
             ostalos.append(t)
         return ' '.join(ostalos).strip()
 
-    def whisper(self, f, key, yazyk=None):
+    def whisper(self, f, key, yazyk=None, pod=''):
         b = uuid.uuid4().hex
-        polya = {'model': MODEL, 'response_format': 'verbose_json', 'temperature': '0',
-                 'prompt': (NAMES + self.prompt.get(f.golos, ''))[-220:]}
+        polya = {'model': MODEL, 'response_format': 'verbose_json', 'temperature': '0'}
+        if pod:
+            polya['prompt'] = pod
         if yazyk:
             polya['language'] = yazyk
         telo = b''.join(('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b, k, v)).encode()
@@ -425,6 +482,8 @@ class Sinhron:
 
     def pokazat(self, golos, tekst, perevod, yazyk):
         q = {'kto': golos, 't': tekst, 'ot': 's'}
+        if perevod and pismo(perevod) not in (None, 'kir' if yazyk == 'en' else 'lat'):
+            perevod = None                    # «перевод» тем же языком — второй ряд не нужен
         if perevod and perevod != tekst:
             q['t2'] = perevod
         try:
