@@ -9,7 +9,10 @@
     zag: 'эфир', vhodZag: 'Вход в эфир', vhodPod: 'Тебя зовут в стрим Александра. Нужны камера и микрофон.',
     vhodZagM: 'Вход: модератор', vhodPodM: 'Ты модератор: впускаешь гостей и делишься их ссылкой. Камера и микрофон — по желанию.',
     vhodZagH: 'Пульт эфира', vhodPodH: 'Твой пульт: кто в комнате, впустить, убрать с экрана, выгнать.',
-    imya: 'Имя в эфире', kamera: 'Камера', mikrofon: 'Микрофон', naushniki: '🎧 Надень наушники — иначе эфир услышит эхо.',
+    imya: 'Имя в эфире', kamera: 'Камера', mikrofon: 'Микрофон',
+    naushniki: '🎧 Лучше в наушниках. Без них в эфире включится «🔇 Только голоса»: игра не зазвучит из динамика, и эфир не услышит эхо.',
+    golosa: 'Только голоса', golosaVkl: 'Игра не звучит — слышно Александра, Плюса и гостей, эфир не услышит эхо. Надел наушники — нажми, игра вернётся.',
+    golosaSam: 'Наушников не видно — включила «Только голоса», чтобы эфир не услышал эхо. Надел наушники — нажми, игра вернётся.',
     razreshit: 'Включить камеру и микрофон', voyti: 'Войти', pultOtkryt: 'Открыть пульт',
     zhdiZag: 'Ждём, пока впустят…', zhdiPod: 'Модератор или Александр сейчас тебя впустят. Не закрывай страницу.',
     slyshno: '🔊 Слышно', igra: '🎮 Игра', lyudi: 'В эфире', pult: 'Пульт', priglasit: 'Пригласить гостя',
@@ -24,7 +27,7 @@
     mikPropal: 'Микрофон пропал (звонок? другое приложение?) — поднимаю…', mikNet: 'Микрофон не вернулся: проверь, не занят ли он звонком, и обнови страницу.',
     mikZanyat: 'Микрофон занят (звонок?) — вернётся сам, когда освободится.',
     kamPropala: 'Камера пропала — поднимаю…', kamNet2: 'Камера не вернулась: не занята ли она другим приложением? Голос в эфире идёт.',
-    naushnikiSmena: '🎧 Наушники отключились? Без них эфир услышит эхо твоего динамика.',
+    naushnikiSmena: '🎧 Наушники отключились — включила «🔇 Только голоса», чтобы эфир не услышал эхо твоего динамика.',
     tolkoZvuk: 'Камера недоступна — входишь только со звуком.',
     prevyuZhdi: 'Картинка эфира появится, когда начнётся эфир.', prevyuNet: 'Этот браузер не показывает картинку эфира — смотри стрим на Twitch, звук идёт отсюда.',
     prevyuVykl: 'Картинка эфира выключена (тесная сеть шлема) — смотри стрим на Twitch.',
@@ -45,7 +48,10 @@
     zag: 'live', vhodZag: 'Join the stream', vhodPod: 'You are invited to Alexander\'s stream. Camera and microphone needed.',
     vhodZagM: 'Join as moderator', vhodPodM: 'You are the moderator: admit guests and share their link. Camera and mic are optional.',
     vhodZagH: 'Stream control', vhodPodH: 'Your control panel: who is in, admit, hide, kick.',
-    imya: 'Your name on stream', kamera: 'Camera', mikrofon: 'Microphone', naushniki: '🎧 Wear headphones — otherwise the stream hears an echo.',
+    imya: 'Your name on stream', kamera: 'Camera', mikrofon: 'Microphone',
+    naushniki: '🎧 Headphones are best. Without them “🔇 Voices only” turns on: the game won’t play from your speaker and the stream won’t hear an echo.',
+    golosa: 'Voices only', golosaVkl: 'No game sound — you hear Alexander, Plus and the guests, and the stream hears no echo. Put on headphones and tap to bring the game back.',
+    golosaSam: 'No headphones detected — “Voices only” is on so the stream hears no echo. Put on headphones and tap to bring the game back.',
     razreshit: 'Turn on camera and microphone', voyti: 'Join', pultOtkryt: 'Open control panel',
     zhdiZag: 'Waiting to be admitted…', zhdiPod: 'The moderator or Alexander will let you in. Keep this page open.',
     slyshno: '🔊 Volume', igra: '🎮 Game', lyudi: 'On stream', pult: 'Control', priglasit: 'Invite a guest',
@@ -60,7 +66,7 @@
     mikPropal: 'Microphone lost (a call? another app?) — restoring…', mikNet: 'The microphone did not come back: is a call using it? Reload the page.',
     mikZanyat: 'Microphone busy (a call?) — it comes back by itself.',
     kamPropala: 'Camera lost — restoring…', kamNet2: 'The camera did not come back: is another app using it? Your voice is still on stream.',
-    naushnikiSmena: '🎧 Headphones unplugged? Without them the stream hears your speaker as an echo.',
+    naushnikiSmena: '🎧 Headphones unplugged — “🔇 Voices only” is on so the stream won’t hear your speaker as an echo.',
     tolkoZvuk: 'Camera unavailable — joining with audio only.',
     prevyuZhdi: 'The stream picture appears when the stream starts.', prevyuNet: 'This browser cannot show the stream picture — watch on Twitch, audio comes from here.',
     prevyuVykl: 'Stream picture is off (tight headset network) — watch on Twitch.',
@@ -99,6 +105,7 @@
     vdec: null, vdecKodek: '', vdecAvcc: false, zhdemKlyuch: true, kodek: '',
     ushel: false, perepodkl: 0, pingT: null, rttMs: 0, buferMs: 0, ssylkaGost: '', ssylkaModer: '',
     lyudi: [], govoryat: new Set(), lock: null, mest: 2, vpusk: 'ruchnoy',
+    tolkoGolosa: false, igraDo: 50, golosaReshili: false,
   };
   const umeet = {
     zvuk: typeof WebAssembly === 'object' && 'AudioWorkletNode' in window,
@@ -119,6 +126,7 @@
     $('knVoyti').textContent = rolPodskazka === 'h' ? T.pultOtkryt : T.voyti;
     $('tZhdiZag').textContent = T.zhdiZag; $('tZhdiPod').textContent = T.zhdiPod;
     $('tSlyshno').textContent = T.slyshno; $('tIgra').textContent = T.igra; $('tLyudi').textContent = T.lyudi;
+    $('tGolosa').textContent = T.golosa;
     $('tPult').textContent = T.pult; $('tPriglasit').textContent = T.priglasit; $('tModerSsylka').textContent = T.moderSsylka;
     $('tNovaya').textContent = T.novaya; $('knSnova').textContent = T.snova;
     document.title = 'Plus · ' + zag;
@@ -347,7 +355,36 @@
 
   function otpravitSam(dop) {
     if (S.ws && S.ws.readyState === 1 && S.vnutri)
-      S.ws.send(JSON.stringify(Object.assign({ t: 'sam', kamera: S.kamera && !!(S.stream && S.stream.getVideoTracks()[0]), mikrofon: S.mikrofon }, dop || {})));
+      S.ws.send(JSON.stringify(Object.assign({ t: 'sam', kamera: S.kamera && !!(S.stream && S.stream.getVideoTracks()[0]), mikrofon: S.mikrofon,
+        igra: Number($('igra').value) / 100 }, dop || {})));
+  }
+
+  // ---------- «🔇 Только голоса» (2.5.3, Александр): без наушников игра из динамика — главное эхо эфира.
+  // Гасит гостю игру в его смеси (сервер), голос Плюса и людей остаётся. Наушников не видно — включается сама.
+  function golosaPokazat() {
+    const b = $('knGolosa');
+    b.classList.toggle('vkl', S.tolkoGolosa); b.setAttribute('aria-pressed', String(S.tolkoGolosa));
+    const p = $('golosaPodskazka');
+    p.textContent = S.tolkoGolosa ? (S.golosaSami ? T.golosaSam : T.golosaVkl) : ''; p.hidden = !S.tolkoGolosa;
+  }
+  function golosaStavit(vkl, sami) {
+    const pl = $('igra');
+    if (vkl && !S.tolkoGolosa && Number(pl.value) > 0) S.igraDo = Number(pl.value);
+    S.tolkoGolosa = vkl; S.golosaSami = !!sami;
+    pl.value = vkl ? 0 : (S.igraDo || 50);
+    golosaPokazat(); otpravitSam();
+  }
+  // Наушники видно по имени выхода звука (Chrome на компьютере и Android); iPhone выходов не показывает — «не видно»
+  async function estNaushniki() {
+    try {
+      const v = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
+      return v.some((d) => /head|наушн|гарнит|airpods|buds|earphone|bluetooth|hands-?free/i.test(d.label || ''));
+    } catch (x) { return false; }
+  }
+  async function golosaReshit() {                                       // один раз, при входе в эфир
+    if (S.golosaReshili || S.rol === 'hozyain') return;
+    S.golosaReshili = true;
+    if (!(await estNaushniki())) golosaStavit(true, true);
   }
 
   // ---------- своя камера → шлем: H.264 (WebCodecs) или JPEG ----------
@@ -596,7 +633,7 @@
         if (!m.kamera && S.kamera && S.rol !== 'hozyain') { S.kamera = false; pokazatSebya(); }
         if (!m.mikrofon && S.mikrofon && S.rol !== 'hozyain') { S.mikrofon = false; knopki(); }
         zametka('');
-        if (S.vnutri) { ekran('ekranEfir'); sostoyanie(); S.nuzhenKlyuch = true; if (S.kodek) prositKlyuch(); budilnik(); }
+        if (S.vnutri) { ekran('ekranEfir'); sostoyanie(); S.nuzhenKlyuch = true; if (S.kodek) prositKlyuch(); budilnik(); golosaReshit(); }
         else ekran('ekranZhdi');
         pokaz('paneli', S.rol !== 'hozyain'); pokaz('prevyuBlok', S.rol !== 'hozyain');
         $('tochka').classList.toggle('efir', S.efir);
@@ -748,7 +785,12 @@
     $('knVyyti').onclick = () => { S.ushel = true; try { S.ws && S.ws.send('{"t":"uhozhu"}'); } catch (x) { } sessionStorage.removeItem('plus-z'); konec(T.prichina.sam); };
     $('knSnova').onclick = () => location.reload();
     $('gromkost').oninput = (e) => { if (S.usil) S.usil.gain.value = e.target.value / 100; };
-    $('igra').oninput = (e) => otpravitSam({ igra: e.target.value / 100 });
+    $('igra').oninput = (e) => {
+      const v = Number(e.target.value);
+      S.tolkoGolosa = v === 0; S.golosaSami = false; if (v > 0) S.igraDo = v;
+      golosaPokazat(); otpravitSam();
+    };
+    $('knGolosa').onclick = () => golosaStavit(!S.tolkoGolosa, false);
     $('knPriglasit').onclick = () => podelitsya(S.ssylkaGost, T.poslatGostyu);
     $('knModer').onclick = () => podelitsya(S.ssylkaModer, T.tekstModeru);
     $('knNovaya').onclick = () => upr('novaya');
@@ -777,7 +819,10 @@
       podpis().then((p) => { bylo = p; });
       navigator.mediaDevices.addEventListener('devicechange', async () => {
         const p = await podpis();
-        if (bylo !== null && p !== bylo && S.vnutri && S.rol !== 'hozyain') zametka(T.naushnikiSmena);
+        // наушники сняли посреди эфира — сами «только голоса»; надели — решает гость (кнопкой)
+        if (bylo !== null && p !== bylo && S.vnutri && S.rol !== 'hozyain' && !S.tolkoGolosa && !(await estNaushniki())) {
+          golosaStavit(true, true); zametka(T.naushnikiSmena);
+        }
         bylo = p;
       });
     }

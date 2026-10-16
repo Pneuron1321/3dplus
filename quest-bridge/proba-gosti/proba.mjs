@@ -55,6 +55,19 @@ try {
   shag('оба слышат смесь (буфер ' + sg.bufer + ' / ' + sm.bufer + ' мс), кодек камеры ' + sg.kodek);
   await g.screenshot({ path: out + '/gost-v-efire.png' });
   await m.screenshot({ path: out + '/moder-v-efire.png', fullPage: true });
+  // 2.5.3 «🔇 Только голоса»: наушников не видно (у Chromium их нет) — включилась сама, сервер гасит игру; кнопка — вернулась
+  const igraNaServere = () => g.evaluate(() => { const S = window.__plus.S; const ya = S.lyudi.find((x) => x.id === S.id); return ya ? ya.igra : null; });
+  await g.waitForFunction(() => window.__plus.S.tolkoGolosa === true, null, { timeout: 5000 });
+  await g.waitForFunction(() => { const S = window.__plus.S; const ya = S.lyudi.find((x) => x.id === S.id); return ya && ya.igra === 0; }, null, { timeout: 5000 });
+  if (await g.isHidden('#golosaPodskazka')) throw new Error('нет подсказки «только голоса»');
+  if (!(await g.getAttribute('#knGolosa', 'class')).includes('vkl')) throw new Error('кнопка «только голоса» не горит');
+  await g.click('#knGolosa');
+  await g.waitForFunction(() => { const S = window.__plus.S; const ya = S.lyudi.find((x) => x.id === S.id); return ya && ya.igra === 0.5; }, null, { timeout: 5000 });
+  if (!(await g.isHidden('#golosaPodskazka'))) throw new Error('подсказка осталась');
+  await g.click('#knGolosa');
+  await g.waitForFunction(() => { const S = window.__plus.S; const ya = S.lyudi.find((x) => x.id === S.id); return ya && ya.igra === 0; }, null, { timeout: 5000 });
+  shag('«Только голоса»: без наушников включилась сама (игра на сервере ' + (await igraNaServere()) + '), кнопкой — игра 50 % и снова 0');
+  await g.screenshot({ path: out + '/gost-tolko-golosa.png' });
   // убрать с экрана — у гостя заметка
   await m.click('#pultLyudi .pultKto button:nth-of-type(1)');
   await g.waitForFunction(() => /hid you|убрал/.test(document.getElementById('zametka').textContent), null, { timeout: 5000 });

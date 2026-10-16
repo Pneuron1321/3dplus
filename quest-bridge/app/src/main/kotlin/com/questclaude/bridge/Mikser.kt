@@ -15,8 +15,9 @@ import kotlin.math.sqrt
  *  - гость → [prinyat]: раскодировать → два буфера (смесь и эфир) с подстройкой (Bufer);
  *  - [tik] раз в 20 мс (часы — проигрыватель шлема, GostiZvuk): что звучит в шлеме (все гости,
  *    тише, пока Плюс слушает Александра), и каждому участнику — его смесь:
- *    фон (игра, Ава, голос донатеру — кладёт эфир, [fon]) × его громкость игры + микрофон Александра
- *    (через заслонку эха) + все остальные гости; кодируется и уходит ему;
+ *    игра (кладёт эфир, [fon]) × его громкость игры + голос Плюса и ответ донатеру ([golos], 2.5.3:
+ *    «🔇 Только голоса» гасит игру, а Плюса — нет) + микрофон Александра (через заслонку эха) + все
+ *    остальные гости; кодируется и уходит ему;
  *  - [vEfir] — гости в звук эфира (поток эфира, со своим буфером на гостя).
  * Заслонка эха: голос гостей из динамиков шлема попадает в микрофон и вернулся бы им эхом через
  * полсекунды. Пока в шлеме звучат гости, а микрофон тише [eho] × их громкости (Александр сам не
@@ -48,8 +49,10 @@ class Mikser(
     private val kanaly = ConcurrentHashMap<Int, Kanal>()
     private val mic = Bufer(MIC_RATE, RATE, tsel0Ms = 150, minTselMs = 120, maksTselMs = 300)
     private val fonBuf = Bufer(RATE, RATE, tsel0Ms = 60, minTselMs = 40)
+    private val golosBuf = Bufer(RATE, RATE, tsel0Ms = 60, minTselMs = 40)
     private val micKadr = ShortArray(KADR)
     private val fonKadr = ShortArray(KADR)
+    private val golosKadr = ShortArray(KADR)
     private val shlemF = FloatArray(KADR)
     private val smes = FloatArray(KADR)
     private val izMiks = ShortArray(KADR)
@@ -92,8 +95,12 @@ class Mikser(
     /** Микрофон Александра (уши, 16 кГц моно). */
     fun mic(c: ShortArray, n: Int) = mic.dobavit(c, 0, n)
 
-    /** Фон эфира (игра, Ава, голос донатеру), 48 кГц моно — кладёт поток эфира. */
+    /** Звук игры, 48 кГц моно — кладёт поток эфира; в смеси гостя — × его громкость игры. */
     fun fon(c: ShortArray, n: Int) = fonBuf.dobavit(c, 0, n)
+
+    /** Голос Плюса и ответ донатеру (вставки эфира), 48 кГц моно — кладёт поток эфира вместе с [fon]
+     *  (тишиной, когда никто не говорит); в смеси гостя — всегда, «🔇 Только голоса» его не трогает. */
+    fun golos(c: ShortArray, n: Int) = golosBuf.dobavit(c, 0, n)
 
     // ---------- такт ----------
 
@@ -107,6 +114,7 @@ class Mikser(
         val vnutri = komnata.vnutri().filter { it.rol != "hozyain" }
         val estMic = mic.vzyat(micKadr)
         fonBuf.vzyat(fonKadr)
+        golosBuf.vzyat(golosKadr)
         java.util.Arrays.fill(shlemF, 0f)
         val zvuchat = ArrayList<Kanal>(slyshno.size)
         var izmenilos = false
@@ -146,7 +154,7 @@ class Mikser(
         for (u in vnutri) {
             val k = kanaly.getOrPut(u.id) { Kanal(u.id) }
             val e = k.enc ?: noviyKoder().also { k.enc = it }
-            for (i in 0 until KADR) smes[i] = fonKadr[i] * u.igra + micKadr[i] * MIC_USIL * micUsil
+            for (i in 0 until KADR) smes[i] = fonKadr[i] * u.igra + golosKadr[i] + micKadr[i] * MIC_USIL * micUsil
             for (o in zvuchat) if (o.id != u.id) for (i in 0 until KADR) smes[i] += o.kadr[i].toFloat()
             for (i in 0 until KADR) izMiks[i] = myagko(smes[i])
             val t0 = System.nanoTime()
@@ -186,7 +194,7 @@ class Mikser(
         val sek = taktov * KADR / RATE.toDouble()
         val dolya = if (sek > 0) kodNs / 1e9 / sek * 100 else 0.0
         return "{\"kanaly\":[$ks],\"opus_proc\":${String.format(java.util.Locale.ROOT, "%.1f", dolya)}," +
-            "\"mic_ms\":${mic.estMs},\"fon_ms\":${fonBuf.estMs},\"zaslonka\":${String.format(java.util.Locale.ROOT, "%.2f", micUsil)}," +
+            "\"mic_ms\":${mic.estMs},\"fon_ms\":${fonBuf.estMs},\"golos_ms\":${golosBuf.estMs},\"zaslonka\":${String.format(java.util.Locale.ROOT, "%.2f", micUsil)}," +
             "\"shlem\":$gromkostShlem,\"efir\":$gromkostEfir,\"eho\":$eho,\"eho_db\":$ehoDb}"
     }
 

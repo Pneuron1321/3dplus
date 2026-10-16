@@ -21,8 +21,9 @@ import kotlin.math.abs
  * RTMP (Rtmp) через очередь с переподключением (Otpravka). Termux для эфира не нужен:
  * Quest убивает Termux по Meta в игре — эфир это переживает.
  *
- * 2.5.0: гости — в звук эфира (Mikser.vEfir); фон (игра, Ава, голос донатеру — без микрофона) —
- * в смесь гостей (Mikser.fon); звук игры — в субтитры (Rech «igra», 16 кГц).
+ * 2.5.0: гости — в звук эфира (Mikser.vEfir); игра — в смесь гостей (Mikser.fon), а Ава и голос
+ * донатеру — отдельно (Mikser.golos, 2.5.3: «Только голоса» гасит гостю игру, но не Плюса);
+ * звук игры — в субтитры (Rech «igra», 16 кГц).
  */
 class Efir(
     private val projection: MediaProjection,
@@ -247,6 +248,7 @@ class Efir(
 
     private var zvukOshibka = ""
     private var fon = ShortArray(CHUNK)
+    private var vst = ShortArray(CHUNK * 2)                  // вставки эфира (Ава, ответ донатеру) — отдельно, для гостей
     private val igra16 = ShortArray(CHUNK / 3 + 2)
     private var igraOst = 0                                  // сумма и счёт недобранной тройки (48 → 16 кГц)
     private var igraOstN = 0
@@ -285,12 +287,20 @@ class Efir(
             }
             val fr = got / 2
             if (r != null) igraVRech(buf, fr)                // звук игры — в субтитры (если демон слушает)
-            vstavka.mix(buf, fr)
-            vstavkaGolos.mix(buf, fr)
-            Hub.mikser?.let { m ->                           // фон гостям: игра, Ава, донатеру — без микрофона
+            val m = Hub.mikser
+            if (m != null) {                                 // гостям — игра отдельно от голоса Плюса (2.5.3: «🔇 Только голоса»)
                 if (fon.size < fr) fon = ShortArray(fr)
                 for (j in 0 until fr) fon[j] = ((buf[2 * j] + buf[2 * j + 1]) / 2).toShort()
                 m.fon(fon, fr)
+                if (vst.size < 2 * fr) vst = ShortArray(2 * fr) else java.util.Arrays.fill(vst, 0, 2 * fr, 0)
+                vstavka.mix(vst, fr)
+                vstavkaGolos.mix(vst, fr)
+                for (j in 0 until fr) fon[j] = ((vst[2 * j] + vst[2 * j + 1]) / 2).toShort()
+                m.golos(fon, fr)                             // Ава и ответ донатеру — и тишина, чтобы шли в ногу с игрой
+                for (i in 0 until 2 * fr) buf[i] = (buf[i] + vst[i]).coerceIn(-32768, 32767).toShort()
+            } else {
+                vstavka.mix(buf, fr)
+                vstavkaGolos.mix(buf, fr)
             }
             mic.mix(buf, fr, mikrofon)
             Hub.mikser?.vEfir(buf, fr)                       // гости — в эфир

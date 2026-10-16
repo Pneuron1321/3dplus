@@ -128,6 +128,23 @@ class MikserTest {
         assertTrue(ton(B, 700.0) > 300)
     }
 
+    /** 2.5.3, «🔇 Только голоса»: игра у гостя — ноль, а голос Плюса (вставки эфира) звучит всегда. */
+    @Test fun tolkoGolosaPlyusOstaetsya() {
+        val (a, sa) = gost("Без наушников")
+        k.sam(a, null, null, 0.0, null)
+        val shlem = ShortArray(960)
+        for (i in 0 until 60) {
+            m.fon(ShortArray(960) { (4000 * sin(2 * PI * 700.0 * (i * 960 + it) / 48000)).toInt().toShort() }, 960)
+            m.golos(ShortArray(960) { (4000 * sin(2 * PI * 1900.0 * (i * 960 + it) / 48000)).toInt().toShort() }, 960)
+            m.tik(shlem, i * 20L)
+        }
+        val A = raskodirovat(sa.pakety.drop(10))
+        assertTrue("игры нет", ton(A, 700.0) < 3)
+        assertTrue("Плюс слышен", ton(A, 1900.0) > 300)
+        assertTrue("Плюса нет в шлеме гостей", ton(shlem, 1900.0) < 5)
+        assertTrue(m.status().contains("\"golos_ms\""))
+    }
+
     @Test fun plusSlushaetGostiTishe() {
         val (a, _) = gost("А")
         val t = Ton(500.0)

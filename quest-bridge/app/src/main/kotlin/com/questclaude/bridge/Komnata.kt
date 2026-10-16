@@ -387,7 +387,7 @@ class Komnata(
 
     private fun chelovek(u: Uchastnik) = "{\"id\":${u.id},\"imya\":${js(u.imya)},\"rol\":\"${u.rol}\",\"sost\":\"${u.sost}\"," +
         "\"kamera\":${u.kamera},\"mikrofon\":${u.mikrofon},\"skryt\":${u.skryt},\"zaglushen\":${u.zaglushen}," +
-        "\"kamera_zapret\":${u.kameraZapret}," +
+        "\"kamera_zapret\":${u.kameraZapret},\"igra\":${u.igra}," +
         "\"cvet\":${u.cvet},\"govorit\":${u.govorit}}"
 
     private fun sobytie(vid: String, imya: String) {
