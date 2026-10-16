@@ -1,6 +1,7 @@
 :root{--fon:#0d0e14;--panel:#171922;--panel2:#1f2230;--tekst:#eceef5;--seryy:#9aa0b4;--siniy:#2d7ff9;
 --rozovyy:#ff8cc8;--oranzh:#ffaa5a;--sirenevyy:#bea0ff;--goluboy:#82c8ff;--zoloto:#ffcd46;--zelenyy:#8ce18c;--krasnyy:#eb4646}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;background:var(--fon);color:var(--tekst);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 -webkit-text-size-adjust:100%}
 body{min-height:100vh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
@@ -66,4 +67,12 @@ button.da{background:#1d5a2c}button.kr{background:#5a1c1c}
 button.vyk{background:#4a3416;box-shadow:inset 0 0 0 1px var(--oranzh)}
 .krug.zapret{opacity:.35;background:#3a1b1b}
 .golosa{display:block;width:100%;margin-top:12px}.golosaPod{margin-top:8px;font-size:13px}
+.govori{display:block;width:100%;margin-top:12px;padding:22px 16px;font-size:19px;font-weight:600;background:#25304a;
+user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none}
+.govori.zhmu{background:var(--krasnyy);transform:scale(.98)}
+.pultKto.govorit{box-shadow:inset 0 0 0 2px var(--zelenyy)}
+.dialog{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.65)}
+.dialogOkno{width:100%;max-width:420px;padding:18px;border-radius:16px;background:var(--panel);box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.dialogOkno p{margin:0 0 4px;font-size:16px}
+#dialogNet{display:block;width:100%;margin-top:10px}
 @media (max-width:420px){.krug{width:46px;height:46px;font-size:19px}.polzunok span{width:80px}}

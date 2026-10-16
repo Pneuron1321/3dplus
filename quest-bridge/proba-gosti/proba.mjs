@@ -61,13 +61,40 @@ try {
   await g.waitForFunction(() => { const S = window.__plus.S; const ya = S.lyudi.find((x) => x.id === S.id); return ya && ya.igra === 0; }, null, { timeout: 5000 });
   if (await g.isHidden('#golosaPodskazka')) throw new Error('нет подсказки «только голоса»');
   if (!(await g.getAttribute('#knGolosa', 'class')).includes('vkl')) throw new Error('кнопка «только голоса» не горит');
+  await g.screenshot({ path: out + '/gost-tolko-golosa.png' });
+  // вернуть игру — сначала вопрос «ты в наушниках?»: «нет» — игра так и выключена, «да» — 50 %
   await g.click('#knGolosa');
+  await vidno(g, 'dialog');
+  await g.screenshot({ path: out + '/gost-vopros-igra.png' });
+  await g.click('#dialogNet');
+  await new Promise((r) => setTimeout(r, 600));
+  if (!(await g.isHidden('#dialog')) || !(await g.evaluate(() => window.__plus.S.tolkoGolosa)) || await igraNaServere() !== 0)
+    throw new Error('«нет» вернул игру');
+  await g.click('#knGolosa');
+  await vidno(g, 'dialog');
+  await g.click('#dialogDa');
   await g.waitForFunction(() => { const S = window.__plus.S; const ya = S.lyudi.find((x) => x.id === S.id); return ya && ya.igra === 0.5; }, null, { timeout: 5000 });
   if (!(await g.isHidden('#golosaPodskazka'))) throw new Error('подсказка осталась');
-  await g.click('#knGolosa');
+  await g.click('#knGolosa');                                           // выключить игру — без вопроса
   await g.waitForFunction(() => { const S = window.__plus.S; const ya = S.lyudi.find((x) => x.id === S.id); return ya && ya.igra === 0; }, null, { timeout: 5000 });
-  shag('«Только голоса»: без наушников включилась сама (игра на сервере ' + (await igraNaServere()) + '), кнопкой — игра 50 % и снова 0');
-  await g.screenshot({ path: out + '/gost-tolko-golosa.png' });
+  if (!(await g.isHidden('#dialog'))) throw new Error('вопрос при выключении игры');
+  shag('«Только голоса»: без наушников включилась сама (игра на сервере 0); вернуть — через вопрос «в наушниках?»: «нет» — без игры, «да» — 50 %');
+  // 📻 рация: не держит — не слышно (модератор не видит «говорит»), держит — слышно и рамка у него в пульте
+  const gid = await g.evaluate(() => window.__plus.S.id);
+  const ryadG = '#pultLyudi .pultKto[data-id="' + gid + '"]';
+  await m.waitForFunction((s) => { const d = document.querySelector(s); return d && d.classList.contains('govorit'); }, ryadG, { timeout: 8000 });
+  await g.click('#knRaciya');
+  await vidno(g, 'knGovori');
+  await m.waitForFunction((s) => { const d = document.querySelector(s); return d && !d.classList.contains('govorit') && d.textContent.includes('📻'); }, ryadG, { timeout: 8000 });
+  await g.dispatchEvent('#knGovori', 'pointerdown', { pointerId: 1, isPrimary: true });
+  await m.waitForFunction((s) => { const d = document.querySelector(s); return d && d.classList.contains('govorit'); }, ryadG, { timeout: 8000 });
+  await g.screenshot({ path: out + '/gost-raciya.png' });
+  await m.screenshot({ path: out + '/moder-raciya.png', fullPage: true });
+  await g.dispatchEvent('#knGovori', 'pointerup', { pointerId: 1, isPrimary: true });
+  await m.waitForFunction((s) => { const d = document.querySelector(s); return d && !d.classList.contains('govorit'); }, ryadG, { timeout: 8000 });
+  await g.click('#knRaciya');                                           // рацию выключил — снова открытый микрофон
+  await m.waitForFunction((s) => { const d = document.querySelector(s); return d && d.classList.contains('govorit') && !d.textContent.includes('📻'); }, ryadG, { timeout: 8000 });
+  shag('рация: без кнопки гостя не слышно, держит — слышно и у модератора рамка «говорит» и 📻; выключил — открытый микрофон');
   // убрать с экрана — у гостя заметка
   await m.click('#pultLyudi .pultKto button:nth-of-type(1)');
   await g.waitForFunction(() => /hid you|убрал/.test(document.getElementById('zametka').textContent), null, { timeout: 5000 });

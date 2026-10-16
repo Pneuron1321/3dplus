@@ -46,6 +46,7 @@ class Komnata(
         @Volatile var vnutriMs = 0L
         @Volatile var igra = IGRA                    // громкость игры в его смеси, 0–1
         @Volatile var prevyu = true                  // хочет картинку эфира
+        @Volatile var raciya = false                 // 2.5.3: рация — слышно, только пока держит кнопку (видно модератору)
         @Volatile var h264 = false                   // умеет раскодировать H.264 (WebCodecs)
         @Volatile var govorit = false                // слышно сейчас (ставит движок звука)
         val vnutri: Boolean get() = sost == "vnutri"
@@ -257,11 +258,13 @@ class Komnata(
         return "{\"ok\":true}"
     }
 
-    /** Участник сам: камера, микрофон, громкость игры, картинка эфира. */
-    fun sam(u: Uchastnik, kamera: Boolean?, mikrofon: Boolean?, igra: Double?, prevyu: Boolean?): Unit = synchronized(zamok) {
+    /** Участник сам: камера, микрофон, громкость игры, картинка эфира, рация. */
+    fun sam(u: Uchastnik, kamera: Boolean?, mikrofon: Boolean?, igra: Double?, prevyu: Boolean?,
+            raciya: Boolean? = null): Unit = synchronized(zamok) {
         if (!lyudi.containsKey(u.id) || u.rol == "hozyain") return
         igra?.takeIf { !it.isNaN() }?.let { u.igra = it.toFloat().coerceIn(0f, 1f) }
         prevyu?.let { u.prevyu = it }
+        raciya?.let { u.raciya = it }
         val bylo = u.media
         val k = kamera ?: u.kamera
         val m = mikrofon ?: u.mikrofon
@@ -387,7 +390,7 @@ class Komnata(
 
     private fun chelovek(u: Uchastnik) = "{\"id\":${u.id},\"imya\":${js(u.imya)},\"rol\":\"${u.rol}\",\"sost\":\"${u.sost}\"," +
         "\"kamera\":${u.kamera},\"mikrofon\":${u.mikrofon},\"skryt\":${u.skryt},\"zaglushen\":${u.zaglushen}," +
-        "\"kamera_zapret\":${u.kameraZapret},\"igra\":${u.igra}," +
+        "\"kamera_zapret\":${u.kameraZapret},\"igra\":${u.igra},\"raciya\":${u.raciya}," +
         "\"cvet\":${u.cvet},\"govorit\":${u.govorit}}"
 
     private fun sobytie(vid: String, imya: String) {

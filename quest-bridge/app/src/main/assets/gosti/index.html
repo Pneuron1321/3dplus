@@ -31,6 +31,7 @@
       <button id="knPovernut" class="tumbler" type="button" hidden>🔄</button>
     </div>
     <p id="tNaushniki" class="sovet">🎧 Надень наушники — иначе эфир услышит эхо.</p>
+    <p id="tTwitch" class="sovet">📺 Twitch держи без звука.</p>
     <button id="knRazreshit" class="glavnaya" type="button">Включить камеру и микрофон</button>
     <button id="knVoyti" class="glavnaya" type="button" hidden>Войти</button>
     <p id="vhodOshibka" class="oshibka" hidden></p>
@@ -57,12 +58,15 @@
           <button id="knMik2" class="krug vkl" type="button" title="Микрофон">🎤</button>
           <button id="knKam2" class="krug vkl" type="button" title="Камера">📷</button>
           <button id="knPov2" class="krug" type="button" hidden>🔄</button>
+          <button id="knRaciya" class="krug" type="button" title="Рация">📻</button>
           <button id="knVyyti" class="krug krasnyy" type="button" title="Выйти">✕</button>
         </div>
+        <button id="knGovori" class="govori" type="button" hidden>📻 Держи и говори</button>
         <label class="polzunok"><span id="tSlyshno">🔊 Слышно</span><input id="gromkost" type="range" min="0" max="150" value="100"></label>
         <label class="polzunok"><span id="tIgra">🎮 Игра</span><input id="igra" type="range" min="0" max="100" value="50"></label>
         <button id="knGolosa" class="tumbler golosa" type="button" aria-pressed="false">🔇 <span id="tGolosa">Только голоса</span></button>
         <p id="golosaPodskazka" class="sovet golosaPod" hidden></p>
+        <p id="tTwitch2" class="sovet golosaPod">📺 Twitch держи без звука.</p>
       </div>
     </div>
     <h2 id="tLyudi">В эфире</h2>
@@ -93,6 +97,15 @@
     <button id="knSnova" class="glavnaya" type="button">Войти снова</button>
   </section>
 </main>
+
+<!-- вопрос с двумя ясными ответами (вернуть звук игры — только в наушниках) -->
+<div id="dialog" class="dialog" hidden>
+  <div class="dialogOkno">
+    <p id="dialogTekst"></p>
+    <button id="dialogDa" class="glavnaya" type="button"></button>
+    <button id="dialogNet" type="button"></button>
+  </div>
+</div>
 
 <audio id="petlya" autoplay playsinline></audio>
 <script src="gost.js"></script>

@@ -13,6 +13,12 @@
     naushniki: '🎧 Лучше в наушниках. Без них в эфире включится «🔇 Только голоса»: игра не зазвучит из динамика, и эфир не услышит эхо.',
     golosa: 'Только голоса', golosaVkl: 'Игра не звучит — слышно Александра, Плюса и гостей, эфир не услышит эхо. Надел наушники — нажми, игра вернётся.',
     golosaSam: 'Наушников не видно — включила «Только голоса», чтобы эфир не услышал эхо. Надел наушники — нажми, игра вернётся.',
+    igraSprosit: 'Вернуть звук игры? Без наушников он пойдёт из динамика, микрофон его поймает — и эфир услышит эхо. Ты в наушниках?',
+    igraDa: '🎧 Да, я в наушниках — вернуть игру', igraNet: 'Нет — оставить только голоса',
+    twitch: '📺 Twitch держи без звука: звук эфира уже идёт здесь, а Twitch отстаёт на несколько секунд — микрофон поймает его, и эфир услышит тебя эхом.',
+    twitch2: '📺 Twitch — без звука: звук эфира идёт отсюда.',
+    raciyaT: 'Рация: тебя слышно, только пока держишь кнопку', govori: '📻 Держи и говори', govorish: '🔴 Говоришь…',
+    raciyaVkl: '📻 Рация: тебя слышно, только пока держишь большую кнопку (на компьютере — пробел).',
     razreshit: 'Включить камеру и микрофон', voyti: 'Войти', pultOtkryt: 'Открыть пульт',
     zhdiZag: 'Ждём, пока впустят…', zhdiPod: 'Модератор или Александр сейчас тебя впустят. Не закрывай страницу.',
     slyshno: '🔊 Слышно', igra: '🎮 Игра', lyudi: 'В эфире', pult: 'Пульт', priglasit: 'Пригласить гостя',
@@ -52,6 +58,12 @@
     naushniki: '🎧 Headphones are best. Without them “🔇 Voices only” turns on: the game won’t play from your speaker and the stream won’t hear an echo.',
     golosa: 'Voices only', golosaVkl: 'No game sound — you hear Alexander, Plus and the guests, and the stream hears no echo. Put on headphones and tap to bring the game back.',
     golosaSam: 'No headphones detected — “Voices only” is on so the stream hears no echo. Put on headphones and tap to bring the game back.',
+    igraSprosit: 'Bring the game sound back? Without headphones it plays from your speaker, your mic picks it up — and the stream hears an echo. Are you wearing headphones?',
+    igraDa: '🎧 Yes, I’m wearing headphones — bring it back', igraNet: 'No — keep voices only',
+    twitch: '📺 Keep Twitch muted: the stream sound already plays here, and Twitch lags a few seconds behind — your mic picks it up and the stream hears you as an echo.',
+    twitch2: '📺 Twitch — muted: the stream sound plays from here.',
+    raciyaT: 'Walkie-talkie: you are heard only while holding the button', govori: '📻 Hold to talk', govorish: '🔴 Talking…',
+    raciyaVkl: '📻 Walkie-talkie: you are heard only while holding the big button (Space on a computer).',
     razreshit: 'Turn on camera and microphone', voyti: 'Join', pultOtkryt: 'Open control panel',
     zhdiZag: 'Waiting to be admitted…', zhdiPod: 'The moderator or Alexander will let you in. Keep this page open.',
     slyshno: '🔊 Volume', igra: '🎮 Game', lyudi: 'On stream', pult: 'Control', priglasit: 'Invite a guest',
@@ -105,7 +117,8 @@
     vdec: null, vdecKodek: '', vdecAvcc: false, zhdemKlyuch: true, kodek: '',
     ushel: false, perepodkl: 0, pingT: null, rttMs: 0, buferMs: 0, ssylkaGost: '', ssylkaModer: '',
     lyudi: [], govoryat: new Set(), lock: null, mest: 2, vpusk: 'ruchnoy',
-    tolkoGolosa: false, igraDo: 50, golosaReshili: false,
+    tolkoGolosa: false, igraDo: 50, golosaReshili: false, sprashivaem: false,
+    raciya: false, zhmu: false,
   };
   const umeet = {
     zvuk: typeof WebAssembly === 'object' && 'AudioWorkletNode' in window,
@@ -126,7 +139,8 @@
     $('knVoyti').textContent = rolPodskazka === 'h' ? T.pultOtkryt : T.voyti;
     $('tZhdiZag').textContent = T.zhdiZag; $('tZhdiPod').textContent = T.zhdiPod;
     $('tSlyshno').textContent = T.slyshno; $('tIgra').textContent = T.igra; $('tLyudi').textContent = T.lyudi;
-    $('tGolosa').textContent = T.golosa;
+    $('tGolosa').textContent = T.golosa; $('tTwitch').textContent = T.twitch; $('tTwitch2').textContent = T.twitch2;
+    $('knRaciya').title = T.raciyaT; $('knGovori').textContent = T.govori;
     $('tPult').textContent = T.pult; $('tPriglasit').textContent = T.priglasit; $('tModerSsylka').textContent = T.moderSsylka;
     $('tNovaya').textContent = T.novaya; $('knSnova').textContent = T.snova;
     document.title = 'Plus · ' + zag;
@@ -246,7 +260,7 @@
       if (star) S.stream.removeTrack(star);
       if (kind === 'audio') {
         const t = (await navigator.mediaDevices.getUserMedia({ audio: ZVUK })).getAudioTracks()[0];
-        t.enabled = S.mikrofon; S.stream.addTrack(t);
+        t.enabled = mikVkl(); S.stream.addTrack(t);
         try { if (S.src) S.src.disconnect(); } catch (x) { }
         S.src = S.ctx.createMediaStreamSource(new MediaStream([t])); S.src.connect(S.zahvat);
       } else {
@@ -310,6 +324,7 @@
   function knopki() {
     for (const id of ['knKamera', 'knKam2']) { $(id).classList.toggle('vkl', S.kamera && !S.kameraZapret); $(id).classList.toggle('zapret', S.kameraZapret); }
     for (const id of ['knMikrofon', 'knMik2']) $(id).classList.toggle('vkl', S.mikrofon && !S.zaglushen);
+    $('knRaciya').classList.toggle('vkl', S.raciya);
   }
 
   // Камера в эфире вкл/выкл: выключенная гаснет совсем (огонёк камеры тоже), включённая — заново.
@@ -346,17 +361,58 @@
 
   function mikrofonTumbler() {
     S.mikrofon = !S.mikrofon;
-    const at = S.stream && S.stream.getAudioTracks()[0];
-    if (at) at.enabled = S.mikrofon;
-    if (S.zahvat) S.zahvat.port.postMessage({ t: 'vkl', vkl: S.mikrofon });
+    mikPrimenit();
     knopki();
     otpravitSam();
+  }
+
+  // Слышно ли сейчас: микрофон включён и (без рации — всегда; в рации — пока держит кнопку)
+  const mikVkl = () => S.mikrofon && (!S.raciya || S.zhmu);
+  function mikPrimenit() {
+    const at = S.stream && S.stream.getAudioTracks()[0];
+    if (at) at.enabled = mikVkl();
+    if (S.zahvat) S.zahvat.port.postMessage({ t: 'vkl', vkl: mikVkl() });
+  }
+
+  // ---------- 📻 Рация (2.5.3, Александр): слышно, только пока держишь кнопку — модератор сразу видит, кто говорит ----------
+  function raciyaTumbler() {
+    S.raciya = !S.raciya; S.zhmu = false;
+    pokaz('knGovori', S.raciya); govoritPokazat();
+    mikPrimenit(); knopki(); otpravitSam();
+    zametka(S.raciya ? T.raciyaVkl : '');
+  }
+  function govoritPokazat() {
+    const b = $('knGovori'); b.classList.toggle('zhmu', S.zhmu); b.textContent = S.zhmu ? T.govorish : T.govori;
+  }
+  function govorit(vkl) {
+    if (!S.raciya || S.zhmu === vkl) return;
+    S.zhmu = vkl; govoritPokazat(); mikPrimenit();
   }
 
   function otpravitSam(dop) {
     if (S.ws && S.ws.readyState === 1 && S.vnutri)
       S.ws.send(JSON.stringify(Object.assign({ t: 'sam', kamera: S.kamera && !!(S.stream && S.stream.getVideoTracks()[0]), mikrofon: S.mikrofon,
-        igra: Number($('igra').value) / 100 }, dop || {})));
+        igra: Number($('igra').value) / 100, raciya: S.raciya }, dop || {})));
+  }
+
+  // Вопрос с двумя ясными ответами (confirm на телефоне — «OK / Отмена», непонятно, что чем)
+  function sprosit(tekst, da, net) {
+    return new Promise((ok) => {
+      $('dialogTekst').textContent = tekst; $('dialogDa').textContent = da; $('dialogNet').textContent = net;
+      const otvet = (v) => { $('dialog').hidden = true; ok(v); };
+      $('dialogDa').onclick = () => otvet(true); $('dialogNet').onclick = () => otvet(false);
+      $('dialog').hidden = false;
+    });
+  }
+  // Вернуть звук игры (Александр 16.10): по умолчанию без наушников он выключен; включить — только после
+  // предупреждения об эхе и ответа «я в наушниках»
+  async function igruVernut(uroven) {
+    if (S.sprashivaem) return;
+    S.sprashivaem = true;
+    try {
+      if (await sprosit(T.igraSprosit, T.igraDa, T.igraNet)) { if (uroven > 0) S.igraDo = uroven; golosaStavit(false); }
+      else { $('igra').value = 0; golosaPokazat(); }
+    } finally { S.sprashivaem = false; }
   }
 
   // ---------- «🔇 Только голоса» (2.5.3, Александр): без наушников игра из динамика — главное эхо эфира.
@@ -650,6 +706,8 @@
         break;
       case 'govoryat':
         S.govoryat = new Set(m.id || []); risovatLyudey();
+        // пульт не перерисовываем (съели бы нажатие модератора) — только рамка «говорит» на строках
+        for (const d of $('pultLyudi').children) d.classList.toggle('govorit', S.govoryat.has(Number(d.dataset.id)));
         break;
       case 'video': videoNastroit(m.kodek); break;
       case 'kluch': S.nuzhenKlyuch = true; break;
@@ -707,7 +765,8 @@
       c.style.background = x.cvet >= 0 ? CVET[x.cvet] : '#555'; c.style.color = c.style.background;
       const n = document.createElement('span'); n.className = 'imya'; n.textContent = x.imya + (x.id === S.id ? T.vy : '');
       const r = document.createElement('span'); r.className = 'rol';
-      r.textContent = (x.rol === 'moder' ? T.moder + ' · ' : '') + (x.mikrofon && !x.zaglushen ? '🎤' : '🔇') + (x.kamera && !x.kamera_zapret ? ' 📷' : '');
+      r.textContent = (x.rol === 'moder' ? T.moder + ' · ' : '') + (x.mikrofon && !x.zaglushen ? '🎤' : '🔇') + (x.kamera && !x.kamera_zapret ? ' 📷' : '') +
+        (x.raciya ? ' 📻' : '');
       li.append(c, n, r); ul.append(li);
     }
   }
@@ -732,8 +791,9 @@
     }
     const pl = $('pultLyudi'); pl.textContent = '';
     for (const x of S.lyudi.filter((y) => y.sost === 'vnutri' && y.rol !== 'hozyain' && y.id !== S.id)) {
-      const d = document.createElement('div'); d.className = 'pultKto';
-      const b = document.createElement('b'); b.textContent = x.imya + ' · ' + (T[x.rol] || x.rol);
+      const d = document.createElement('div'); d.className = 'pultKto'; d.dataset.id = x.id;
+      d.classList.toggle('govorit', S.govoryat.has(x.id));                      // говорит сейчас — зелёная рамка: кого глушить
+      const b = document.createElement('b'); b.textContent = x.imya + ' · ' + (T[x.rol] || x.rol) + (x.raciya ? ' · 📻' : '');
       if (x.cvet >= 0) b.style.color = CVET[x.cvet];
       d.append(b,
         knopka(x.skryt ? T.pokazatK : T.skrytK, '', () => upr(x.skryt ? 'pokazat' : 'skryt', x.id)),
@@ -787,10 +847,22 @@
     $('gromkost').oninput = (e) => { if (S.usil) S.usil.gain.value = e.target.value / 100; };
     $('igra').oninput = (e) => {
       const v = Number(e.target.value);
+      if (S.tolkoGolosa && v > 0) { e.target.value = 0; igruVernut(v); return; }   // из «только голоса» — через вопрос
       S.tolkoGolosa = v === 0; S.golosaSami = false; if (v > 0) S.igraDo = v;
       golosaPokazat(); otpravitSam();
     };
-    $('knGolosa').onclick = () => golosaStavit(!S.tolkoGolosa, false);
+    $('knGolosa').onclick = () => (S.tolkoGolosa ? igruVernut() : golosaStavit(true, false));
+    // 📻 рация: держишь — слышно; отпустил, увёл палец, свернул страницу — нет
+    $('knRaciya').onclick = raciyaTumbler;
+    const gv = $('knGovori');
+    gv.addEventListener('pointerdown', (e) => { e.preventDefault(); try { gv.setPointerCapture(e.pointerId); } catch (x) { } govorit(true); });
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) gv.addEventListener(t, () => govorit(false));
+    gv.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && S.raciya && !e.repeat && !/input|textarea/i.test((e.target && e.target.tagName) || '')) { e.preventDefault(); govorit(true); }
+    });
+    document.addEventListener('keyup', (e) => { if (e.code === 'Space') govorit(false); });
+    window.addEventListener('blur', () => govorit(false));
     $('knPriglasit').onclick = () => podelitsya(S.ssylkaGost, T.poslatGostyu);
     $('knModer').onclick = () => podelitsya(S.ssylkaModer, T.tekstModeru);
     $('knNovaya').onclick = () => upr('novaya');
@@ -799,7 +871,7 @@
     // Уроки студии: iOS усыпляет звук и роняет Wake Lock в фоне, а сокет может умереть молча — на возврате
     // будим всё; был в фоне дольше 8 с — пинг, и если сервер не ответил за 2,5 с — переподключаемся сами.
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { S.skrytoMs = Date.now(); return; }
+      if (document.hidden) { S.skrytoMs = Date.now(); govorit(false); return; }
       budit();
       if (S.ctx && S.ctx.state === 'suspended') S.ctx.resume();
       if (!S.vnutri) return;

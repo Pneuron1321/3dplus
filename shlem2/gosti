@@ -336,6 +336,8 @@ def status():
             p.append('в кадре' if u['cvet'] >= 0 and not u['skryt'] else ('убран с экрана' if u['skryt'] else 'за кадром'))
             p.append('микрофон ' + ('выкл модератором' if u['zaglushen'] else ('вкл' if u['mikrofon'] else 'выкл')))
             p.append('камера ' + ('выкл модератором' if u.get('kamera_zapret') else ('вкл' if u['kamera'] else 'выкл')))
+            if u.get('raciya'):
+                p.append('рация (слышно, только пока держит кнопку)')
             if u.get('govorit'):
                 p.append('говорит')
         print('  %s — %s' % (u['imya'], ', '.join(p)))
