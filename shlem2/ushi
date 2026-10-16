@@ -76,7 +76,8 @@ RACIYA = ('рация', 'рацию', 'рации', 'режим рация', 'в
           'радио', 'radio')
 OKNO = ('окно', 'окна', 'режим окно', 'выключи рацию', 'window')
 REZHIMY = {'в ухо': 'uho', 'ухо': 'uho', 'вухо': 'uho',
-           'in ear': 'uho', 'ear': 'uho',
+           'уши': 'uho', 'в уши': 'uho',    # 16.10, Александр: «можно и ухо, и уши»
+           'in ear': 'uho', 'ear': 'uho', 'ears': 'uho', 'in ears': 'uho',
            'вслух': 'vsluh', 'в слух': 'vsluh',
            'aloud': 'vsluh', 'out loud': 'vsluh'}
 # Выдумки Whisper на тишине и шуме (из субтитров,
@@ -103,6 +104,11 @@ PLUS_LEAD = re.compile(r'^.{0,20}?' + PLUS_T + r'[\s,.!-]*'
                        re.I | re.S)
 PLUS1 = re.compile(r'^\s*' + PLUS_T + r'(?!\w)[\s,.!?…-]*',
                    re.I)
+# «В ухо» / «уши» (16.10): Vosk приложения подгонял под «в ухо»
+# и «уши» в разговоре, а вызов — и «с плюсом». Режим «в ухо»
+# по фразе со словами вызова (lead > 0) — только если и Whisper
+# услышал «плюс» в её начале.
+PLUS_SLYSHEN = re.compile(r'^.{0,25}?' + PLUS_T, re.I | re.S)
 
 
 def bez_vyzova(w, lead):
@@ -792,6 +798,7 @@ def handle(e, sluh):
     elif kind == 'tiho':
         subprocess.run(['tiho'])
     chek = kind == 'chek'           # «чек чек плюс»: плёнка уйдёт и без слов
+    lead, syroy = 0.0, ''           # слова вызова, с; текст Whisper как есть
     if kind in ('text', 'chek'):
         metka('fraza', e['id'], e.get('ms'))
         metka('ushi', e['id'])
@@ -815,6 +822,7 @@ def handle(e, sluh):
         metka('whisper', e['id'],
               dop='%s %.2f' % (sluh.via, time.time() - t0))
         if w:
+            syroy = w
             w = (KAPI if e.get('stop') else KAPI2).sub('', w)
             w = bez_vyzova(w, lead)
         if dosluh and (rech_f < 0.4 or
@@ -857,6 +865,11 @@ def handle(e, sluh):
             # 11.10, 20:40: в секунду после ответа (без «плюс плюс») бридж услышал «в ухо» в игре —
             # до конца эфира Аву слышал только Александр. «В ухо» — только после «плюс плюс».
             print(time.strftime('%H:%M:%S'), '«в ухо» без «плюс плюс» — режим не меняю', flush=True)
+        elif r == 'uho' and kind == 'text' and lead and syroy and not PLUS_SLYSHEN.search(syroy):
+            # 16.10: Vosk «услышал» вызов (в «с плюсом», в разговоре), а Whisper «плюс» не слышал —
+            # вызова не было: «уши» в разговоре — не команда
+            print(time.strftime('%H:%M:%S'), '«в ухо», но Whisper не слышал «плюс плюс» — режим не меняю',
+                  flush=True)
         else:
             rezhim(r)
     elif kind == 'text' and low in RACIYA + OKNO:

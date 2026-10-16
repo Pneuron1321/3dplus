@@ -67,6 +67,10 @@ class EarService : Service() {
         private const val DOSLUH_OT = RATE / 2L
         /** Заговорил после ответа, но слов так и нет — столько ждём, потом молча слушаем дальше. */
         private const val DOSLUH_TIHO_MS = 2500L
+        /** 2.5.2: «в ухо» Vosk сам не исполняет — он подгонял под него «уши» в разговоре после ложного
+         *  вызова («с плюсом»). Точная фраза «плюс плюс в ухо» — вызов, «в ухо» уходит фразой, а Termux
+         *  меняет режим, только если и Whisper услышал «плюс плюс» и «ухо»/«уши». */
+        private const val UHO = "rezhim:uho"
 
         @Volatile var running = false
         @Volatile var status = "Уши выключены."
@@ -219,7 +223,7 @@ class EarService : Service() {
             // у каждой модели своя «первая часть»: русская могла услышать в «loud» своё слово
             // раньше, чем английская — команду
             if (firstPart[g.lang] != false && g.text.split(' ').any { it.isNotBlank() && it != "[unk]" }) {
-                cmd = triggers.command(g.lang, g.text, g.confs)
+                cmd = triggers.command(g.lang, g.text, g.confs)?.takeIf { it.action != UHO }   // «в ухо» — решит Whisper
                 firstPart[g.lang] = false
             }
             return cmd to triggers.endsWithStop(g.lang, g.text, g.confs)
@@ -291,14 +295,18 @@ class EarService : Service() {
                             val json = e.keyword.result
                             val heard = heardOf(e.lang, json)
                             val words = wordsOf(json, "result")
-                            val h = triggers.match(e.lang, heard.text, heard.confs)
+                            val h0 = triggers.match(e.lang, heard.text, heard.confs)
+                            // «плюс плюс в ухо» — вызов, а «в ухо» — уже фраза после него (для Whisper)
+                            val uho = h0?.action == UHO
+                            val h = if (uho) Triggers.Hit("wake", e.lang, h0!!.conf) else h0
                             if (h != null) {
                                 if (h.action != "stop") hits += h          // «копи копи» — только внутри фразы
-                                if (h.action == "wake") bare += h
+                                if (h.action == "wake" && !uho) bare += h
                                 if (h.action == "wake" || h.action == Triggers.CHEK) {
-                                    words.lastOrNull()?.let { wakeAt[h] = e.base + (it.end * RATE).toLong() }
+                                    (if (uho) words.getOrNull(1) ?: words.lastOrNull() else words.lastOrNull())
+                                        ?.let { wakeAt[h] = e.base + (it.end * RATE).toLong() }
                                     words.firstOrNull()?.let { wakeFrom[h] = e.base + (it.start * RATE).toLong() }
-                                    how[h] = "точно"
+                                    how[h] = if (uho) "точно, в ухо" else "точно"
                                 }
                             } else {
                                 // «плюс плюс …» или «чек чек плюс …» в начале итога, дальше уже фраза
