@@ -1,0 +1,670 @@
+#!/usr/bin/env -S python3 -S
+"""sinhron — синхронист эфира (2.5.0, docs/GOSTI.md): субтитры по каждому голосу. Александр 13.10:
+«каждый из потоков звука — мой голос, голоса в игре, голоса каждого из подключившихся — слушался для
+субтитров: если на английском — вторые на русском, если на русском — вторые на английском».
+  Приложение 2 режет речь каждого голоса на фразы (/titry/rech, WAV 16 кГц): ya — микрофон
+  Александра, igra — звук игры, g1…g3 — гости. Здесь: Whisper large-v3-turbo в Groq (свой лимит,
+  отдельно от слуха Плюса на large-v3), язык — сам; подсказка — имена письмом языка голоса, игре —
+  никакой; услышал один язык, а написал другим — ещё раз с языком; фильтр выдумок Whisper, тишины и
+  повтора подсказки; перевод пачкой (английский → русский, остальное → английский), второй ряд тем же
+  языком — не показывать; готовое — /titr?kto=…&ot=s.
+  Бесплатный Groq: Whisper — 20 запросов в минуту, 2000 в день и 7200 секунд звука в час, причём
+  запрос короче 10 с считается за 10 с. Бюджет — две корзины: запросов (SINHRON_RPM, файл
+  /root/.sinhron-rpm, по умолчанию 18 в минуту) и секунд звука (файл /root/.sinhron-ash, по умолчанию
+  7000 в час; 0 — без предела). Очередь: Александр и гости раньше игры, старше 15 с — прочь; пока
+  корзина пуста, фразы копятся, и фразы одного голоса уходят одним запросом (10 с за одну цену).
+  На день осталось меньше 200 — игру не слушаем (и говорю это в ухо), меньше 60 — только Александр и
+  гости. Музыку игры (речь без пауз — мало «тихих» кусков) не шлём. Игре — не больше трети бюджета
+  (свои корзины запросов и секунд, 17.10: шум боя съедал всё); три пустых ответа по игре подряд
+  (стрельба, вертолёт — речи нет) — игру пропускаем 20 с, потом 40, 80, до 2 мин; речь в игре — сначала.
+  sinhron                 — как работает: голоса, бюджет Groq, ошибки
+  sinhron igra|ya|gosti vkl|vykl — какие голоса слушать (приложение помнит до перезапуска)
+  sinhron gosti u_plitki|vnizu   — субтитры гостей пузырём у плитки или внизу со всеми
+  sinhron rpm 18          — запросов к Whisper в минуту
+  sinhron platnyy | besplatnyy — уровень Groq: платный — 120 в минуту и без предела звука
+  sinhron demon           — сам цикл (запускает plus; второй не запустится)
+Ключ — /root/.groq-key (кладёт `kluch`): не печатать, не читать вслух. Слова гостей и игры Плюсу с
+инструментами не идут — только в кадр и в /tmp/sinhron-istoriya.log."""
+import fcntl
+import http.client
+import json
+import os
+import re
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+MOST = os.environ.get('SINHRON_MOST', 'http://localhost:8766')
+GROQ = os.environ.get('SINHRON_GROQ', 'https://api.groq.com/openai/v1')
+MODEL = os.environ.get('SINHRON_MODEL', 'whisper-large-v3-turbo')
+PEREVOD = os.environ.get('SINHRON_PEREVOD', 'openai/gpt-oss-20b,llama-3.1-8b-instant').split(',')
+KEY = os.environ.get('SINHRON_KEY', '/root/.groq-key')
+RPM_F = os.environ.get('SINHRON_RPM_F', '/root/.sinhron-rpm')
+ASH_F = os.environ.get('SINHRON_ASH_F', '/root/.sinhron-ash')
+GOLOS_Q = os.environ.get('SINHRON_GOLOS_Q', '/tmp/golos/q')
+LOCK = os.environ.get('SINHRON_LOCK', '/tmp/sinhron.lock')
+SOST = os.environ.get('SINHRON_SOST', '/tmp/sinhron.json')
+LOG = os.environ.get('SINHRON_LOG', '/tmp/sinhron.log')
+ISTORIYA = os.environ.get('SINHRON_ISTORIYA', '/tmp/sinhron-istoriya.log')
+SEK = float(os.environ.get('SINHRON_SEK', 1))           # в проверке — доли секунды
+STAROE = 15.0          # фраза старше — субтитр уже ни к чему
+STAROE_IGRA = 9.0
+SKLEIT_MAKS = 16.0     # склеенный запрос не длиннее, с
+MIN_SEK = 10.0         # Groq считает запрос короче 10 с за 10 с
+ASH = 7000.0           # секунд звука в час (у бесплатного Groq — 7200)
+POROG_TIHIH = 0.12     # «тихих» кусков меньше — музыка, не речь (только игра)
+ZHDAT_PEREVOD = 1.2    # перевод — пачкой: ждём столько с первой фразы
+IGRA_DOLYA = 1 / 3     # игре — не больше трети запросов и секунд звука
+IGRA_PUSTYH = 3        # столько пустых ответов по игре подряд — пауза
+IGRA_PAUZA = 20.0      # первая пауза, с; дальше вдвое, до IGRA_PAUZA_MAKS
+IGRA_PAUZA_MAKS = 120.0
+LANGS = {'russian': 'ru', 'ukrainian': 'uk', 'english': 'en'}
+# Выдумки Whisper на тишине, шуме и музыке (из субтитров, на которых его учили) — как у ушей.
+GALLYU = re.compile(
+    r'субтитр|корректор|продолжение следует|спасибо за (?:просмотр|внимание)|подписывайтесь|'
+    r'ставьте лайк|dimatorzok|диматорзок|диматург|thanks? (?:you )?for watching|amara\.org|'
+    r'дякую за перегляд|subtitles? by|please subscribe|like and subscribe|transcribed by|'
+    r'^\W*(?:музыка|аплодисменты|music|applause|смех|laughter)\W*$', re.I)
+KOROTKIE = re.compile(r'^\W*(?:спасибо|thank you|thanks|you|ага|угу|да|bye|пока)\W*$', re.I)
+# Подсказка Whisper — имена письмом того языка, на котором голос говорил в прошлый раз. Игре — никакой:
+# 16.10 русская подсказка заставила Whisper писать английскую игру по-русски («Мы близко к победе» —
+# и перевод «на русский» второй строкой), а на шуме он повторял саму подсказку («Саша, Александр, Твич»).
+NAMES = 'Плюс, Саша, Александр, GTA, Twitch. '
+NAMES_EN = 'Plus, Sasha, Alexander, GTA, Twitch. '
+IMENA = set('плюс саша александр gta гта twitch твич plus sasha alexander'.split())
+
+
+def log(*a):
+    try:
+        with open(LOG, 'a') as f:
+            print(time.strftime('%H:%M:%S'), *a, file=f)
+    except OSError:
+        pass
+
+
+def klyuch():
+    k = os.environ.get('GROQ_API_KEY')
+    try:
+        k = k or open(KEY).read()
+    except OSError:
+        return None
+    return k.strip() or None
+
+
+def rpm():
+    try:
+        return max(1.0, min(600.0, float(open(RPM_F).read().strip())))
+    except (OSError, ValueError):
+        return float(os.environ.get('SINHRON_RPM', 18))
+
+
+def ash():
+    """Секунд звука в час для Whisper; 0 — без предела (платный уровень)."""
+    try:
+        return max(0.0, float(open(ASH_F).read().strip()))
+    except (OSError, ValueError):
+        return float(os.environ.get('SINHRON_ASH', ASH))
+
+
+def v_uho(tekst):
+    """Голосом только Александру (голос-демон, дорожка .uho: не в эфир, без субтитров)."""
+    try:
+        os.makedirs(GOLOS_Q, exist_ok=True)
+        put = os.path.join(GOLOS_Q, '%d.uho' % time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(tekst)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
+def pismo(t):
+    """'kir' — кириллица, 'lat' — латиница (чего больше), None — букв нет."""
+    kir = len(re.findall(r'[а-яёіїєґ]', t, re.I))
+    lat = len(re.findall(r'[a-z]', t, re.I))
+    return None if not (kir or lat) else 'kir' if kir > lat else 'lat'
+
+
+def slova(t):
+    return re.findall(r'\w+', t.lower())
+
+
+def ekho(t, podskazka):
+    """Whisper на шуме повторяет подсказку: кусок — почти одни имена из неё или её длинный кусок."""
+    s = slova(t)
+    imen = sum(w in IMENA for w in s)
+    if s and len(s) <= 6 and imen >= 2 and imen >= len(s) - 1:
+        return True
+    n = ' '.join(s)
+    return len(n) >= 20 and n in ' '.join(slova(podskazka))
+
+
+def most(put, timeout=4):
+    with urllib.request.urlopen(MOST + put, timeout=timeout) as r:
+        return r.read().decode('utf-8', 'replace')
+
+
+class Fraza:
+    def __init__(self, golos, wav, tihih, db, prishla):
+        self.golos, self.wav, self.tihih, self.db, self.prishla = golos, wav, tihih, db, prishla
+
+    @property
+    def sek(self):
+        return max(0.0, (len(self.wav) - 44) / 32000.0)
+
+
+def skleit(frazy):
+    """Фразы одного голоса подряд — один WAV (между ними 0,25 с тишины)."""
+    pcm = b''
+    for i, f in enumerate(frazy):
+        if i:
+            pcm += b'\0' * 8000
+        pcm += f.wav[44:]
+    zag = bytearray(frazy[0].wav[:44])
+    zag[4:8] = (36 + len(pcm)).to_bytes(4, 'little')
+    zag[40:44] = len(pcm).to_bytes(4, 'little')
+    return Fraza(frazy[0].golos, bytes(zag) + pcm, max(f.tihih for f in frazy), max(f.db for f in frazy),
+                 frazy[0].prishla)
+
+
+class Sinhron:
+    def __init__(self):
+        self.lock = threading.Condition()
+        self.ochered = []
+        self.perevod = []                     # (golos, tekst, yazyk, kogda)
+        self.korzina = 3.0
+        self.korzinaT = time.time()
+        self.zvuk = None                      # корзина секунд звука (None — полная при первом запросе)
+        self.igra_korzina = 1.0               # игре — свои корзины: треть темпа
+        self.igra_zvuk = None
+        self.igra_pusto = 0                   # пустых ответов по игре подряд
+        self.igra_shag = 0                    # какая по счёту пауза
+        self.igra_pauza_do = 0.0
+        self.skazano = set()                  # о чём уже сказано в ухо
+        self.pauza_do = 0.0                   # 429 — ждать до
+        self.ostalos_den = None               # запросов Whisper на сегодня (из ответа Groq)
+        self.ostalos_perevod = None
+        self.perevod_model = 0
+        self.prompt = {}                      # прошлая фраза голоса — подсказка Whisper
+        self.yaz = {}                         # язык прошлой фразы голоса — письмо имён в подсказке
+        self.poslednee = {}                   # (golos) → (текст, когда) — не повторять одно и то же
+        self.schet = {'fraz': 0, 'zaprosov': 0, 'subtitrov': 0, 'muzyka': 0, 'vydumki': 0, 'tishina': 0,
+                      'starye': 0, 'skleeno': 0, 'perevodov': 0, 'oshibok': 0, 'shum': 0}
+        self.oshibka = ''
+        self.zhiv_most = False
+        self.staroe = False                   # приложение без /titry/rech (старше 2.5.0)
+
+    # ---------- приём фраз ----------
+
+    def priyom(self):
+        while True:
+            try:
+                u = urllib.parse.urlsplit(MOST)
+                c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=30)
+                c.request('GET', '/titry/rech?zhdat=%g' % (20 * SEK))
+                r = c.getresponse()
+                telo = r.read()
+                self.zhiv_most = True
+                self.staroe = r.status == 404
+                if r.status == 200 and telo[:4] == b'RIFF':
+                    f = Fraza(r.getheader('X-Golos', ''), telo, float(r.getheader('X-Tihih', '0.5')),
+                              float(r.getheader('X-Db', '-30')), time.time())
+                    with self.lock:
+                        self.ochered.append(f)
+                        self.schet['fraz'] += 1
+                        self.lock.notify_all()
+                c.close()
+                if r.status not in (200, 204):        # приложение старше 2.5.0 (404) или сбой — не долбить шлем
+                    time.sleep(10 * SEK)
+            except Exception:
+                self.zhiv_most = False
+                time.sleep(3 * SEK)
+
+    # ---------- очередь и бюджет ----------
+
+    def vzyat(self):
+        """Следующая фраза для Whisper (или склейка); ждёт; None — ничего."""
+        with self.lock:
+            while True:
+                now = time.time()
+                self.ochered = [f for f in self.ochered if self._svezhaya(f, now)]
+                malo = self.ostalos_den is not None and self.ostalos_den < 200
+                ochen_malo = self.ostalos_den is not None and self.ostalos_den < 60
+                shum = now < self.igra_pauza_do
+                for f in list(self.ochered):
+                    if f.golos == 'igra' and (f.tihih < POROG_TIHIH or malo or shum):
+                        self.ochered.remove(f)
+                        self.schet['muzyka' if f.tihih < POROG_TIHIH else 'shum' if shum else 'starye'] += 1
+                if self.ochered and now >= self.pauza_do:
+                    self._dolit(now)
+                    kandidaty = [f for f in self.ochered if f.golos != 'igra' or self.igra_korzina >= 1]
+                    if kandidaty and self.korzina >= 1:
+                        self.korzina -= 1
+                        perv = min(kandidaty, key=lambda f: (f.golos == 'igra', f.prishla))
+                        igra = perv.golos == 'igra'
+                        odin = [f for f in self.ochered if f.golos == perv.golos]
+                        # копится (бюджет тесный) — склеить фразы этого голоса, сколько влезет
+                        vmeste = [perv]
+                        if len(self.ochered) > 1 or ochen_malo:
+                            for f in odin[1:]:
+                                if sum(x.sek for x in vmeste) + f.sek <= SKLEIT_MAKS:
+                                    vmeste.append(f)
+                        cena = max(MIN_SEK, sum(x.sek for x in vmeste))
+                        if self.zvuk is not None and self.zvuk < cena:     # секунд звука нет — копим
+                            self.korzina += 1
+                            self.lock.wait(min(2.0, (cena - self.zvuk) * 3600 / max(ash(), 1)) * SEK)
+                            continue
+                        if igra and self.igra_zvuk is not None and self.igra_zvuk < cena:   # треть секунд игры — кончилась
+                            self.korzina += 1
+                            self.lock.wait(min(2.0, (cena - self.igra_zvuk) * 3600 / max(ash() * IGRA_DOLYA, 1)) * SEK)
+                            continue
+                        if self.zvuk is not None:
+                            self.zvuk -= cena
+                        if igra:
+                            self.igra_korzina -= 1
+                            if self.igra_zvuk is not None:
+                                self.igra_zvuk -= cena
+                        for f in vmeste:
+                            self.ochered.remove(f)
+                        if len(vmeste) > 1:
+                            self.schet['skleeno'] += len(vmeste) - 1
+                            return skleit(vmeste)
+                        return perv
+                zhdat = 0.5 if self.ochered else 5.0
+                if self.ochered and now < self.pauza_do:
+                    zhdat = min(zhdat, self.pauza_do - now)
+                self.lock.wait(zhdat * SEK)
+
+    def _svezhaya(self, f, now):
+        if now - f.prishla > (STAROE_IGRA if f.golos == 'igra' else STAROE) * max(SEK, 0.05):
+            self.schet['starye'] += 1
+            return False
+        return True
+
+    def _dolit(self, now):
+        dt = (now - self.korzinaT) / max(SEK, 0.001)
+        self.korzina = min(3.0, self.korzina + dt * rpm() / 60.0)
+        self.igra_korzina = min(1.0, self.igra_korzina + dt * rpm() / 60.0 * IGRA_DOLYA)
+        a = ash()
+        if not a:
+            self.zvuk = self.igra_zvuk = None     # платный уровень — секунды не считаем
+        else:
+            vmest = min(60.0, max(MIN_SEK, a / 60.0))          # запас — минута звука, не меньше одного запроса
+            self.zvuk = vmest if self.zvuk is None else min(vmest, self.zvuk + dt * a / 3600.0)
+            vi = max(MIN_SEK, vmest * IGRA_DOLYA)
+            self.igra_zvuk = vi if self.igra_zvuk is None else min(vi, self.igra_zvuk + dt * a * IGRA_DOLYA / 3600.0)
+        self.korzinaT = now
+
+    # ---------- Whisper ----------
+
+    def slushat(self):
+        while True:
+            f = self.vzyat()
+            if f is None:
+                continue
+            try:
+                self.raspoznat(f)
+            except Exception as e:
+                self.schet['oshibok'] += 1
+                self.oshibka = '%s %s' % (type(e).__name__, str(e)[:80])
+                log('whisper:', self.oshibka)
+
+    def raspoznat(self, f):
+        key = klyuch()
+        if not key:
+            self.oshibka = 'нет ключа Groq (! kluch)'
+            time.sleep(10 * SEK)
+            return
+        porog = 0.4 if f.golos == 'igra' else 0.6
+        pod = self.podskazka(f.golos)
+        d, zag = self.whisper(f, key, pod=pod)
+        self.schet['zaprosov'] += 1
+        yazyk = LANGS.get((d.get('language') or '').lower(), (d.get('language') or '')[:2].lower())
+        tekst = self.otbor(d, porog, pod)
+        if f.golos == 'igra':
+            self._igra_itog(bool(tekst))
+        if not tekst:
+            return
+        nado = None
+        if f.golos == 'ya' and yazyk not in ('ru', 'uk', 'en'):     # как у слуха: Александр — по-русски
+            nado = 'ru'
+        elif yazyk in ('ru', 'uk', 'en') and pismo(tekst) not in (None, 'lat' if yazyk == 'en' else 'kir'):
+            nado = yazyk          # услышал английский, а написал по-русски (или наоборот) — ещё раз, с языком
+        if nado:
+            pod = self.podskazka(f.golos, nado)
+            d2, _ = self.whisper(f, key, nado, pod)
+            self.schet['zaprosov'] += 1
+            tekst = self.otbor(d2, porog, pod)
+            yazyk = nado
+            if not tekst:
+                return
+        p = pismo(tekst)                      # перевод — по тому, чем написано: два русских ряда не показывать
+        if p == 'kir' and yazyk == 'en':
+            yazyk = 'ru'
+        elif p == 'lat' and yazyk in ('ru', 'uk'):
+            yazyk = 'en'
+        pr = self.poslednee.get(f.golos)
+        if pr and pr[0] == tekst and time.time() - pr[1] < 6:
+            return
+        self.poslednee[f.golos] = (tekst, time.time())
+        self.prompt[f.golos] = tekst[-200:]
+        self.yaz[f.golos] = yazyk
+        with self.lock:
+            self.perevod.append((f.golos, tekst, yazyk, time.time()))
+            self.lock.notify_all()
+
+    def _igra_itog(self, est_rech):
+        """Речь в игре — пауз нет; пустых ответов подряд IGRA_PUSTYH — игру пропускаем, паузы растут."""
+        if est_rech:
+            self.igra_pusto = self.igra_shag = 0
+            return
+        self.igra_pusto += 1
+        if self.igra_pusto >= IGRA_PUSTYH:
+            pauza = min(IGRA_PAUZA_MAKS, IGRA_PAUZA * 2 ** self.igra_shag)
+            self.igra_pauza_do = time.time() + pauza * SEK
+            self.igra_shag += 1
+            self.igra_pusto = 0
+            log('игра: %d пустых подряд — пропускаю %g с' % (IGRA_PUSTYH, pauza))
+
+    def podskazka(self, golos, yazyk=None):
+        """Игре — пусто; остальным — имена письмом языка (заданного или прошлой фразы) и прошлая фраза,
+        если она тем же письмом."""
+        if golos == 'igra':
+            return ''
+        en = (yazyk or self.yaz.get(golos)) == 'en'
+        pr = self.prompt.get(golos, '')
+        if pismo(pr) != ('lat' if en else 'kir'):
+            pr = ''
+        return ((NAMES_EN if en else NAMES) + pr)[-220:]
+
+    def otbor(self, d, porog, podskazka=''):
+        """Текст без выдумок и тишины — по каждому куску Whisper отдельно: в склейке одна пустая фраза
+        не должна съесть остальные. Пусто — нечего показывать (счётчики — почему)."""
+        segs = d.get('segments')
+        if not segs:
+            segs = [{'text': d.get('text') or '', 'no_speech_prob': 0, 'avg_logprob': 0, 'compression_ratio': 1}]
+        ostalos = []
+        for sg in segs:
+            t = (sg.get('text') or '').strip()
+            nsp = sg.get('no_speech_prob', 0) or 0
+            lp = sg.get('avg_logprob', 0) or 0
+            cr = sg.get('compression_ratio', 1) or 1
+            if len(t) < 2:
+                continue
+            if GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4 or ekho(t, podskazka):
+                self.schet['vydumki'] += 1
+                log('выдумка', t[:60])
+                continue
+            if (nsp > porog and lp < -0.6) or lp < -1.2:
+                self.schet['tishina'] += 1
+                continue
+            ostalos.append(t)
+        return ' '.join(ostalos).strip()
+
+    def whisper(self, f, key, yazyk=None, pod=''):
+        b = uuid.uuid4().hex
+        polya = {'model': MODEL, 'response_format': 'verbose_json', 'temperature': '0'}
+        if pod:
+            polya['prompt'] = pod
+        if yazyk:
+            polya['language'] = yazyk
+        telo = b''.join(('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (b, k, v)).encode()
+                        for k, v in polya.items())
+        telo += ('--%s\r\nContent-Disposition: form-data; name="file"; filename="fraza.wav"\r\n'
+                 'Content-Type: audio/wav\r\n\r\n' % b).encode() + f.wav + ('\r\n--%s--\r\n' % b).encode()
+        req = urllib.request.Request(GROQ + '/audio/transcriptions', data=telo, headers={
+            'Authorization': 'Bearer ' + key, 'User-Agent': 'plus-sinhron',
+            'Content-Type': 'multipart/form-data; boundary=' + b})
+        try:
+            with urllib.request.urlopen(req, timeout=12) as r:
+                self._limity(r.headers, 'whisper')
+                return json.loads(r.read().decode('utf-8')), r.headers
+        except urllib.error.HTTPError as e:
+            self._limity(e.headers, 'whisper')
+            if e.code == 429:
+                pauza = self._pauza(e.headers)
+                self.pauza_do = time.time() + pauza * SEK
+                self.oshibka = 'Groq: лимит (429), жду %.0f с' % pauza
+                log(self.oshibka)
+            raise
+
+    def _limity(self, h, chto):
+        if h is None:
+            return
+        try:
+            v = h.get('x-ratelimit-remaining-requests')
+            if v is not None:
+                if chto == 'whisper':
+                    self.ostalos_den = int(float(v))
+                    if self.ostalos_den < 200 and 'malo' not in self.skazano:
+                        self.skazano.add('malo')
+                        v_uho('Субтитры: у Groq на сегодня осталось меньше двухсот запросов. Игру больше не '
+                              'подписываю, только тебя и гостей.')
+                else:
+                    self.ostalos_perevod = int(float(v))
+        except (TypeError, ValueError):
+            pass
+
+    @staticmethod
+    def _pauza(h):
+        try:
+            return max(1.0, min(120.0, float(h.get('retry-after'))))
+        except (TypeError, ValueError, AttributeError):
+            return 20.0
+
+    # ---------- перевод и показ ----------
+
+    def perevodit(self):
+        while True:
+            with self.lock:
+                while not self.perevod:
+                    self.lock.wait(5 * SEK)
+                pervaya = self.perevod[0][3]
+                zhdat = ZHDAT_PEREVOD * SEK - (time.time() - pervaya)
+                if zhdat > 0 and len(self.perevod) < 4:
+                    self.lock.wait(zhdat)
+                pachka, self.perevod = self.perevod, []
+            try:
+                perevody = self.perevesti(pachka)
+            except Exception as e:
+                self.schet['oshibok'] += 1
+                self.oshibka = 'перевод: %s' % type(e).__name__
+                perevody = [None] * len(pachka)
+            for (golos, tekst, yazyk, _), p in zip(pachka, perevody):
+                self.pokazat(golos, tekst, p, yazyk)
+
+    def perevesti(self, pachka):
+        key = klyuch()
+        if not key or not pachka:
+            return [None] * len(pachka)
+        stroki = ['%d. [to %s] %s' % (i + 1, 'Russian' if y == 'en' else 'English', t)
+                  for i, (_, t, y, _) in enumerate(pachka)]
+        zadanie = ('You translate live-stream subtitles (a VR game stream with guests). Each user line is '
+                   '"N. [to LANGUAGE] text". Translate every line into its target language: short, natural, '
+                   'spoken style; keep names (Plus, Alexander, guest names), game terms and numbers; add '
+                   'nothing. Answer with exactly the same number of lines, each "N. translation".')
+        poryadok = PEREVOD[self.perevod_model:] + PEREVOD[:self.perevod_model]
+        for model in poryadok:
+            model = model.strip()
+            body = {'model': model, 'temperature': 0.2, 'max_completion_tokens': 120 + 90 * len(pachka),
+                    'messages': [{'role': 'system', 'content': zadanie}, {'role': 'user', 'content': '\n'.join(stroki)}]}
+            if 'gpt-oss' in model:
+                body['reasoning_effort'] = 'low'
+            req = urllib.request.Request(GROQ + '/chat/completions', data=json.dumps(body).encode(), headers={
+                'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'User-Agent': 'plus-sinhron'})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    self._limity(r.headers, 'perevod')
+                    if self.ostalos_perevod is not None and self.ostalos_perevod < 150 and model == PEREVOD[0].strip():
+                        self.perevod_model = 1 % len(PEREVOD)            # бережём дневной лимит titr
+                    d = json.loads(r.read().decode('utf-8'))
+                t = (d['choices'][0]['message'].get('content') or '').strip()
+            except urllib.error.HTTPError as e:
+                log('перевод', model, 'HTTP', e.code)
+                continue
+            except Exception as e:
+                log('перевод', model, type(e).__name__)
+                continue
+            out = [None] * len(pachka)
+            for line in t.splitlines():
+                m = re.match(r'\s*(\d+)[.)]\s*(.+)', line)
+                if m and 1 <= int(m.group(1)) <= len(pachka):
+                    p = m.group(2).strip().strip('"«»“”').strip()
+                    if p and len(p) <= 3 * len(pachka[int(m.group(1)) - 1][1]) + 40:     # не сочинение
+                        out[int(m.group(1)) - 1] = p
+            self.schet['perevodov'] += 1
+            return out
+        return [None] * len(pachka)
+
+    def pokazat(self, golos, tekst, perevod, yazyk):
+        q = {'kto': golos, 't': tekst, 'ot': 's'}
+        if perevod and pismo(perevod) not in (None, 'kir' if yazyk == 'en' else 'lat'):
+            perevod = None                    # «перевод» тем же языком — второй ряд не нужен
+        if perevod and perevod != tekst:
+            q['t2'] = perevod
+        try:
+            most('/titr?' + urllib.parse.urlencode(q, quote_via=urllib.parse.quote))
+            self.schet['subtitrov'] += 1
+        except Exception as e:
+            self.oshibka = 'приложение: %s' % type(e).__name__
+        try:
+            with open(ISTORIYA, 'a') as f:
+                f.write('%s %s %s | %s | %s\n' % (time.strftime('%H:%M:%S'), golos, yazyk, tekst, perevod or ''))
+        except OSError:
+            pass
+
+    # ---------- состояние ----------
+
+    def sostoyanie(self):
+        while True:
+            try:
+                d = dict(self.schet, rpm=rpm(), ash=ash(), zvuk=None if self.zvuk is None else round(self.zvuk),
+                         ostalos_den=self.ostalos_den, ostalos_perevod=self.ostalos_perevod,
+                         v_ocheredi=len(self.ochered), pauza=max(0, round(self.pauza_do - time.time())),
+                         most=self.zhiv_most, staroe=self.staroe, oshibka=self.oshibka, model=MODEL,
+                         igra_pauza=max(0, round((self.igra_pauza_do - time.time()) / max(SEK, 0.001))),
+                         perevod=PEREVOD[self.perevod_model].strip(), ms=int(time.time() * 1000))
+                tmp = SOST + '.novyy'
+                with open(tmp, 'w') as f:
+                    json.dump(d, f, ensure_ascii=False)
+                os.replace(tmp, SOST)
+            except Exception:
+                pass
+            time.sleep(3 * SEK)
+
+
+def obnovilsya(mt):
+    try:
+        if os.path.getmtime(__file__) != mt:
+            log('новая версия — перезапускаюсь')
+            os.execv(sys.executable, [sys.executable, '-S', os.path.abspath(__file__)] + sys.argv[1:])
+    except OSError:
+        pass
+
+
+def demon():
+    z = open(LOCK, 'w')
+    try:
+        fcntl.flock(z, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    log('запущен')
+    s = Sinhron()
+    for f in (s.priyom, s.slushat, s.perevodit, s.sostoyanie):
+        threading.Thread(target=f, daemon=True).start()
+    mt = os.path.getmtime(__file__)
+    while True:
+        obnovilsya(mt)
+        time.sleep(10 * SEK)
+
+
+def main(a):
+    if a and a[0] == 'demon':
+        return demon()
+    if a and a[0] == 'rpm':
+        try:
+            n = max(1, min(600, int(a[1])))
+        except (IndexError, ValueError):
+            print('sinhron rpm ЧИСЛО — запросов к Whisper в минуту (бесплатный Groq — до 20).')
+            return 1
+        with open(RPM_F, 'w') as f:
+            f.write(str(n))
+        print('Whisper для субтитров — до %d запросов в минуту.' % n)
+        return 0
+    if a and a[0] in ('platnyy', 'besplatnyy'):
+        p = a[0] == 'platnyy'
+        with open(RPM_F, 'w') as f:
+            f.write('120' if p else '18')
+        with open(ASH_F, 'w') as f:
+            f.write('0' if p else str(int(ASH)))
+        print('Groq платный: Whisper до 120 запросов в минуту, секунды звука не считаю.' if p else
+              'Groq бесплатный: Whisper до 18 запросов в минуту и 7000 секунд звука в час.')
+        return 0
+    if a and a[0] in ('igra', 'ya', 'gosti') and len(a) >= 2:
+        if a[0] == 'gosti' and a[1] in ('u_plitki', 'vnizu'):
+            q = 'gde=' + a[1]
+        elif a[1] in ('vkl', 'vykl'):
+            q = '%s=%s' % (a[0], '1' if a[1] == 'vkl' else '0')
+        else:
+            print('sinhron igra|ya|gosti vkl|vykl; sinhron gosti u_plitki|vnizu.')
+            return 1
+        try:
+            d = json.loads(most('/titry/upr?' + q))
+        except Exception:
+            print('Приложение 2 не отвечает (или старое, без субтитров по голосам): открой бридж и «Начать захват».')
+            return 1
+        print(opisanie(d))
+        return 0
+    if a and a[0] not in ('status', 's'):
+        print(__doc__.split('\n  sinhron  ')[0].strip().split('\n')[0])
+        print('sinhron; sinhron igra|ya|gosti vkl|vykl; sinhron gosti u_plitki|vnizu; sinhron rpm N; '
+              'sinhron platnyy|besplatnyy.')
+        return 1
+    try:
+        d = json.loads(most('/titry/upr'))
+        print(opisanie(d))
+    except Exception:
+        print('Приложение 2 не отвечает (или старое, без субтитров по голосам).')
+    try:
+        s = json.load(open(SOST))
+        zhiv = time.time() * 1000 - s.get('ms', 0) < 15000
+    except (OSError, ValueError):
+        s, zhiv = {}, False
+    if not zhiv:
+        print('Демон sinhron не работает (его запускает plus; вручную: setsid nohup sinhron demon &).')
+        return 0
+    od = s.get('ostalos_den')
+    print('Whisper: %s, до %g запросов в минуту, %s; на сегодня осталось: %s.' % (
+        s.get('model'), s.get('rpm'),
+        ('секунд звука в час — %g; копилка на минуту: %s из %d с (пополняется сама, это не остаток часа)'
+         % (s['ash'], s.get('zvuk'), round(min(60.0, max(MIN_SEK, s['ash'] / 60.0))))) if s.get('ash') else 'секунды звука не считаю',
+        od if od is not None else 'не знаю (ещё не спрашивала)'))
+    print('Игра: не больше трети бюджета; шум без речи пропущено %d%s.' % (
+        s.get('shum', 0), (', пауза ещё %d с' % s['igra_pauza']) if s.get('igra_pauza') else ''))
+    print('Фраз пришло %d, распознано запросами %d, субтитров %d; музыка игры мимо %d, выдумки %d, тишина %d, '
+          'устарели %d, склеено %d; перевод — %s.' % (
+              s.get('fraz', 0), s.get('zaprosov', 0), s.get('subtitrov', 0), s.get('muzyka', 0), s.get('vydumki', 0),
+              s.get('tishina', 0), s.get('starye', 0), s.get('skleeno', 0), s.get('perevod')))
+    if s.get('staroe'):
+        print('Приложение 2 старше 2.5.0 — фраз по голосам не отдаёт: субтитры начнутся с APK 2.5.0.')
+    if s.get('pauza'):
+        print('Пауза по лимиту Groq: ещё %d с.' % s['pauza'])
+    if s.get('oshibka'):
+        print('Последняя ошибка: ' + s['oshibka'])
+    return 0
+
+
+def opisanie(d):
+    vkl = lambda x: 'да' if x else 'нет'
+    return ('Субтитры по голосам: Александр — %s, игра — %s, гости — %s (%s); эфир — %s, демон — %s, в очереди %s.' % (
+        vkl(d.get('ya')), vkl(d.get('igra')), vkl(d.get('gosti')),
+        'у плитки' if d.get('gosti_gde') == 'u_plitki' else 'внизу', vkl(d.get('efir')), vkl(d.get('demon')),
+        d.get('v_ocheredi', 0)))
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

@@ -1,0 +1,11 @@
+#!/bin/bash
+# uskor — хук UserPromptSubmit: Александр сказал или написал новое. Ава не
+# обрывается: остаток прежнего ответа она договаривает на 25 % быстрее
+# (оборвать сразу — tiho или «плюс тихо»). Метка для zamer: Claude получил фразу.
+# Хук фоновый (async в settings.json): ответ Claude его не ждёт.
+# 12.10: встроенными командами bash (без date) — под proot каждый запуск программы дорог.
+t=$EPOCHREALTIME
+echo "$t" > "${GOLOS_USKOR:-/tmp/golos.uskor}"
+us=${t/./}
+printf '%s\tprompt\t-\t\n' "${us%???}" >> "${GOLOS_HOOK_ZAMER:-/tmp/zamer.log}"
+exit 0

@@ -1,0 +1,228 @@
+#!/usr/bin/env -S python3 -S
+"""titr — субтитры эфира (приложение 2.2.8): что сказал Александр Плюсу и что Плюс ответил
+вслух — внизу кадра на двух языках: как сказано и перевод (по-русски — второй ряд английский,
+по-английски — русский; Александр 08.10: «я прямо говорил, что на два языка»).
+  titr ya ТЕКСТ               — фраза Александра (уши шлют сами)
+  titr plus [--sek N] ТЕКСТ   — кусок ответа Плюса вслух (голос-демон шлёт сам; «в ухо» — нет)
+  titr skryt | pokazat        — убрать / вернуть субтитры в эфире
+  titr status
+Переводит Groq (openai/gpt-oss-20b, запасная — gpt-oss-120b), ключ — /root/.groq-key: его не
+читать вслух и не печатать. Только пока идёт эфир: без эфира — молча, без похода в Groq.
+Ошибки — в /tmp/titr.log (без ключа).
+С 12.10 (этап 1 плана эфира) titr — ещё и модуль: голос и уши зовут perevod_mnogo / subtitr у себя
+внутри, без запуска программы на каждую фразу; перевод ответа — одним запросом, соединение с Groq
+живёт, пока жив процесс."""
+import http.client
+import json
+import os
+import re
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+MOST = os.environ.get('TITR_MOST', 'http://localhost:8766')
+GROQ = os.environ.get('TITR_GROQ_URL', 'https://api.groq.com/openai/v1/chat/completions')
+MODELI = os.environ.get('TITR_MODEL', 'openai/gpt-oss-20b,openai/gpt-oss-120b').split(',')
+LOG = os.environ.get('TITR_LOG', '/tmp/titr.log')
+ISTORIYA = os.environ.get('TITR_ISTORIYA', '/tmp/titr-istoriya.log')   # разговор вечера — для соведущего
+KIRILL = re.compile('[А-Яа-яЁёІіЇїЄєҐґ]')
+ZADANIE = ('You write live-stream subtitles. Translate the user text (spoken to or by Plus, a voice '
+           'assistant, during a VR game stream) into short natural {yazyk}. Keep names (Plus, '
+           'Alexander), game terms and numbers. Output only the translation, one line, no quotes, '
+           'no notes.')
+
+
+def log(*a):
+    try:
+        with open(LOG, 'a') as f:
+            print(time.strftime('%H:%M:%S'), *a, file=f)
+    except OSError:
+        pass
+
+
+def get(path, timeout=3):
+    with urllib.request.urlopen(MOST + path, timeout=timeout) as r:
+        return r.read().decode('utf-8', 'replace')
+
+
+def efir_idyot():
+    if os.environ.get('TITR_VSEGDA'):
+        return True
+    try:
+        return json.loads(get('/efir')).get('state') == 'efir'
+    except Exception:
+        return False
+
+
+def groq_key():
+    k = os.environ.get('GROQ_API_KEY')
+    try:
+        k = k or open('/root/.groq-key').read()
+    except OSError:
+        return None
+    return k.strip() or None
+
+
+ZADANIE_MNOGO = ('You write live-stream subtitles. The user sends numbered lines (spoken by Plus, a voice '
+                 'assistant, during a VR game stream). Translate each line separately into short natural '
+                 '{yazyk}. Keep names (Plus, Alexander), game terms and numbers. Output exactly the same '
+                 'number of lines, each starting with its number and a dot, nothing else.')
+
+
+class Svyaz:
+    """Одно соединение с Groq на весь процесс (голос живёт весь эфир): без нового TLS на каждый
+    перевод. Оборвалось — переподключаемся один раз."""
+    lock = threading.Lock()
+    conn = None
+
+    @classmethod
+    def post(cls, url, body, headers, timeout=8):
+        u = urllib.parse.urlsplit(url)
+        put = u.path + ('?' + u.query if u.query else '')
+        with cls.lock:
+            for popytka in (1, 2):
+                try:
+                    if cls.conn is None:
+                        Conn = http.client.HTTPSConnection if u.scheme == 'https' else http.client.HTTPConnection
+                        cls.conn = Conn(u.netloc, timeout=timeout)
+                    cls.conn.request('POST', put, body=body, headers=headers)
+                    r = cls.conn.getresponse()
+                    dannye = r.read()
+                    if r.status >= 400:
+                        raise urllib.error.HTTPError(url, r.status, r.reason, r.headers, None)
+                    return dannye
+                except urllib.error.HTTPError:
+                    raise
+                except Exception:
+                    try:
+                        cls.conn.close()
+                    except Exception:
+                        pass
+                    cls.conn = None
+                    if popytka == 2:
+                        raise
+
+
+def sprosit(zadanie, tekst, max_tokens=300):
+    """Groq: ответ модели (по очереди моделей) или None."""
+    key = groq_key()
+    if not key:
+        log('нет ключа Groq — субтитров нет')
+        return None
+    for model in MODELI:
+        body = json.dumps({'model': model.strip(), 'temperature': 0.2, 'max_completion_tokens': max_tokens,
+                           'reasoning_effort': 'low',
+                           'messages': [{'role': 'system', 'content': zadanie},
+                                        {'role': 'user', 'content': tekst}]}).encode()
+        try:
+            d = json.loads(Svyaz.post(GROQ, body, {'Authorization': 'Bearer ' + key,
+                                                  'Content-Type': 'application/json', 'User-Agent': 'plus-titr'}))
+            t = (d['choices'][0]['message'].get('content') or '').strip()
+            if t:
+                return t
+            log(model, 'пустой перевод')
+        except urllib.error.HTTPError as e:
+            log(model, 'HTTP', e.code)
+        except Exception as e:
+            log(model, type(e).__name__, str(e)[:80])
+    return None
+
+
+def yazyk_dlya(tekst):
+    return 'English' if KIRILL.search(tekst) else 'Russian'
+
+
+def perevod(tekst):
+    """Кириллица — в английский, иначе — в русский. Не вышло — None (субтитр одним рядом)."""
+    t = sprosit(ZADANIE.format(yazyk=yazyk_dlya(tekst)), tekst)
+    return t.splitlines()[0].strip().strip('"«»“”').strip() or None if t else None
+
+
+def perevod_mnogo(frazy):
+    """Фразы ответа — одним запросом (12.10): список переводов той же длины; чего не вышло — None.
+    Ответ не разобрался по номерам — переводим по одной (в том же соединении)."""
+    frazy = [f for f in frazy]
+    if not frazy:
+        return []
+    if len(frazy) == 1:
+        return [perevod(frazy[0])]
+    t = sprosit(ZADANIE_MNOGO.format(yazyk=yazyk_dlya(' '.join(frazy))),
+                '\n'.join('%d. %s' % (i + 1, f) for i, f in enumerate(frazy)), max_tokens=120 + 80 * len(frazy))
+    if t is not None:
+        out = [None] * len(frazy)
+        for line in t.splitlines():
+            m = re.match(r'\s*(\d+)[.)]\s*(.+)', line)
+            if m and 1 <= int(m.group(1)) <= len(frazy):
+                out[int(m.group(1)) - 1] = m.group(2).strip().strip('"«»“”').strip() or None
+        if all(out):
+            return out
+        log('перевод по номерам не разобрался — по одной')
+    return [perevod(f) for f in frazy]
+
+
+def pokazat(kto, tekst, perevod_=None, sek=None):
+    q = {'kto': kto, 't': tekst}
+    if perevod_:
+        q['t2'] = perevod_
+    if sek:
+        q['sek'] = '%.1f' % sek
+    get('/titr?' + urllib.parse.urlencode(q, quote_via=urllib.parse.quote))
+
+
+def subtitr(kto, tekst, perevod_=None, sek=None):
+    """Показать субтитр и записать в историю вечера (для соведущего)."""
+    try:
+        pokazat(kto, tekst, perevod_, sek)
+    except Exception as e:
+        log('приложение:', type(e).__name__, str(e)[:80])
+    try:
+        with open(ISTORIYA, 'a') as f:
+            f.write('%s %s | %s | %s\n' % (time.strftime('%H:%M:%S'), 'Плюс' if kto == 'plus' else 'Александр',
+                                          tekst, perevod_ or ''))
+    except OSError:
+        pass
+
+
+def main(a):
+    if not a or a[0] in ('status', 's'):
+        try:
+            d = json.loads(get('/titr'))
+        except Exception:
+            print('Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват».')
+            return 1
+        print('Субтитры: ' + ('в эфире' if d.get('vidny') else 'скрыты') + ', сейчас строк: %s.' % d.get('strok'))
+        return 0
+    if a[0] in ('skryt', 'pokazat'):
+        try:
+            d = json.loads(get('/titr?vidny=' + ('0' if a[0] == 'skryt' else '1')))
+        except Exception:
+            print('Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват».')
+            return 1
+        print('Субтитры: ' + ('в эфире.' if d.get('vidny') else 'скрыты.'))
+        return 0
+    kto = a[0]
+    if kto not in ('ya', 'plus'):
+        print('titr ya|plus [--sek N] ТЕКСТ; titr skryt|pokazat; titr status.')
+        return 1
+    a = a[1:]
+    sek = None
+    if len(a) >= 2 and a[0] == '--sek':
+        try:
+            sek = float(a[1])
+        except ValueError:
+            pass
+        a = a[2:]
+    if a and a[0] == '--':
+        a = a[1:]
+    tekst = ' '.join(' '.join(a).split())
+    if not tekst or not efir_idyot():
+        return 0
+    subtitr(kto, tekst, perevod(tekst), sek)  # нет перевода — субтитр одним рядом, как сказано
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

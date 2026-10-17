@@ -1,0 +1,20 @@
+#!/bin/sh
+# golos-hook — хук Stop Claude Code: ответ Плюса звучит голосом Авы.
+# Кладёт ответ (JSON хука) в очередь голоса-демона golos и сразу выходит:
+# golos сам уберёт код, ссылки и разметку и скажет по предложениям.
+# Молчать: touch /root/.golos-off. В «рации» хук молчит — там говорит поток.
+[ -n "$GOLOS_RACIYA" ] && exit 0
+[ -e /root/.golos-off ] && exit 0
+Q=/tmp/golos/q
+mkdir -p $Q
+n=$(date +%s%N)
+# golos-hook pre — хук PreToolUse: вступление перед инструментом («Сейчас
+# посмотрю») звучит сразу, пока инструмент работает; golos найдёт его в журнале.
+v=hook
+[ "$1" = pre ] && v=pre
+cat > "$Q/$n.$v.tmp" && mv "$Q/$n.$v.tmp" "$Q/$n.$v"
+[ $v = hook ] && printf '%s\thook\t%s\t\n' "${n%??????}" "$n" >> /tmp/zamer.log
+if flock -n /tmp/golos-demon.lock true; then
+  setsid nohup ${GOLOS_BIN:-/usr/local/bin/golos} >> /tmp/golos.log 2>&1 < /dev/null &
+fi
+exit 0

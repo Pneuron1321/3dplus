@@ -1,0 +1,106 @@
+#!/bin/bash
+# plus — запустить Плюса: уши (ushi) в фоне и Claude в tmux-сессии «plus».
+# Уши вписывают услышанное в эту сессию. Выйти из Claude — /exit, как обычно.
+# Уши обновили (ushi или sluh новее запущенных) — перезапускает их сам.
+# -u и UTF-8: без них tmux меняет кириллицу на «_».
+# plus --continue --s N — подъём после убийства (приложение 2 по «плюс плюс», когда
+# Плюс пропал): тот же разговор, уши берут фразы с события N, когда Claude готов.
+# /exit больше не гасит всё (2.2.9): этот скрипт и есть вход в Ubuntu — пока он жив, уши,
+# голос, автопросмотр, соведущий, донаты и зрители живут, окно Termux не закрывается.
+# Claude вышел — через 10 с поднимется снова: Enter — сразу, c — продолжить прошлый
+# разговор, q — закрыть всё, как раньше.
+export LANG=C.UTF-8
+# 12.10: эфир спотыкался, когда Александр говорил с Плюсом. Плюс и всё, что запускается отсюда
+# (Claude, уши, голос, помощники, чёрный ящик), уступают процессор игре и бриджу: приоритет ниже
+# обычного (nice 10; своё число — в /root/.plus-nice, 0 — как было). Ответ — на доли секунды позже.
+NICE=$(cat /root/.plus-nice 2> /dev/null)
+case "$NICE" in ''|*[!0-9]*) NICE=10 ;; esac
+python3 - "$$" "$NICE" << 'PY' 2> /dev/null
+import os, sys
+moy, n = int(sys.argv[1]), min(19, int(sys.argv[2]))
+os.setpriority(os.PRIO_PROCESS, moy, n)
+# уже запущенные (до обновления) Claude, tmux и помощники — тоже, каждым потоком
+SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'raciya', b'nagruzka', b'plus-mcp',
+        b'sinhron', b'gosti', b'cloudflared'}
+for d in os.listdir('/proc'):
+    if not d.isdigit():
+        continue
+    try:
+        a = open('/proc/%s/cmdline' % d, 'rb').read().split(b'\0')[:3]
+        if not SVOI & {os.path.basename(x) for x in a}:
+            continue
+        for t in os.listdir('/proc/%s/task' % d):
+            try:
+                if os.getpriority(os.PRIO_PROCESS, int(t)) < n:
+                    os.setpriority(os.PRIO_PROCESS, int(t), n)
+            except OSError:
+                pass
+    except OSError:
+        pass
+PY
+CONT=; S=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --continue) CONT=--continue ;;
+    --s) S=$2; shift ;;
+  esac
+  shift
+done
+# 16.10: bash держит цикл этого файла в памяти — после obnovi новые помощники (sinhron) не
+# стартовали до полного перезапуска. Теперь после /exit обновлённый plus поднимается сам собой.
+ME=$(readlink -f "$0")
+MT=$(stat -c %Y "$ME" 2> /dev/null)
+while :; do
+  P=$(cat /tmp/ushi.pid 2> /dev/null)
+  if [ -n "$P" ] && kill -0 "$P" 2> /dev/null; then
+    for f in /usr/local/bin/ushi /usr/local/bin/sluh; do
+      if [ "$f" -nt /tmp/ushi.pid ]; then
+        kill "$P"; sleep 1; P=; break
+      fi
+    done
+  fi
+  if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
+    # журнал дописываем (видно, что было до убийства), но не больше ~1 МБ
+    [ "$(stat -c %s /tmp/ushi.log 2> /dev/null || echo 0)" -gt 1000000 ] && \
+      tail -c 300000 /tmp/ushi.log > /tmp/ushi.log.1 && mv /tmp/ushi.log.1 /tmp/ushi.log
+    USHI_S=$S setsid nohup /usr/local/bin/ushi >> /tmp/ushi.log 2>&1 < /dev/null &
+  fi
+  # Автопросмотр игры (obzor, по умолчанию раз в 8 мин), соведущий (vedushchiy, раз в 15 мин),
+  # донаты (donaty) и зрители (zriteli): у каждого замок — второй не запустится; выключенные
+  # выходят сами; обновлённый (obnovi) сам перезапускается новой версией.
+  case "$(cat /root/.obzor-min 2> /dev/null)" in
+    0|*[!0-9]*) ;;
+    *) setsid nohup /usr/local/bin/obzor demon >> /tmp/obzor-demon.log 2>&1 < /dev/null & ;;
+  esac
+  setsid nohup /usr/local/bin/vedushchiy demon >> /tmp/vedushchiy.log 2>&1 < /dev/null &
+  setsid nohup /usr/local/bin/donaty demon >> /tmp/donaty.log 2>&1 < /dev/null &
+  setsid nohup /usr/local/bin/zriteli demon >> /tmp/zriteli.log 2>&1 < /dev/null &
+  # Синхронист (2.5.0): субтитры по каждому голосу — Александр, игра, гости (Whisper и перевод в Groq);
+  # пока нет эфира или фраз, только ждёт приложение. Гости и туннель — по команде: gosti start.
+  [ -x /usr/local/bin/sinhron ] && setsid nohup /usr/local/bin/sinhron demon >> /tmp/sinhron-demon.log 2>&1 < /dev/null &
+  # чёрный ящик: раз в 2 с — эфир (кадры, потери, звук) и процессор помощников (nagruzka sboi)
+  setsid nohup /usr/local/bin/nagruzka demon >> /tmp/nagruzka-demon.log 2>&1 < /dev/null &
+  # Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
+  # «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
+  D=/root/plus
+  mkdir -p "$D"
+  # Модель из settings.json на низком усилии — быстрый голос; трудное Плюс отдаёт
+  # помощнику dumat (высокое усилие, /root/.claude/agents/dumat.md).
+  # Мышь в tmux: джойстик шлема листает вывод, а не историю отправленного
+  # (без неё Termux превращает прокрутку в стрелки).
+  tmux -u new-session -A -s plus -c "$D" claude $CONT --effort low \; set -g mouse on
+  CONT=; S=
+  printf '\nПлюс вышел. Уши, голос и помощники работают.\n'
+  printf 'Через 10 с Плюс поднимется снова. Enter — сразу, c — продолжить прошлый разговор, q — закрыть всё.\n'
+  touch /tmp/plus-pauza                     # уши: Плюс не пропал, а сейчас поднимется сам
+  a=; read -r -t 10 a
+  rm -f /tmp/plus-pauza
+  case "$a" in
+    q|Q|й|Й) exit 0 ;;
+    c|C|с|С) CONT=--continue ;;
+  esac
+  if [ -n "$MT" ] && [ "$(stat -c %Y "$ME" 2> /dev/null)" != "$MT" ] && bash -n "$ME" 2> /dev/null; then
+    printf 'plus обновлён — поднимаюсь новой версией.\n'
+    exec "$ME" $CONT
+  fi
+done
