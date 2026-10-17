@@ -49,7 +49,8 @@ public class Canvas {
     public void scale(float sx, float sy) { c.scale(sx, sy); }
     public void rotate(float deg) { c.rotate(deg); }
     public void rotate(float deg, float px, float py) { c.translate(px, py); c.rotate(deg); c.translate(-px, -py); }
-    public void clipRect(float l, float t, float r, float b) { c.clipRect(org.jetbrains.skia.Rect.Companion.makeLTRB(l, t, r, b)); }
+    public boolean clipRect(float l, float t, float r, float b) { c.clipRect(org.jetbrains.skia.Rect.Companion.makeLTRB(l, t, r, b)); return true; }
+    public boolean clipRect(RectF r) { return clipRect(r.left, r.top, r.right, r.bottom); }
     /** Только для стенда: холст Skia. */
     public org.jetbrains.skia.Canvas sk() { return c; }
 }

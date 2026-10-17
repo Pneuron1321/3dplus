@@ -61,5 +61,23 @@ class Vstavka(private val maksSek: Int = 120) {
                 (mono[i] + (mono[i2] - mono[i]) * f).toInt().coerceIn(-32768, 32767).toShort()
             }
         }
+
+        /** То же в стерео (L,R,L,R…) — музыка (Fon, 2.5.6): моно — в оба канала, больше двух — первые два. */
+        fun v48stereo(pcm: ShortArray, rate: Int, kanalov: Int): ShortArray {
+            val ch = kanalov.coerceAtLeast(1)
+            val n = pcm.size / ch
+            if (n == 0 || rate <= 0) return ShortArray(0)
+            fun s(i: Int, k: Int): Float = pcm[i * ch + if (ch == 1) 0 else k].toFloat()
+            val m = if (rate == RATE) n else (n.toLong() * RATE / rate).toInt()
+            val out = ShortArray(2 * m)
+            for (j in 0 until m) {
+                val t = if (rate == RATE) j.toDouble() else j.toDouble() * rate / RATE
+                val i = t.toInt().coerceAtMost(n - 1)
+                val i2 = (i + 1).coerceAtMost(n - 1)
+                val f = (t - i).toFloat()
+                for (k in 0..1) out[2 * j + k] = (s(i, k) + (s(i2, k) - s(i, k)) * f).toInt().coerceIn(-32768, 32767).toShort()
+            }
+            return out
+        }
     }
 }

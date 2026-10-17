@@ -44,7 +44,7 @@ class Gost(val imya: String, val rol: String, val kamera: Boolean, val govorit: 
            val mikrofon: Boolean = true, val fon: Pair<Int, Int> = 0xFF2D4B5E.toInt() to 0xFF16222C.toInt())
 
 class Varyant(val imya: String, val mest: Int, val gosti: List<Gost>, val niz: List<Triple<String, String, String>>,
-              val puzyri: Map<String, Pair<String, String>>, val vnizu: Boolean = false)
+              val puzyri: Map<String, Pair<String, String>>, val vnizu: Boolean = false, val muzyka: Boolean = false)
 
 fun main(args: Array<String>) {
     val out = File(args.getOrElse(0) { "maket-out" }).apply { mkdirs() }
@@ -56,7 +56,7 @@ fun main(args: Array<String>) {
             listOf(Triple("ya", "Макс, прикрой слева, я захожу на крышу", "Max, cover the left, I'm going up to the roof"),
                 Triple("igra", "Enemy UAV spotted!", "Замечен вражеский дрон!")),
             mapOf("Max" to ("Вижу двоих на крыше, справа от тебя" to "I see two on the roof, to your right"),
-                "Lena" to ("Nice shot! That was insane" to "Отличный выстрел! Это было безумие"))),
+                "Lena" to ("Nice shot! That was insane" to "Отличный выстрел! Это было безумие")), muzyka = true),
         Varyant("gosti-maket-3", 3,
             listOf(Gost("Max", "moder", kamera = true, fon = siniy), Gost("Lena", "gost", kamera = false, govorit = true),
                 Gost("Dima", "gost", kamera = true, mikrofon = false, fon = lilovyy)),
@@ -135,7 +135,9 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
     // чат: между плашкой Плюса и окном камеры (как plashkaNa "pc")
     val zazor = 8
     val chatVerhGl = H - m - Nalozhenie.H - zazor
-    val chatNizGl = kameraVerhGl + zazor
+    // музыка (2.5.6, "mz"): справа над окном камеры, чат — над ней
+    val mzNizGl = kameraVerhGl + zazor
+    val chatNizGl = kameraVerhGl + zazor + (if (v.muzyka) Nalozhenie.MZH + zazor else 0)
     rz.chatMesto = (chatVerhGl - chatNizGl).coerceIn(0, Nalozhenie.CH)
 
     // ---------- плашки: настоящий код ----------
@@ -151,6 +153,12 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
     val estPuzyri = plitki != null && zvat(n, "puzyri", vse.filter { Titry.gost(it.kto) && it.kto in plitki }) == true
     zvat(n, "levyVerh")
     zvat(n, "chatRisovat", chat.vidimye(now), now, false)
+    if (v.muzyka) {
+        val fon = Fon(dir, File(dir, "fon-nastroyki"))
+        pole(fon, "plashkaTekst", "Bossa Antigua — Kevin MacLeod (CC BY 4.0)")
+        floatArrayOf(0.85f, 0.95f, 0.8f, 0.65f, 0.72f, 0.55f, 0.48f, 0.36f, 0.22f, 0.12f).copyInto(fon.miks.spektr)
+        zvat(n, "muzykaRisovat", fon, now)
+    }
 
     // ---------- кадр ----------
     val kadr = ABitmap.createBitmap(W, H, ABitmap.Config.ARGB_8888)
@@ -189,6 +197,7 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
         kc.drawBitmap(bmp("chatBmp"), (W - Nalozhenie.CW - m).toFloat(), (H - chatNizGl - Nalozhenie.CH).toFloat(), null)
         kc.restore()
     }
+    if (v.muzyka) kc.drawBitmap(bmp("mzBmp"), (W - Nalozhenie.MZW - m).toFloat(), (H - mzNizGl - Nalozhenie.MZH).toFloat(), null)  // mz
     if (ek.isNotEmpty()) kc.drawBitmap(bmp("lgBmp"), 0f, Raskladka.SLOY_Y, null)                         // lg
     if (estPuzyri) kc.drawBitmap(bmp("lbBmp"), 0f, Raskladka.SLOY_Y, null)                              // lb
     return kadr

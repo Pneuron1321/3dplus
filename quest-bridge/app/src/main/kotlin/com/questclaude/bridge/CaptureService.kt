@@ -170,6 +170,7 @@ class CaptureService : Service() {
 
         try {
             if (Hub.say == null) Hub.say = Golos(cacheDir)
+            if (Hub.fon == null) Hub.fon = Fon(cacheDir, java.io.File(filesDir, "fon-nastroyki"))
             Hub.acquire("capture")
             serving = true
         } catch (e: Exception) {

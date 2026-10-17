@@ -5,11 +5,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -61,6 +63,10 @@ import kotlin.math.sin
  * слой "lg": рамка, свечение цветом гостя, пока он говорит, имя на плашке, значок выключенного микрофона; без
  * камеры — полупрозрачная строка с именем и огоньком голоса (круг с буквой — только пока кадры не дошли). Справа от плитки — слой "lb": пузырь с его субтитрами (как сказано
  * и перевод). Внизу — Александр (голубой), Плюс (золотой), игра (зелёный), а гости — если «все внизу».
+ *
+ * Музыка (2.5.6, задания Плюса п. 2): пока играет фоновая музыка и Плюс просил полоску — справа над окном
+ * камеры слой "mz", как свёрнутый Winamp: «▶», трек и автор зелёными буквами (бегут, если не влезают),
+ * эквалайзер от самой музыки; 10 раз в секунду (тесно игре — 5).
  */
 class Nalozhenie(
     ctx: Context,
@@ -94,6 +100,15 @@ class Nalozhenie(
     private val chatBmp = Bitmap.createBitmap(CW, CH, Bitmap.Config.ARGB_8888)    // справа: чат Twitch
     private val chc = Canvas(chatBmp)
     private val chp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; textSize = CSZ }
+    private val mzBmp = Bitmap.createBitmap(MZW, MZH, Bitmap.Config.ARGB_8888)    // справа над камерой: «сейчас играет»
+    private val mzc = Canvas(mzBmp)
+    private val mzp = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val mzt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD); textSize = 17f; color = Color.rgb(0, 232, 0)
+    }
+    private val mzRadu = LinearGradient(0f, 6f, 0f, MZH - 6f, intArrayOf(Color.rgb(230, 40, 20), Color.rgb(240, 220, 30),
+        Color.rgb(30, 210, 40)), floatArrayOf(0f, 0.4f, 1f), Shader.TileMode.CLAMP)
+    private val mzTr = Path()
     private val lgBmp = Bitmap.createBitmap(Raskladka.SLOY_LG, Raskladka.SLOY_H, Bitmap.Config.ARGB_8888)   // рамки и имена гостей
     private val lgc = Canvas(lgBmp)
     private val lbBmp = Bitmap.createBitmap(Raskladka.SLOY_LB, Raskladka.SLOY_H, Bitmap.Config.ARGB_8888)   // пузыри субтитров гостей
@@ -173,6 +188,8 @@ class Nalozhenie(
             var gostiBylo = ""
             var gostiMs = 0L
             var puzyriBylo = ""
+            var muzBylo = ""
+            var muzMs = 0L
             while (rabotaet) {
                 val now = System.currentTimeMillis()
                 val sost = sostoyanie(now)
@@ -246,6 +263,13 @@ class Nalozhenie(
                         gostiBylo = gKlyuch; gostiMs = now
                     }
                 }
+                shag("музыка") {                                      // «сейчас играет» — пока музыка звучит
+                    val f = Hub.fon
+                    if (f == null || !f.plashkaVidna(now)) { if (muzBylo != "net") razvilka.sloy("mz", null); muzBylo = "net" }
+                    else if (muzBylo == "net" || now - muzMs >= (if (tesnoIgre) 200L else 100L)) {
+                        muzykaRisovat(f, now); razvilka.sloy("mz", mzBmp); muzBylo = "da"; muzMs = now
+                    }
+                }
                 shag("табло") {
                     val lv = igra.vidna || top.vidna                   // слева вверху: топ-донатор, под ним табло
                     val gKlyuch = if (lv) "${top.status()} ${igra.status()}" else "net"
@@ -281,7 +305,7 @@ class Nalozhenie(
                         itogiBylo = iKlyuch
                     }
                 }
-                Thread.sleep(if (anim || p.radar) 70 else 200)                // шаг 70 мс; что перерисовать — решают плашки
+                Thread.sleep(if (anim || p.radar || Hub.fon?.plashkaVidna(now) == true) 70 else 200)                // шаг 70 мс; что перерисовать — решают плашки
             }
         }
     }
@@ -304,7 +328,7 @@ class Nalozhenie(
         rabotaet = false
         potok?.join(1000)
         kompas.stop()
-        try { for (u in listOf("pv", "ln", "lv", "nc", "pc", "vse", "lg", "lb")) razvilka.sloy(u, null) } catch (e: Exception) { }
+        try { for (u in listOf("pv", "ln", "lv", "nc", "pc", "vse", "lg", "lb", "mz")) razvilka.sloy(u, null) } catch (e: Exception) { }
         itogiBmp?.recycle(); itogiBmp = null
         itogi.konecEfira()
         nalet.zapisat()
@@ -492,6 +516,48 @@ class Nalozhenie(
             tochki.alpha = if ((now / 300) % 3 == i.toLong()) 255 else 110
             c.drawCircle(cx + (i - 1) * 22f * m, top + 26 * k, 6f * m, tochki)
         }
+    }
+
+    /**
+     * «Сейчас играет» (2.5.6): корпус с фаской, как у свёрнутого Winamp; «▶»; трек и автор — зелёным в
+     * чёрном окне, длинное бежит (40 точек в секунду); справа — эквалайзер FonMiks (красный сверху).
+     */
+    private fun muzykaRisovat(f: Fon, now: Long) {
+        val c = mzc
+        val w = MZW.toFloat()
+        val h = MZH.toFloat()
+        c.drawColor(0, PorterDuff.Mode.CLEAR)
+        mzp.shader = null
+        mzp.color = Color.rgb(44, 46, 66); c.drawRect(0f, 0f, w, h, mzp)
+        mzp.color = Color.rgb(112, 116, 146); c.drawRect(0f, 0f, w, 2f, mzp); c.drawRect(0f, 0f, 2f, h, mzp)        // свет
+        mzp.color = Color.rgb(16, 16, 26); c.drawRect(0f, h - 2f, w, h, mzp); c.drawRect(w - 2f, 0f, w, h, mzp)    // тень
+        mzTr.reset(); mzTr.moveTo(10f, 10f); mzTr.lineTo(22f, h / 2); mzTr.lineTo(10f, h - 10f); mzTr.close()
+        mzp.color = Color.rgb(0, 232, 0); c.drawPath(mzTr, mzp)
+        val lcd = RectF(30f, 5f, w - 96f, h - 5f)
+        mzp.color = Color.BLACK; c.drawRect(lcd, mzp)
+        val t = f.plashkaTekst
+        val tw = mzt.measureText(t)
+        val baza = lcd.centerY() + 6f
+        c.save()
+        c.clipRect(lcd)
+        if (tw <= lcd.width() - 12f) c.drawText(t, lcd.left + 6f, baza, mzt)
+        else {
+            val krug = tw + 60f
+            val x = lcd.left + 6f - ((now - nachalo) / 1000f * 40f) % krug
+            c.drawText(t, x, baza, mzt); c.drawText(t, x + krug, baza, mzt)
+        }
+        c.restore()
+        val x0 = w - 90f
+        mzp.color = Color.BLACK; c.drawRect(x0 - 2f, 4f, w - 6f, h - 4f, mzp)
+        mzp.shader = mzRadu
+        val sp = f.miks.spektr
+        for (i in 0 until FonMiks.POLOS) {
+            val v = sp[i].coerceIn(0f, 1f)
+            if (v <= 0.02f) continue
+            val x = x0 + i * 8f
+            c.drawRect(x, (h - 6f) - (h - 12f) * v, x + 6f, h - 6f, mzp)
+        }
+        mzp.shader = null
     }
 
     private fun razmer(sz: Float, s: String): Float { tekst.textSize = sz; return tekst.measureText(s) }
@@ -972,6 +1038,8 @@ class Nalozhenie(
         const val LVH = 118                                             // TOPH + ZAZOR + IH
         /** Чат Twitch (справа, под Плюсом, над камерой): картинка CW×CH, кегль CSZ, строка CLH. */
         const val CW = 420
+        const val MZW = 420                   // «сейчас играет» — шириной с чат
+        const val MZH = 34
         const val CH = 400
         const val CSZ = 19f
         const val CLH = 25f

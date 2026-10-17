@@ -49,6 +49,10 @@ object Hub {
     @Volatile var plashki: FrameServer.PlashkiUpr? = null
     /** Голос Авы через приложение (POST /say); ставит первая служба — нужна папка кэша. */
     @Volatile var say: FrameServer.Say? = null
+    /** Фоновая музыка (2.5.6, /fon…): ставит первая служба, как голос. */
+    @Volatile var fon: Fon? = null
+    /** Музыка в звук эфира: ставит Efir, пока эфир идёт (Fon кладёт, эфир берёт). */
+    @Volatile var fonLenta: Lenta? = null
 
     private var server: FrameServer? = null
     private val users = mutableSetOf<String>()
@@ -63,7 +67,7 @@ object Hub {
                 override fun rot(sek: Double) { say?.rot(sek) }
                 override val govorit get() = say?.govorit ?: false
             }, { t, n -> plenkaRisunok(t, n) }, { lastWakeMs }, { efir }, { n -> Pamyat.hvost(n) }, { kamera }, { nalet },
-                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg }, { gosti }, rechi)
+                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg }, { gosti }, rechi, { fon })
             s.start()
             server = s
         }

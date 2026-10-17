@@ -36,6 +36,9 @@ import kotlin.concurrent.thread
  *                              {"end":"done|stopped|error"}; uho — not captured by the stream; oba (2.3.9) — into
  *                              the headset like uho and straight into our stream's sound
  *   GET /say/stop, /say/status -> stop the voice; {"playing":…,"rezhimy":[…]}
+ *   POST /fon?mode=oba|efir|uho (MP3) -> фоновая музыка кусками, рядом с голосом (2.5.6); ждёт места в очереди
+ *   GET /fon/status, /fon/stop, /fon/gromkost?v=|shlem=|efir= (0–150), /fon/duck?v=0.33,
+ *       /fon/plashka?pokaz=1|0&tekst=…&avtor=… -> музыка: состояние, стоп, громкость, приглушение, полоска в кадре
  *   POST /chat/pachka        -> chat for the stream overlay in one batch (2.3.9): each body line is a /chat/upr query
  *   GET /efir                -> эфир: {"state":"off|podklyuchayus|efir|obryv", kbps, sec, zvuk, oshibka…}
  *   GET /efir/start[?size=720|1080&fps=&kbps=] -> начать эфир на Twitch (ключ — с /efir/key)
@@ -88,6 +91,8 @@ class FrameServer(
     private val gosti: () -> GostiUpr? = { null },
     /** Речь для субтитров по каждому голосу (2.5.0). */
     private val rechi: Rechi? = null,
+    /** Фоновая музыка (2.5.6). */
+    private val fon: () -> FonUpr? = { null },
 ) {
     class Frame(val jpeg: ByteArray, val width: Int, val height: Int, val timeMs: Long, val count: Long)
 
@@ -152,6 +157,23 @@ class FrameServer(
         }
     }
 
+    /**
+     * Фоновая музыка (2.5.6, Fon; в тестах — подделка): второй канал рядом с голосом, приглушается под
+     * голосом. Ответы — JSON.
+     */
+    interface FonUpr {
+        /** Кусок MP3 в очередь (mode: oba | efir | uho); ждёт, пока впереди станет меньше запаса. */
+        fun kusok(mp3: ByteArray, mode: String): String
+        fun stop(): String
+        fun status(): String
+        /** v (оба), shlem, efir — проценты 0–150. */
+        fun gromkost(q: Map<String, String>): String
+        /** v — до какой доли стихает под голосом (0–1). */
+        fun duck(q: Map<String, String>): String
+        /** pokaz=1|0, tekst, avtor — полоска «сейчас играет» в кадре эфира. */
+        fun plashka(q: Map<String, String>): String
+    }
+
     /** Гости эфира (Gosti; в тестах — подделка). Ответы — JSON; ключи и адрес туннеля сюда не попадают. */
     interface GostiUpr {
         fun status(): String
@@ -168,7 +190,7 @@ class FrameServer(
         /** Громкость голоса по умолчанию (Efir.Opts.MIC; здесь — без Android). */
         const val MIC_EFIR = 3f
         /** Что умеет это приложение сверх 2.3.8 — /status «umeet» (скрипты проверяют перед новым). */
-        const val UMEET = "[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\"]"
+        const val UMEET = "[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\",\"fon\"]"
         /** Как умеет звучать голос — /say/status «rezhimy» (голос-демон: «oba» — «вслух» через приложение). */
         const val REZHIMY = "[\"uho\",\"vsluh\",\"efir\",\"oba\"]"
 
@@ -445,6 +467,37 @@ class FrameServer(
                     val end = g.play(mp3, when (query["mode"]) { "uho" -> "uho"; "efir" -> "efir"; "oba" -> "oba"; else -> "vsluh" })
                     reply(out, 200, "application/json", "{\"end\":\"$end\"}".toByteArray())
                 }
+            }
+            "/fon" -> {
+                val f = fon()
+                if (f == null) reply(out, 404, "application/json", "{\"ok\":false,\"oshibka\":\"нет музыки\"}".toByteArray(Charsets.UTF_8))
+                else if (length <= 0) reply(out, 200, "application/json; charset=utf-8", f.status().toByteArray(Charsets.UTF_8))
+                else if (length > 8_000_000) reply(out, 413, "application/json", "{\"ok\":false}".toByteArray())
+                else {
+                    val chars = CharArray(length)
+                    var got = 0
+                    c.soTimeout = 15000
+                    while (got < length) {
+                        val k = reader.read(chars, got, length - got)
+                        if (k < 0) break
+                        got += k
+                    }
+                    val mp3 = ByteArray(got) { chars[it].code.toByte() }   // ISO-8859-1: символ = байт
+                    c.soTimeout = 0                                         // кусок ждёт места в очереди
+                    val mode = when (query["mode"]) { "uho" -> "uho"; "efir" -> "efir"; else -> "oba" }
+                    reply(out, 200, "application/json; charset=utf-8", f.kusok(mp3, mode).toByteArray(Charsets.UTF_8))
+                }
+            }
+            "/fon/status", "/fon/stop", "/fon/gromkost", "/fon/duck", "/fon/plashka" -> {
+                val f = fon()
+                if (f == null) reply(out, 404, "application/json", "{\"ok\":false,\"oshibka\":\"нет музыки\"}".toByteArray(Charsets.UTF_8))
+                else reply(out, 200, "application/json; charset=utf-8", when (path) {
+                    "/fon/stop" -> f.stop()
+                    "/fon/gromkost" -> f.gromkost(query)
+                    "/fon/duck" -> f.duck(query)
+                    "/fon/plashka" -> f.plashka(query)
+                    else -> f.status()
+                }.toByteArray(Charsets.UTF_8))
             }
             "/say/stop" -> {
                 say?.stop()

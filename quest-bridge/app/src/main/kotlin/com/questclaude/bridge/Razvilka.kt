@@ -446,7 +446,8 @@ class Razvilka(private val w: Int, private val h: Int) {
     /**
      * Плашка в своём углу — в самом углу, отступ 1 % высоты (Александр 08.10: налёт «в самом верху
      * правого угла», компас «в самом углу левом»); "nc" — внизу по центру (субтитры, 5 % от низа);
-     * "pc" — чат справа между плашкой Плюса и окном камеры; "vse" — во весь кадр (итоги вечера).
+     * "pc" — чат справа между плашкой Плюса и окном камеры; "vse" — во весь кадр (итоги вечера);
+     * "mz" — «сейчас играет» (2.5.6): справа над окном камеры, чат — над ней.
      * Начало координат GL — внизу слева.
      */
     private fun plashkaNa(o: Out, ugol: String, sl: Sloy) {
@@ -461,12 +462,17 @@ class Razvilka(private val w: Int, private val h: Int) {
             "nc" -> { x = nizCentr(o, w) - w / 2; y = o.h * 5 / 100 }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }   // слои гостей: от точки (0; SLOY_Y) 1080p
             "vse" -> { x = 0; y = 0; w = o.w; h = o.h }
-            "pc" -> {                         // чат: справа, между плашкой Плюса и окном камеры
+            "mz" -> {                         // музыка: справа над окном камеры (без камеры — над субтитрами)
+                val zazor = (8 * s).toInt()
+                y = kameraVerh(o)?.let { it + zazor } ?: (o.h * 5 / 100 + (Nalozhenie.TH * s).toInt() + zazor)
+            }
+            "pc" -> {                         // чат: справа, между плашкой Плюса и окном камеры (и музыкой)
                 val zazor = (8 * s).toInt()
                 val pv = sloi["pv"]?.takeIf { it.w > 0 }
                 val verh = o.h - m - (pv?.let { (it.h * s).toInt() } ?: 0) - zazor
-                val niz = kameraVerh(o)?.let { it + zazor }
-                    ?: (o.h * 5 / 100 + (Nalozhenie.TH * s).toInt() + zazor)     // без камеры — над субтитрами
+                val mz = sloi["mz"]?.takeIf { it.w > 0 }?.let { (it.h * s).toInt() + zazor } ?: 0
+                val niz = (kameraVerh(o)?.let { it + zazor }
+                    ?: (o.h * 5 / 100 + (Nalozhenie.TH * s).toInt() + zazor)) + mz    // без камеры — над субтитрами
                 chatMesto = ((verh - niz) / s).toInt().coerceIn(0, Nalozhenie.CH)
                 if (verh - niz < (60 * s).toInt()) return
                 y = niz                       // новые сообщения — внизу картинки; лишнее срежет сверху

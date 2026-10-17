@@ -1,12 +1,8 @@
 package com.questclaude.bridge
 
 import android.media.AudioAttributes
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.media.MediaPlayer
 import java.io.File
-import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -135,64 +131,8 @@ class Golos(private val dir: File) : FrameServer.Say {
         }
     }
 
-    /** MP3 (edge-tts) → PCM 48 кГц моно аппаратным декодером; больше 5 с работы — сдаёмся. */
-    private fun dekodirovat(f: File): ShortArray? {
-        val ex = MediaExtractor()
-        var dec: MediaCodec? = null
-        try {
-            ex.setDataSource(f.path)
-            val ti = (0 until ex.trackCount).firstOrNull {
-                ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            } ?: return null
-            ex.selectTrack(ti)
-            val fmt = ex.getTrackFormat(ti)
-            var rate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var ch = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            val d = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
-            dec = d
-            d.configure(fmt, null, null, 0)
-            d.start()
-            val kuski = mutableListOf<ShortArray>()
-            val info = MediaCodec.BufferInfo()
-            var vhodKonec = false
-            val do_ = System.currentTimeMillis() + 5000
-            while (System.currentTimeMillis() < do_) {
-                if (!vhodKonec) {
-                    val i = d.dequeueInputBuffer(10_000)
-                    if (i >= 0) {
-                        val b = d.getInputBuffer(i)!!
-                        val m = ex.readSampleData(b, 0)
-                        if (m < 0) { d.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); vhodKonec = true }
-                        else { d.queueInputBuffer(i, 0, m, ex.sampleTime, 0); ex.advance() }
-                    }
-                }
-                val o = d.dequeueOutputBuffer(info, 10_000)
-                if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    rate = d.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                    ch = d.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                } else if (o >= 0) {
-                    val b = d.getOutputBuffer(o)
-                    if (b != null && info.size > 0) {
-                        b.position(info.offset); b.limit(info.offset + info.size)
-                        val sb = b.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-                        kuski += ShortArray(sb.remaining()).also { sb.get(it) }
-                    }
-                    d.releaseOutputBuffer(o, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                }
-            }
-            val vse = ShortArray(kuski.sumOf { it.size })
-            var p = 0
-            for (k in kuski) { k.copyInto(vse, p); p += k.size }
-            return Vstavka.v48mono(vse, rate, ch)
-        } catch (e: Exception) {
-            return null
-        } finally {
-            try { dec?.stop() } catch (e: Exception) { }
-            try { dec?.release() } catch (e: Exception) { }
-            ex.release()
-        }
-    }
+    /** MP3 (edge-tts) → PCM 48 кГц моно; больше 5 с работы — сдаёмся. */
+    private fun dekodirovat(f: File): ShortArray? = Mp3.raskodirovat(f)?.let { Vstavka.v48mono(it.pcm, it.rate, it.kanalov) }
 
     override fun stop() {
         rotDoMs = 0L                                       // вызов «плюс плюс» — замолчала и в Termux

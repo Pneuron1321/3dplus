@@ -97,6 +97,7 @@ class EarService : Service() {
         Pamyat.zapis("уши: включены")
         try {
             if (Hub.say == null) Hub.say = Golos(cacheDir)
+            if (Hub.fon == null) Hub.fon = Fon(cacheDir, java.io.File(filesDir, "fon-nastroyki"))
             Hub.acquire("ear")
         } catch (e: Exception) {
             status = "Порт ${Hub.PORT} занят: ${e.message}"

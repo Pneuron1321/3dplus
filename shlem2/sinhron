@@ -14,7 +14,9 @@
   7000 в час; 0 — без предела). Очередь: Александр и гости раньше игры, старше 15 с — прочь; пока
   корзина пуста, фразы копятся, и фразы одного голоса уходят одним запросом (10 с за одну цену).
   На день осталось меньше 200 — игру не слушаем (и говорю это в ухо), меньше 60 — только Александр и
-  гости. Музыку игры (речь без пауз — мало «тихих» кусков) не шлём.
+  гости. Музыку игры (речь без пауз — мало «тихих» кусков) не шлём. Игре — не больше трети бюджета
+  (свои корзины запросов и секунд, 17.10: шум боя съедал всё); три пустых ответа по игре подряд
+  (стрельба, вертолёт — речи нет) — игру пропускаем 20 с, потом 40, 80, до 2 мин; речь в игре — сначала.
   sinhron                 — как работает: голоса, бюджет Groq, ошибки
   sinhron igra|ya|gosti vkl|vykl — какие голоса слушать (приложение помнит до перезапуска)
   sinhron gosti u_plitki|vnizu   — субтитры гостей пузырём у плитки или внизу со всеми
@@ -56,6 +58,10 @@ MIN_SEK = 10.0         # Groq считает запрос короче 10 с з�
 ASH = 7000.0           # секунд звука в час (у бесплатного Groq — 7200)
 POROG_TIHIH = 0.12     # «тихих» кусков меньше — музыка, не речь (только игра)
 ZHDAT_PEREVOD = 1.2    # перевод — пачкой: ждём столько с первой фразы
+IGRA_DOLYA = 1 / 3     # игре — не больше трети запросов и секунд звука
+IGRA_PUSTYH = 3        # столько пустых ответов по игре подряд — пауза
+IGRA_PAUZA = 20.0      # первая пауза, с; дальше вдвое, до IGRA_PAUZA_MAKS
+IGRA_PAUZA_MAKS = 120.0
 LANGS = {'russian': 'ru', 'ukrainian': 'uk', 'english': 'en'}
 # Выдумки Whisper на тишине, шуме и музыке (из субтитров, на которых его учили) — как у ушей.
 GALLYU = re.compile(
@@ -173,6 +179,11 @@ class Sinhron:
         self.korzina = 3.0
         self.korzinaT = time.time()
         self.zvuk = None                      # корзина секунд звука (None — полная при первом запросе)
+        self.igra_korzina = 1.0               # игре — свои корзины: треть темпа
+        self.igra_zvuk = None
+        self.igra_pusto = 0                   # пустых ответов по игре подряд
+        self.igra_shag = 0                    # какая по счёту пауза
+        self.igra_pauza_do = 0.0
         self.skazano = set()                  # о чём уже сказано в ухо
         self.pauza_do = 0.0                   # 429 — ждать до
         self.ostalos_den = None               # запросов Whisper на сегодня (из ответа Groq)
@@ -182,7 +193,7 @@ class Sinhron:
         self.yaz = {}                         # язык прошлой фразы голоса — письмо имён в подсказке
         self.poslednee = {}                   # (golos) → (текст, когда) — не повторять одно и то же
         self.schet = {'fraz': 0, 'zaprosov': 0, 'subtitrov': 0, 'muzyka': 0, 'vydumki': 0, 'tishina': 0,
-                      'starye': 0, 'skleeno': 0, 'perevodov': 0, 'oshibok': 0}
+                      'starye': 0, 'skleeno': 0, 'perevodov': 0, 'oshibok': 0, 'shum': 0}
         self.oshibka = ''
         self.zhiv_most = False
         self.staroe = False                   # приложение без /titry/rech (старше 2.5.0)
@@ -223,15 +234,18 @@ class Sinhron:
                 self.ochered = [f for f in self.ochered if self._svezhaya(f, now)]
                 malo = self.ostalos_den is not None and self.ostalos_den < 200
                 ochen_malo = self.ostalos_den is not None and self.ostalos_den < 60
+                shum = now < self.igra_pauza_do
                 for f in list(self.ochered):
-                    if f.golos == 'igra' and (f.tihih < POROG_TIHIH or malo):
+                    if f.golos == 'igra' and (f.tihih < POROG_TIHIH or malo or shum):
                         self.ochered.remove(f)
-                        self.schet['muzyka' if f.tihih < POROG_TIHIH else 'starye'] += 1
+                        self.schet['muzyka' if f.tihih < POROG_TIHIH else 'shum' if shum else 'starye'] += 1
                 if self.ochered and now >= self.pauza_do:
                     self._dolit(now)
-                    if self.korzina >= 1:
+                    kandidaty = [f for f in self.ochered if f.golos != 'igra' or self.igra_korzina >= 1]
+                    if kandidaty and self.korzina >= 1:
                         self.korzina -= 1
-                        perv = min(self.ochered, key=lambda f: (f.golos == 'igra', f.prishla))
+                        perv = min(kandidaty, key=lambda f: (f.golos == 'igra', f.prishla))
+                        igra = perv.golos == 'igra'
                         odin = [f for f in self.ochered if f.golos == perv.golos]
                         # копится (бюджет тесный) — склеить фразы этого голоса, сколько влезет
                         vmeste = [perv]
@@ -244,8 +258,16 @@ class Sinhron:
                             self.korzina += 1
                             self.lock.wait(min(2.0, (cena - self.zvuk) * 3600 / max(ash(), 1)) * SEK)
                             continue
+                        if igra and self.igra_zvuk is not None and self.igra_zvuk < cena:   # треть секунд игры — кончилась
+                            self.korzina += 1
+                            self.lock.wait(min(2.0, (cena - self.igra_zvuk) * 3600 / max(ash() * IGRA_DOLYA, 1)) * SEK)
+                            continue
                         if self.zvuk is not None:
                             self.zvuk -= cena
+                        if igra:
+                            self.igra_korzina -= 1
+                            if self.igra_zvuk is not None:
+                                self.igra_zvuk -= cena
                         for f in vmeste:
                             self.ochered.remove(f)
                         if len(vmeste) > 1:
@@ -266,12 +288,15 @@ class Sinhron:
     def _dolit(self, now):
         dt = (now - self.korzinaT) / max(SEK, 0.001)
         self.korzina = min(3.0, self.korzina + dt * rpm() / 60.0)
+        self.igra_korzina = min(1.0, self.igra_korzina + dt * rpm() / 60.0 * IGRA_DOLYA)
         a = ash()
         if not a:
-            self.zvuk = None                  # платный уровень — секунды не считаем
+            self.zvuk = self.igra_zvuk = None     # платный уровень — секунды не считаем
         else:
             vmest = min(60.0, max(MIN_SEK, a / 60.0))          # запас — минута звука, не меньше одного запроса
             self.zvuk = vmest if self.zvuk is None else min(vmest, self.zvuk + dt * a / 3600.0)
+            vi = max(MIN_SEK, vmest * IGRA_DOLYA)
+            self.igra_zvuk = vi if self.igra_zvuk is None else min(vi, self.igra_zvuk + dt * a * IGRA_DOLYA / 3600.0)
         self.korzinaT = now
 
     # ---------- Whisper ----------
@@ -300,6 +325,8 @@ class Sinhron:
         self.schet['zaprosov'] += 1
         yazyk = LANGS.get((d.get('language') or '').lower(), (d.get('language') or '')[:2].lower())
         tekst = self.otbor(d, porog, pod)
+        if f.golos == 'igra':
+            self._igra_itog(bool(tekst))
         if not tekst:
             return
         nado = None
@@ -329,6 +356,19 @@ class Sinhron:
         with self.lock:
             self.perevod.append((f.golos, tekst, yazyk, time.time()))
             self.lock.notify_all()
+
+    def _igra_itog(self, est_rech):
+        """Речь в игре — пауз нет; пустых ответов подряд IGRA_PUSTYH — игру пропускаем, паузы растут."""
+        if est_rech:
+            self.igra_pusto = self.igra_shag = 0
+            return
+        self.igra_pusto += 1
+        if self.igra_pusto >= IGRA_PUSTYH:
+            pauza = min(IGRA_PAUZA_MAKS, IGRA_PAUZA * 2 ** self.igra_shag)
+            self.igra_pauza_do = time.time() + pauza * SEK
+            self.igra_shag += 1
+            self.igra_pusto = 0
+            log('игра: %d пустых подряд — пропускаю %g с' % (IGRA_PUSTYH, pauza))
 
     def podskazka(self, golos, yazyk=None):
         """Игре — пусто; остальным — имена письмом языка (заданного или прошлой фразы) и прошлая фраза,
@@ -506,6 +546,7 @@ class Sinhron:
                          ostalos_den=self.ostalos_den, ostalos_perevod=self.ostalos_perevod,
                          v_ocheredi=len(self.ochered), pauza=max(0, round(self.pauza_do - time.time())),
                          most=self.zhiv_most, staroe=self.staroe, oshibka=self.oshibka, model=MODEL,
+                         igra_pauza=max(0, round((self.igra_pauza_do - time.time()) / max(SEK, 0.001))),
                          perevod=PEREVOD[self.perevod_model].strip(), ms=int(time.time() * 1000))
                 tmp = SOST + '.novyy'
                 with open(tmp, 'w') as f:
@@ -599,8 +640,11 @@ def main(a):
     od = s.get('ostalos_den')
     print('Whisper: %s, до %g запросов в минуту, %s; на сегодня осталось: %s.' % (
         s.get('model'), s.get('rpm'),
-        'секунд звука в час — %g (в запасе %s)' % (s['ash'], s.get('zvuk')) if s.get('ash') else 'секунды звука не считаю',
+        ('секунд звука в час — %g; копилка на минуту: %s из %d с (пополняется сама, это не остаток часа)'
+         % (s['ash'], s.get('zvuk'), round(min(60.0, max(MIN_SEK, s['ash'] / 60.0))))) if s.get('ash') else 'секунды звука не считаю',
         od if od is not None else 'не знаю (ещё не спрашивала)'))
+    print('Игра: не больше трети бюджета; шум без речи пропущено %d%s.' % (
+        s.get('shum', 0), (', пауза ещё %d с' % s['igra_pauza']) if s.get('igra_pauza') else ''))
     print('Фраз пришло %d, распознано запросами %d, субтитров %d; музыка игры мимо %d, выдумки %d, тишина %d, '
           'устарели %d, склеено %d; перевод — %s.' % (
               s.get('fraz', 0), s.get('zaprosov', 0), s.get('subtitrov', 0), s.get('muzyka', 0), s.get('vydumki', 0),

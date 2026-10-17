@@ -113,6 +113,20 @@ class FrameServerTest {
     }
     private val rechi = Rechi()
 
+    /** Подделка музыки (2.5.6): помнит куски и команды. */
+    private val fon = object : FrameServer.FonUpr {
+        val kuski = mutableListOf<Pair<ByteArray, String>>()
+        @Volatile var q: Map<String, String>? = null
+        @Volatile var stopov = 0
+        override fun kusok(mp3: ByteArray, mode: String): String { kuski += mp3 to mode; return "{\"ok\":true}" }
+        override fun stop(): String { stopov++; return status() }
+        override fun status() = "{\"igraet\":${kuski.isNotEmpty()}}"
+        override fun gromkost(q: Map<String, String>): String { this.q = q; return "{\"g\":true}" }
+        override fun duck(q: Map<String, String>): String { this.q = q; return "{\"d\":true}" }
+        override fun plashka(q: Map<String, String>): String { this.q = q; return "{\"p\":true}" }
+    }
+    @Volatile private var fonOn = true
+
     private data class Reply(val code: Int, val type: String?, val body: ByteArray)
 
     private fun get(path: String, timeoutMs: Int = 2000): Reply {
@@ -128,7 +142,7 @@ class FrameServerTest {
         server = FrameServer(port, { frame }, { capturing }, { stale }, { variants[it] }, ear, voice,
             { t, n -> plenkaT = t; plenkaN = n; plenka }, { wakeMs }, { if (efirOn) efir else null }, { "" },
             { if (kameraOn) kamera else null }, { nalet }, { if (plashkiOn) plashki else null },
-            { t -> kadrT = t; kadrMoment }, { gosti }, rechi)
+            { t -> kadrT = t; kadrMoment }, { gosti }, rechi, { if (fonOn) fon else null })
         server.start()
     }
 
@@ -143,6 +157,27 @@ class FrameServerTest {
         val code = c.responseCode
         val b = (if (code < 400) c.inputStream else c.errorStream).readBytes()
         return Reply(code, c.contentType, b)
+    }
+
+    @Test fun fonKuskiIUpravlenie() {
+        val mp3 = ByteArray(5000) { (it * 7).toByte() }                 // все байты 0–255: тело доходит как есть
+        val r = post("/fon?mode=efir", mp3)
+        assertEquals(200, r.code)
+        assertEquals("{\"ok\":true}", String(r.body))
+        assertTrue(fon.kuski.single().first.contentEquals(mp3))
+        assertEquals("efir", fon.kuski.single().second)
+        post("/fon", byteArrayOf(1, 2, 3))
+        assertEquals("oba", fon.kuski.last().second)                     // по умолчанию — в шлем и в эфир
+        assertEquals("{\"igraet\":true}", String(get("/fon").body))  // GET без тела — состояние
+        assertEquals("{\"igraet\":true}", String(get("/fon/status").body))
+        assertEquals("{\"g\":true}", String(get("/fon/gromkost?shlem=80&efir=120").body))
+        assertEquals(mapOf("shlem" to "80", "efir" to "120"), fon.q)
+        get("/fon/duck?v=0.4"); assertEquals("0.4", fon.q?.get("v"))
+        get("/fon/plashka?pokaz=1&tekst=Bossa%20Antigua"); assertEquals("Bossa%20Antigua", fon.q?.get("tekst"))
+        get("/fon/stop"); assertEquals(1, fon.stopov)
+        assertTrue(String(get("/status").body).contains("\"fon\""))
+        fonOn = false
+        assertEquals(404, get("/fon/status").code)
     }
 
     @Test fun efirKeyStartStop() {
@@ -216,7 +251,7 @@ class FrameServerTest {
         assertEquals("application/json", s.type)
         assertEquals("{\"capturing\":false,\"width\":0,\"height\":0,\"frames\":0,\"ageMs\":-1," +
             "\"stale\":false,\"ear\":\"off\",\"micDb\":-1,\"lastWakeMs\":0," +
-            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\"]}",
+            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\",\"fon\"]}",
             String(s.body))
         assertEquals(404, get("/frame.jpg").code)
     }
@@ -299,7 +334,7 @@ class FrameServerTest {
         ear.micDb = 42
         val s = String(get("/status").body)
         assertTrue(s, s.endsWith(",\"stale\":true,\"ear\":\"listening\",\"micDb\":42,\"lastWakeMs\":0," +
-            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\"]}"))
+            "\"dosluh\":{\"okno\":1.0,\"db\":38,\"otkryto\":0,\"zagovoril\":0},\"umeet\":[\"kadr_t\",\"chat_pachka\",\"gosti\",\"titry_rech\",\"fon\"]}"))
     }
 
     @Test fun earEvents() {

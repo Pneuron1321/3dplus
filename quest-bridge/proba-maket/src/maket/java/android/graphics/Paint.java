@@ -23,6 +23,7 @@ public class Paint {
     private Join join = Join.MITER;
     private Cap cap = Cap.BUTT;
     private Xfermode xfermode;
+    private Shader shader;
     final boolean aa;
 
     public Paint() { aa = false; }
@@ -48,6 +49,8 @@ public class Paint {
     public void setStrokeCap(Cap c) { cap = c; }
     public Xfermode getXfermode() { return xfermode; }
     public Xfermode setXfermode(Xfermode x) { xfermode = x; return x; }
+    public Shader getShader() { return shader; }
+    public Shader setShader(Shader s) { shader = s; return s; }
 
     Font font() {
         Font f = new Font(typeface.sk, textSize);
@@ -70,6 +73,7 @@ public class Paint {
         p.setStrokeCap(cap == Cap.ROUND ? PaintStrokeCap.ROUND : cap == Cap.SQUARE ? PaintStrokeCap.SQUARE : PaintStrokeCap.BUTT);
         if (xfermode instanceof PorterDuffXfermode) p.setBlendMode(BlendMode.valueOf(((PorterDuffXfermode) xfermode).mode.name()
             .replace("ADD", "PLUS")));
+        if (shader != null) p.setShader(shader.sk());
         return p;
     }
 }
