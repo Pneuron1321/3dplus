@@ -100,21 +100,22 @@ class KameraStranica(
 
         /**
          * Ссылка Larix Grove: подключение «Quest» (перезаписать прежнее с тем же именем), только видео,
-         * H.264 1280×720, 30 к/с, 2000 кбит/с, ключевой кадр раз в секунду.
+         * H.264 1920×1080, 30 к/с, 6000 кбит/с, ключевой кадр раз в секунду (2.5.5: было 720p и 2000 —
+         * Александр 17.10: «картинка с камеры слабовата»; Wi-Fi дома тянет с запасом).
          */
         fun larix(rtmp: String): String =
             "larix://set/v1?conn[][url]=" + URLEncoder.encode(rtmp, "UTF-8") +
                 "&conn[][name]=Quest&conn[][overwrite]=on&conn[][mode]=v" +
-                "&enc[vid][format]=avc&enc[vid][res]=1280x720&enc[vid][fps]=30&enc[vid][bitrate]=2000&enc[vid][keyframe]=1"
+                "&enc[vid][format]=avc&enc[vid][res]=1920x1080&enc[vid][fps]=30&enc[vid][bitrate]=6000&enc[vid][keyframe]=1"
 
         /**
-         * Ссылка Moblin: поток «Quest» (выбран), H.264 1280×720, 30 к/с, 2000 кбит/с, без B-кадров,
+         * Ссылка Moblin: поток «Quest» (выбран), H.264 1920×1080, 30 к/с, 6000 кбит/с, без B-кадров,
          * ключевой кадр раз в секунду. Moblin по умолчанию шлёт H.265 — без этой ссылки его нужно
          * переключать руками. Запрос — JSON целиком, в процентах (Moblin: url.query(percentEncoded: false)).
          */
         fun moblin(rtmp: String): String =
             "moblin://?" + procent("{\"streams\":[{\"name\":\"Quest\",\"url\":${FrameServer.json(rtmp)},\"selected\":true," +
-                "\"video\":{\"codec\":\"H.264/AVC\",\"resolution\":\"1280x720\",\"fps\":30,\"bitrate\":2000000," +
+                "\"video\":{\"codec\":\"H.264/AVC\",\"resolution\":\"1920x1080\",\"fps\":30,\"bitrate\":6000000," +
                 "\"bFrames\":false,\"maxKeyFrameInterval\":1}}]}")
 
         private fun procent(s: String): String = buildString {
@@ -186,7 +187,7 @@ small{color:#999}
 <h1>Камера для эфира</h1>
 <p>Лучше Moblin (App Store, бесплатно, без водяного знака). Нажми:</p>
 <a class="b" href="$m">Добавить в Moblin</a>
-<p>Moblin спросит про импорт настроек — согласись: появится поток <b>Quest</b> (H.264, 720p), он уже выбран. Потом в Moblin — «Go Live».</p>
+<p>Moblin спросит про импорт настроек — согласись: появится поток <b>Quest</b> (H.264, 1080p), он уже выбран. Был прежний <b>Quest</b> — его можно удалить. Потом в Moblin — «Go Live».</p>
 <a class="b b2" href="$l">Добавить в Larix</a>
 <p><small>Larix бесплатно ставит надпись на картинку и ограничивает эфир часом.</small></p>
 <p>Приложение спросит про устройства в локальной сети — «Разрешить» (иначе оно не найдёт шлем; потом это в Настройках → Конфиденциальность → Локальная сеть).</p>

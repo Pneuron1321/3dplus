@@ -33,7 +33,7 @@ class KameraStranicaTest {
     @Test fun larixGrove() {
         assertEquals("larix://set/v1?conn[][url]=rtmp%3A%2F%2F192.168.1.50%3A1935%2Fkamera%2Fk7m2x9p4qa" +
             "&conn[][name]=Quest&conn[][overwrite]=on&conn[][mode]=v" +
-            "&enc[vid][format]=avc&enc[vid][res]=1280x720&enc[vid][fps]=30&enc[vid][bitrate]=2000&enc[vid][keyframe]=1",
+            "&enc[vid][format]=avc&enc[vid][res]=1920x1080&enc[vid][fps]=30&enc[vid][bitrate]=6000&enc[vid][keyframe]=1",
             KameraStranica.larix(rtmp))
     }
 
@@ -43,7 +43,7 @@ class KameraStranicaTest {
         assertFalse(m, m.contains("\"") || m.contains("{") || m.contains(" "))
         val json = java.net.URLDecoder.decode(m.removePrefix("moblin://?"), "UTF-8")
         assertEquals("{\"streams\":[{\"name\":\"Quest\",\"url\":\"$rtmp\",\"selected\":true," +
-            "\"video\":{\"codec\":\"H.264/AVC\",\"resolution\":\"1280x720\",\"fps\":30,\"bitrate\":2000000," +
+            "\"video\":{\"codec\":\"H.264/AVC\",\"resolution\":\"1920x1080\",\"fps\":30,\"bitrate\":6000000," +
             "\"bFrames\":false,\"maxKeyFrameInterval\":1}}]}", json)
     }
 

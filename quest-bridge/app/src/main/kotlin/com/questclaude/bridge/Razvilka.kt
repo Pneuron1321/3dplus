@@ -119,6 +119,8 @@ class Razvilka(private val w: Int, private val h: Int) {
     @Volatile var bezKamery: Set<Int> = emptySet()
     private var shOes = Sh(0, 0, 0, 0, 0, 0)                  // программы плиток: видео (OES) и картинка (2D)
     private var sh2d = Sh(0, 0, 0, 0, 0, 0)
+    private var shKamera = Sh(0, 0, 0, 0, 0, 0)               // окно камеры: уменьшение в 4 выборки (0 — не собралась)
+    private var uShag = 0
     private var released = false
 
     /** Кадров от захвата — для статуса. */
@@ -309,6 +311,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             if (program2 != 0) GLES20.glDeleteProgram(program2)
             if (shOes.p != 0) GLES20.glDeleteProgram(shOes.p)
             if (sh2d.p != 0) GLES20.glDeleteProgram(sh2d.p)
+            if (shKamera.p != 0) GLES20.glDeleteProgram(shKamera.p)
             if (program != 0) GLES20.glDeleteProgram(program)
             GLES20.glDeleteTextures(1, intArrayOf(tex), 0)
             EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
@@ -351,6 +354,10 @@ class Razvilka(private val w: Int, private val h: Int) {
             GLES20.glGetUniformLocation(p, "uMtx"), GLES20.glGetUniformLocation(p, "uRazmer"), GLES20.glGetUniformLocation(p, "uR"))
         shOes = sh(program(VERTEX_PLITKA, FRAGMENT_PLITKA))
         sh2d = sh(program(VERTEX_PLITKA, FRAGMENT_PLITKA_2D))
+        try {                                         // не собралась — окно камеры рисуем как раньше
+            shKamera = sh(program(VERTEX_KAMERA, FRAGMENT_KAMERA))
+            uShag = GLES20.glGetUniformLocation(shKamera.p, "uShag")
+        } catch (e: Exception) { shKamera = Sh(0, 0, 0, 0, 0, 0) }
         tex = oesTexture()
         st = SurfaceTexture(tex)
         st.setDefaultBufferSize(w, h)
@@ -666,7 +673,30 @@ class Razvilka(private val w: Int, private val h: Int) {
         }
         GLES20.glViewport(r[0], r[1], r[2], r[3])
         android.opengl.Matrix.multiplyMM(kmtxPov, 0, kmtx, 0, Okno.povorot(v.povorot), 0)
-        kvadrat(ktex, kmtxPov)
+        if (shKamera.p == 0) return kvadrat(ktex, kmtxPov)
+        val umen = maxOf(r[2], r[3]) < maxOf(kw, kh)      // кадр телефона больше окна — уменьшаем
+        kvadratKamery(kmtxPov, if (umen) 0.25f / r[2] else 0f, if (umen) 0.25f / r[3] else 0f)
+    }
+
+    /**
+     * Окно камеры. Одна выборка на точку при уменьшении (1080p телефона в окно ~500 точек) теряет
+     * мелочь и даёт «лесенку» и мерцание шума — 4 выборки по четвертям точки окна (2.5.5, Александр
+     * 17.10: «картинка с камеры слабовата»). sx, sy — четверть точки окна в долях окна (0 — одна выборка).
+     */
+    private fun kvadratKamery(m: FloatArray, sx: Float, sy: Float) {
+        val k = shKamera
+        GLES20.glUseProgram(k.p)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, ktex)
+        GLES20.glUniformMatrix4fv(k.uMtx, 1, false, m, 0)
+        GLES20.glUniform2f(uShag, sx, sy)
+        quad.position(0)
+        GLES20.glVertexAttribPointer(k.aPos, 2, GLES20.GL_FLOAT, false, 16, quad)
+        GLES20.glEnableVertexAttribArray(k.aPos)
+        quad.position(2)
+        GLES20.glVertexAttribPointer(k.aTex, 2, GLES20.GL_FLOAT, false, 16, quad)
+        GLES20.glEnableVertexAttribArray(k.aTex)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
     private fun program(vs: String, fs: String): Int {
@@ -765,6 +795,43 @@ class Razvilka(private val w: Int, private val h: Int) {
             return if (w > h) { val k = h.toFloat() / w; floatArrayOf(k, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, (1 - k) / 2, 0f, 0f, 1f) }
             else { val k = w.toFloat() / h; floatArrayOf(1f, 0f, 0f, 0f, 0f, k, 0f, 0f, 0f, 0f, 1f, 0f, 0f, (1 - k) / 2, 0f, 1f) }
         }
+
+        /**
+         * Окно камеры: шаг на четверть точки окна, переведённый в координаты текстуры той же матрицей
+         * (с поворотом окна), — 4 выборки вокруг середины точки (каждая ещё и сглаженная, LINEAR).
+         */
+        private val VERTEX_KAMERA = """
+            attribute vec4 aPos;
+            attribute vec4 aTex;
+            uniform mat4 uMtx;
+            uniform vec2 uShag;
+            varying vec2 vTex;
+            varying vec2 vDx;
+            varying vec2 vDy;
+            void main() {
+                gl_Position = aPos;
+                vTex = (uMtx * aTex).xy;
+                vDx = (uMtx * vec4(uShag.x, 0.0, 0.0, 0.0)).xy;
+                vDy = (uMtx * vec4(0.0, uShag.y, 0.0, 0.0)).xy;
+            }
+        """.trimIndent()
+        /** Координаты — highp: в mediump сдвиг на четверть точки 1080p-кадра тонет в округлении. */
+        private val FRAGMENT_KAMERA = """
+            #extension GL_OES_EGL_image_external : require
+            #ifdef GL_FRAGMENT_PRECISION_HIGH
+            precision highp float;
+            #else
+            precision mediump float;
+            #endif
+            varying vec2 vTex;
+            varying vec2 vDx;
+            varying vec2 vDy;
+            uniform samplerExternalOES sTex;
+            void main() {
+                gl_FragColor = 0.25 * (texture2D(sTex, vTex - vDx - vDy) + texture2D(sTex, vTex + vDx - vDy)
+                    + texture2D(sTex, vTex - vDx + vDy) + texture2D(sTex, vTex + vDx + vDy));
+            }
+        """.trimIndent()
 
         private val FRAGMENT = """
             #extension GL_OES_EGL_image_external : require
