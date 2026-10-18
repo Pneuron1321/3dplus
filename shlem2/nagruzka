@@ -123,8 +123,41 @@ PY
   exit 0
 fi
 #   nagruzka demon   — чёрный ящик (запускает plus, второй не встанет): раз в 2 с, пока идёт эфир, —
-#                    кадры, потери и пропуски звука эфира и процессор Плюса и помощников; /tmp/nagruzka.log
+#                    кадры, потери и пропуски звука эфира и процессор Плюса и помощников; /tmp/nagruzka.log;
+#                    и предохранитель: тяжёлое у помощника в эфире — низший приоритет, тесно — одно ядро
 #   nagruzka sboi [часов] — где эфир спотыкался (по чёрному ящику) и что в эти секунды делал Плюс
+#   nagruzka povodok [vkl|vykl] — кого предохранитель притормозил сейчас; vykl — не прижимать совсем, vkl — снова
+#   nagruzka otpustit — «пусть работает в полную»: отпустить прижатое до конца этого эфира
+if [ "$1" = otpustit ]; then
+  : > "${NAGRUZKA_OTPUSTIT:-/tmp/nagruzka-otpustit}"
+  echo "Отпущу через пару секунд: тяжёлое работает в полную до конца этого эфира."
+  exit 0
+fi
+if [ "$1" = povodok ]; then
+  V=${NAGRUZKA_POVODOK_VYKL:-/root/.nagruzka-povodok-vykl}
+  case "$2" in
+    vykl) : > "$V"; echo "Предохранитель выключен: тяжёлое в эфире не прижимаю (включить — nagruzka povodok vkl)."; exit 0 ;;
+    vkl) rm -f "$V"; echo "Предохранитель включён: тяжёлое в эфире — на одно ядро с низшим приоритетом."; exit 0 ;;
+  esac
+  [ -f "$V" ] && echo "Предохранитель выключен (nagruzka povodok vkl — включить)."
+  python3 - "${NAGRUZKA_POVODOK:-/tmp/nagruzka-povodok.json}" << 'PY'
+import json, sys, time
+try:
+    d = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    print('Чёрный ящик ещё не писал (эфира не было или plus не запущен).'); sys.exit(0)
+if d.get('otpushcheno'):
+    print('В этом эфире отпущено: тяжёлое работает в полную.')
+p = d.get('prizhaty') or []
+if not p:
+    print('Сейчас никто не уступает: тяжёлого нет.')
+for x in p:
+    print('Уступает %d мин: %s%s — было ~%d%% ядра; %s.' % ((time.time() - x['t']) / 60, x['imya'],
+          ' (%s)' % x['sostav'] if x.get('sostav') else '', x['sr'],
+          'эфиру было тесно — на одном ядре %s' % d.get('yadro') if x.get('yadro') else 'низший приоритет, скорость обычная'))
+PY
+  exit 0
+fi
 if [ "$1" = demon ] || [ "$1" = sboi ]; then
   REZHIM=$1; shift
   exec python3 - "nagruzka-$REZHIM" "$0" "${1:-4}" "${NAGRUZKA_URL:-http://localhost:8766}" <<'PY'
@@ -152,8 +185,12 @@ def gruppa(pid):
     return 'drugoe'
 
 
+PPID = {}                                         # pid → родитель (последний снимок)
+
+
 def tiki():
     out = {}
+    PPID.clear()
     for d in os.listdir('/proc'):
         if not d.isdigit():
             continue
@@ -163,6 +200,7 @@ def tiki():
             continue
         f = st[st.rfind(')') + 2:].split()
         out[d] = int(f[11]) + int(f[12])
+        PPID[d] = f[1]
     return out
 
 
@@ -173,32 +211,277 @@ def efir():
         return None
 
 
+# ---------- предохранитель (17.10, Александр: «нужно сделать предохранитель… чтобы он кусками это делал») ----------
+# В эфире помощник Плюса качал треки и искал файлы по всей системе — Termux съел 4,5 ядра, игра проседала. Тяжёлую
+# работу не убиваем и не запрещаем: пока идёт эфир, дерево помощника, которое долго ест больше POROG % ядра, получает
+# низший приоритет (SCHED_IDLE, nice 19) — скорость обычная, просто не в ущерб (Александр 18.10: «по умолчанию
+# нормальная скорость, просто не критична для процессора»); если бридж говорит «тесно», а оно всё ещё тяжёлое —
+# на одно самое слабое ядро, и Александру один раз в ухо. Остановка сигналами (0,5 с работает / 1,5 с стоит) под proot не
+# держится: proot отпускает остановленный процесс (проверено 17.10 и изнутри, и снаружи), а привязка к ядру — да
+# (3 загруженных процесса: 296 % → 98 %).
+# Кандидаты — потомки Claude Плюса (окно tmux «plus»: его инструменты, помощники, поиск) и осиротевшие (родитель — 1);
+# свои демоны (уши, голос, музыка, субтитры…) и всё под ними — никогда.
+POROG = float(os.environ.get('NAGRUZKA_POROG', 50))           # % одного ядра у дерева помощника, в среднем за окно
+OKNO = int(os.environ.get('NAGRUZKA_OKNO', 10))               # шагов подряд (по 2 с — 20 с)
+TESNO_SHAGOV = int(os.environ.get('NAGRUZKA_TESNO', 3))      # «тесно» столько шагов подряд — на одно ядро
+POVODOK = os.environ.get('NAGRUZKA_POVODOK', '/tmp/nagruzka-povodok.json')        # кто сейчас прижат
+OTPUSTIT = os.environ.get('NAGRUZKA_OTPUSTIT', '/tmp/nagruzka-otpustit')          # «пусть работает в полную»
+POVODOK_VYKL = os.environ.get('NAGRUZKA_POVODOK_VYKL', '/root/.nagruzka-povodok-vykl')
+GOLOS_Q = os.environ.get('NAGRUZKA_GOLOS_Q', '/tmp/golos/q')
+KORNI = os.environ.get('NAGRUZKA_KORNI', '')                  # проверка: pid вместо окна tmux
+SVOI = {'ushi', 'sluh', 'golos', 'skazhi', 'tiho', 'sinhron', 'gosti', 'cloudflared', 'vedushchiy', 'muzyka', 'obzor',
+        'donaty', 'zriteli', 'raciya', 'nagruzka', 'nagruzka-demon', 'plus', 'plus-mcp', 'golos-hook', 'tmux',
+        'tmux: server', 'tmux: client', 'proot', 'play-audio', 'edge-tts', 'sshd'}
+NICE_BYLO = 10                                    # так plus ставит своим (12.10)
+
+
+def imena_procesa(pid):
+    try:
+        c = open('/proc/%s/comm' % pid).read().strip()
+        a = open('/proc/%s/cmdline' % pid, 'rb').read().split(b'\0')
+    except OSError:
+        return []
+    return [c] + [os.path.basename(x.decode('utf-8', 'replace')) for x in a[:3] if x]
+
+
+def korotkoe_imya(pid):
+    """Имя для уха и журнала — без аргументов (в них бывают адреса и ключи): программа, у интерпретатора — скрипт."""
+    im = imena_procesa(pid) or ['?']
+    c = im[0]
+    if re.match(r'^(python\d*(\.\d+)?|bash|sh|dash|node)$', c) and len(im) > 2 and re.match(r'^[A-Za-z0-9._-]+$', im[2]) \
+            and not im[2].startswith('-'):
+        return '%s:%s' % (c, im[2])
+    return c
+
+
+def korni():
+    """pid Claude Плюса — то, что запущено в окне tmux «plus» (раз в 30 с)."""
+    if KORNI:
+        return set(KORNI.split(','))
+    if time.time() - KORNI_KESH[0] > 30:
+        try:
+            import subprocess
+            r = subprocess.run(['tmux', 'list-panes', '-t', 'plus', '-F', '#{pane_pid}'], capture_output=True,
+                               text=True, timeout=3)
+            KORNI_KESH[1] = set(r.stdout.split())
+        except Exception:
+            KORNI_KESH[1] = set()
+        KORNI_KESH[0] = time.time()
+    return KORNI_KESH[1]
+
+
+KORNI_KESH = [0.0, set()]
+
+
+def verh_pomoshchnika(pid, kor):
+    """Верхний процесс дерева помощника, к которому относится pid, или None (свой, Плюс, система)."""
+    p, verh, n = pid, None, 0
+    moy = str(os.getpid())
+    while p and n < 64:
+        if p == moy or p in kor:
+            return verh if p in kor else None
+        if any(x in SVOI for x in imena_procesa(p)):
+            return None
+        rod = PPID.get(p)
+        if rod in (None, '0', '1') or rod not in PPID:
+            return p                                  # сирота: сам себе верх
+        verh, p, n = p, rod, n + 1
+    return None
+
+
+def yadro_slaboe():
+    """Самое слабое из доступных ядер (меньше всех частота), иначе первое доступное."""
+    dostupno = sorted(os.sched_getaffinity(0))
+    def chastota(c):
+        try:
+            return int(open('/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq' % c).read())
+        except (OSError, ValueError):
+            return 1 << 40
+    return min(dostupno, key=lambda c: (chastota(c), c))
+
+
+def potoki(pid):
+    try:
+        return [int(t) for t in os.listdir('/proc/%s/task' % pid)]
+    except OSError:
+        return []
+
+
+def poderevo(verh):
+    """verh и все его потомки (по последнему снимку)."""
+    deti, res, ochered = {}, [], [verh]
+    for p, r in PPID.items():
+        deti.setdefault(r, []).append(p)
+    while ochered:
+        p = ochered.pop()
+        res.append(p)
+        ochered.extend(deti.get(p, []))
+    return res
+
+
+def prizhat(pid, yadro=None):
+    """Низший приоритет (SCHED_IDLE, nice 19) — скорость обычная, но любое своё дело и игра впереди; yadro — ещё и
+    на одно ядро (когда эфиру тесно)."""
+    for t in potoki(pid):
+        for f in ((lambda: os.sched_setaffinity(t, {yadro})) if yadro is not None else (lambda: None),
+                  lambda: os.sched_setscheduler(t, os.SCHED_IDLE, os.sched_param(0)),
+                  lambda: os.setpriority(os.PRIO_PROCESS, t, 19)):
+            try:
+                f()
+            except (OSError, AttributeError):
+                pass
+
+
+def otpustit_pid(pid):
+    vse = os.sched_getaffinity(0)
+    for t in potoki(pid):
+        for f in (lambda: os.sched_setaffinity(t, vse),
+                  lambda: os.sched_setscheduler(t, os.SCHED_OTHER, os.sched_param(0)),
+                  lambda: os.setpriority(os.PRIO_PROCESS, t, NICE_BYLO)):
+            try:
+                f()
+            except (OSError, AttributeError):
+                pass
+
+
+def v_uho(tekst):
+    """Голосом только Александру (дорожка .uho голос-демона: не в эфир, без субтитров)."""
+    try:
+        os.makedirs(GOLOS_Q, exist_ok=True)
+        put = os.path.join(GOLOS_Q, '%d.uho' % time.time_ns())
+        open(put + '.tmp', 'w').write(tekst)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
+class Povodok:
+    def __init__(self):
+        self.okna = {}            # верх → последние суммы % ядра
+        self.prizhaty = {}        # верх → {'imya', 't', 'sr'}
+        self.otpushcheno = False  # Александр сказал «в полную» — до конца эфира не трогаем
+        self.tesno = 0            # шагов подряд, когда бридж говорит «тесно»
+        self.yadro = yadro_slaboe()
+        self.zapisat()
+
+    def zapisat(self):
+        try:
+            json.dump({'yadro': self.yadro, 'otpushcheno': self.otpushcheno,
+                       'prizhaty': [dict(v, pid=k) for k, v in self.prizhaty.items()]},
+                      open(POVODOK + '.tmp', 'w'), ensure_ascii=False)
+            os.replace(POVODOK + '.tmp', POVODOK)
+        except OSError:
+            pass
+
+    def vse_otpustit(self):
+        for verh in list(self.prizhaty):
+            for p in poderevo(verh):
+                otpustit_pid(p)
+        self.prizhaty.clear()
+        self.okna.clear()
+
+    def shag(self, idet, cpu_pid, tesno=False):
+        """Раз в шаг: cpu_pid — % ядра каждого процесса за шаг; idet — эфир идёт; tesno — бридж сказал «тесно»."""
+        if os.path.exists(OTPUSTIT):
+            try:
+                os.remove(OTPUSTIT)
+            except OSError:
+                pass
+            self.vse_otpustit()
+            self.otpushcheno = True
+            self.zapisat()
+        if not idet or os.path.exists(POVODOK_VYKL):
+            if self.prizhaty:
+                self.vse_otpustit()
+            self.otpushcheno = self.otpushcheno and idet
+            self.zapisat()
+            return
+        for verh in [v for v in self.prizhaty if v not in PPID]:
+            del self.prizhaty[verh]                   # доделал и вышел
+        kor = korni()
+        summy = {}
+        for pid, c in cpu_pid.items():
+            v = verh_pomoshchnika(pid, kor)
+            if v:
+                summy[v] = summy.get(v, 0.0) + c
+        for v in list(self.okna):
+            if v not in summy:
+                del self.okna[v]
+        for v, sm in summy.items():
+            self.okna.setdefault(v, []).append(sm)
+            self.okna[v] = self.okna[v][-OKNO:]
+        self.tesno = self.tesno + 1 if tesno else 0
+        if self.otpushcheno:
+            self.zapisat()
+            return
+        for v, okno in self.okna.items():             # долго тяжёлое — низший приоритет, скорость обычная
+            if v in self.prizhaty or len(okno) < OKNO or sum(okno) / len(okno) < POROG:
+                continue
+            deti = {}
+            for p in poderevo(v)[1:]:
+                n = korotkoe_imya(p)
+                deti[n] = deti.get(n, 0) + 1
+            self.prizhaty[v] = {'imya': korotkoe_imya(v), 't': time.time(), 'sr': round(sum(okno) / len(okno)),
+                                'sostav': ', '.join('%s×%d' % (n, k) if k > 1 else n
+                                                    for n, k in sorted(deti.items(), key=lambda x: -x[1])[:3]),
+                                'yadro': False}
+        for v, x in self.prizhaty.items():           # эфиру тесно, а помощник всё ещё тяжёл — на одно ядро
+            okno = self.okna.get(v, [])
+            if not x['yadro'] and self.tesno >= TESNO_SHAGOV and okno and sum(okno) / len(okno) >= POROG / 2:
+                x['yadro'] = True
+                v_uho('Эфиру тесно, а тяжёлая работа помощника всё ещё грузит шлем: %s, около %d процентов ядра. '
+                      'Посадила её на одно ядро — доделает медленнее, а игре и эфиру просторнее. Скажи Плюсу «пусть '
+                      'работает в полную» — отпущу.' % (x['imya'] + (' (%s)' % x['sostav'] if x['sostav'] else ''),
+                                                       sum(okno) / len(okno)))
+            for p in poderevo(v):                     # и новые дети (следующий curl) — так же
+                prizhat(p, self.yadro if x['yadro'] else None)
+        self.zapisat()
+
+
 def demon():
-    zamok = open('/tmp/nagruzka-demon.lock', 'w')
+    zamok = open(os.environ.get('NAGRUZKA_ZAMOK', '/tmp/nagruzka-demon.lock'), 'w')
     try:
         fcntl.flock(zamok, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         return                                    # чёрный ящик уже пишет
+    import signal
     versiya = os.path.getmtime(SKRIPT) if os.path.exists(SKRIPT) else 0
     imena, t0, e0, m0, posl = {}, tiki(), efir(), time.time(), 0.0
+    pov = Povodok()
+
+    def proch(*_):                                # выходим — никого не оставляем прижатым
+        pov.vse_otpustit()
+        pov.zapisat()
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, proch)
+    signal.signal(signal.SIGHUP, proch)
     while True:
         time.sleep(SHAG)
         if os.path.exists(SKRIPT) and os.path.getmtime(SKRIPT) != versiya:
+            pov.vse_otpustit()
             zamok.close()
             os.execv('/bin/sh', ['sh', SKRIPT, 'demon'])          # обновили — новая версия
         t1, e1, m1 = tiki(), efir(), time.time()
         dt_ = max(0.5, m1 - m0)
         cpu = dict.fromkeys(GRUPPY + ('drugoe', 'gosti'), 0.0)
+        cpu_pid = {}
         for pid, t in t1.items():
             if pid not in imena:
                 imena[pid] = gruppa(pid)
             g = imena[pid]
-            if g and pid in t0:
-                cpu[g] += (t - t0[pid]) / HZ / dt_ * 100
+            if pid in t0:
+                c = (t - t0[pid]) / HZ / dt_ * 100
+                cpu_pid[pid] = c
+                if g:
+                    cpu[g] += c
         for pid in list(imena):
             if pid not in t1:
                 del imena[pid]
         idet = e1 is not None and e1.get('state') == 'efir'
+        try:
+            pov.shag(idet, cpu_pid, bool(e1 and e1.get('tesno')))
+        except Exception as e:                    # предохранитель не должен ронять чёрный ящик
+            print('povodok:', type(e).__name__, e, file=sys.stderr)
         if idet or m1 - posl >= 30:
             metki = []
             try:
@@ -409,8 +692,11 @@ for x in bash:plus python3:ushi python3:golos python3:obzor python3:vedushchiy p
 done
 CL=$(awk '$2 == "node:claude" || $2 == "claude"' /tmp/.nagr.i | wc -l)
 [ "$CL" -gt 3 ] && LISHN="$LISHN claude×$CL"
-ZOMBI=$(for d in /proc/[0-9]*; do s=$(cat "$d/stat" 2> /dev/null) || continue; s=${s##*) }; [ "${s%% *}" = Z ] && echo z; done | wc -l)
-[ "$ZOMBI" -gt 0 ] && LISHN="$LISHN зомби×$ZOMBI"
+# зомби — кончились, а родитель их не забрал (17.10: Плюс насчитал 13, а чьи — не видно): по имени родителя
+ZOMBI=$(for d in /proc/[0-9]*; do s=$(cat "$d/stat" 2> /dev/null) || continue; s=${s##*) }; set -- $s
+  [ "$1" = Z ] || continue; imya "$2" || printf '?'; echo; done)
+[ -n "$ZOMBI" ] && LISHN="$LISHN зомби×$(echo "$ZOMBI" | wc -l) (не забрал: $(echo "$ZOMBI" | sort | uniq -c |
+  sort -rn | awk '{ printf "%s%s×%d", (NR > 1 ? ", " : ""), $2, $1 }'))"
 NI=$(for p in $(awk '$2 == "claude" || $2 == "node:claude" { print $1 }' /tmp/.nagr.i); do
   s=$(cat /proc/$p/stat 2> /dev/null) || continue; s=${s##*) }; set -- $s; echo "${17}"; done | sort -n | tail -n 1)
 [ -n "$NI" ] && echo "Приоритет Плюса: nice $NI (10 — уступает игре и бриджу, 0 — наравне с ними)"

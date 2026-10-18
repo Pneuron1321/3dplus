@@ -1,0 +1,1035 @@
+#!/usr/bin/env python3
+# muzyka — фоновая музыка для эфира (версия 0.1, 17.10). Треки — /root/muzyka (CC0 / CC-BY, без Content ID).
+#
+#   muzyka                  — что играет
+#   muzyka vkl [трек]       — включить (трек — часть названия, любая; без названия — по кругу)
+#   muzyka stop             — выключить (демон выходит)
+#   muzyka sleduyushchiy    — следующий трек
+#   muzyka predydushchiy    — прошлый трек (тот, что играл до этого)
+#   muzyka pult             — демон шторки приложения (2.5.7): шлёт мосту состояние плеера и берёт команды
+#                             из шторки (назад, вперёд, стоп, громкость, плейлист, трек); запускает plus
+#   muzyka gromkost N       — громкость 0–100 (по умолчанию 40; 100 = примерно как голос Авы);
+#                             также gromche [N] / tishe [N] и «+N» / «-N». Обычный путь: меняется
+#                             для СЛЕДУЮЩИХ кусков (~24 с готовых уже стоят в очереди приложения), демон
+#                             не перезапускается
+#   muzyka gromkost N bystro — то же, но СРАЗУ (также `muzyka bystro N`, bystro работает и с gromche/tishe):
+#                             кроме нового N для кусков, приложение мгновенно (GET /fon/gromkost) домножает
+#                             уже стоящую очередь на N / (громкость, на которой она закодирована); когда
+#                             кусок на новой громкости начинает играть, приложение возвращается к 100 %.
+#                             Потолок приложения 150 %: если N больше чем в 1,5 раза громче очереди, сразу
+#                             слышно 1,5× и остальное — со следующим куском. Обычный путь приложение не
+#                             трогает и быстрый не ломает. Нужен мост с fon и играющая музыка, иначе
+#                             bystro = обычная громкость
+#   muzyka spisok           — какие треки есть
+#   muzyka udalit ИМЯ       — удалить трек из папки и из всех плейлистов (имя однозначно; иначе перечислит)
+#   muzyka avtor            — строка авторства (CC BY 4.0) для эфира
+#
+# С приложения 2.5.6 (в /status «umeet» есть fon): куски идут в POST /fon?mode=oba, приложение само
+# приглушает музыку под голосом, уступать паузами не нужно; название — /fon/plashka. Ниже — старый путь
+# (запасной, если fon нет): POST /say?mode=oba на мост (localhost:8766): в шлем и
+# прямо в эфир. Мост играет ОДНО аудио за раз, новое /say обрывает прежнее, громкости и смешивания
+# у него нет. Поэтому музыка идёт кусками по 30 с, тише на заранее (ffmpeg volume), и уступает Аве:
+# пока она говорит (или Александр сказал «плюс плюс») — тишина, потом музыка сама продолжает с того
+# же места через ~2,5 с тишины. Никогда не обрывает голос: новый кусок ставится, только когда
+# мост молчит. nice 10, один ffmpeg на 30 с звука.
+import fcntl
+import json
+import os
+import random
+import re
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.parse
+import urllib.request
+
+DIR = os.environ.get('MUZYKA_DIR', '/root/muzyka')
+E = os.environ.get
+CFG = E('MUZYKA_CFG', '/root/.muzyka.json')
+GAIN = E('MUZYKA_GAIN', '/root/.muzyka-gain.json')
+STATE = E('MUZYKA_STATE', '/tmp/muzyka.state')
+LOCK = E('MUZYKA_LOCK', '/tmp/muzyka-demon.lock')
+LOG = E('MUZYKA_LOG', '/tmp/muzyka.log')
+ISTORIYA = E('MUZYKA_ISTORIYA', '/tmp/muzyka.istoriya')      # какие треки играли (для «назад»)
+PULT_LOCK = E('MUZYKA_PULT_LOCK', '/tmp/muzyka-pult.lock')
+MOST = os.environ.get('GOLOS_MOST', 'http://localhost:8766')
+Q = '/tmp/golos/q'
+PAUZA, DALSHE = '/tmp/golos.pauza', '/tmp/golos.dalshe'
+EXT = ('.mp3', '.ogg', '.wav', '.m4a', '.flac', '.opus')
+PERVYY = 6.0        # с звука в первом куске трека (быстрый старт после переключения)
+SEG = 30.0          # с звука в куске
+TISHINA = 2.5       # с тишины моста, прежде чем музыка вернётся после голоса
+UMOLCHANIE = 40     # громкость по умолчанию, %
+OPORA = -18.0       # дБ: средняя громкость трека при 100 %
+AVTORY = os.path.join(DIR, 'avtory.json')
+AVTOR_PO_UMOLCHANIYU = 'Kevin MacLeod (CC BY 4.0)'
+AVTOR = ('Music by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0 '
+         '(creativecommons.org/licenses/by/4.0/)')
+
+
+def log(s):
+    try:
+        with open(LOG, 'a') as f:
+            f.write('%s %s\n' % (time.strftime('%H:%M:%S'), s))
+    except OSError:
+        pass
+
+
+def pl_put(n):
+    return os.path.join(DIR, '.pleylist-%s.txt' % n)
+
+
+def pl_chitat(n):
+    try:
+        return [l.strip() for l in open(pl_put(n), encoding='utf-8') if l.strip()]
+    except OSError:
+        return []
+
+
+def treki():
+    try:
+        vse = sorted(f for f in os.listdir(DIR) if f.lower().endswith(EXT) and not f.startswith('.'))
+        try:
+            akt = open(os.path.join(DIR, '.pleylist-aktivnyy'), encoding='utf-8').read().strip()
+        except OSError:
+            akt = ''
+        if akt:
+            v = [f for f in vse if f in pl_chitat(akt)]
+            return v or vse
+        return vse
+    except OSError:
+        return []
+
+
+def imya(f):
+    return os.path.splitext(f)[0]
+
+
+def avtor_treka(f):
+    """'Автор (лицензия)' из avtory.json по имени трека (с .mp3 или без); по умолчанию Kevin MacLeod CC BY 4.0."""
+    try:
+        d = json.load(open(AVTORY, encoding='utf-8'))
+        a = d.get(imya(f)) or d.get(f)
+        if a:
+            return str(a)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return AVTOR_PO_UMOLCHANIYU
+
+
+def norm(s):
+    return re.sub(r'[^a-z0-9а-яё]+', ' ', s.lower()).strip()
+
+
+def naiti(zapros):
+    """Трек по части названия. Возвращает список совпадений (пусто — нет, 1 — нашли, больше — неясно)."""
+    t = treki()
+    z = norm(zapros)
+    if not z:
+        return []
+    tochno = [f for f in t if norm(imya(f)) == z]
+    if tochno:
+        return tochno
+    chast = [f for f in t if z in norm(imya(f))]
+    if chast:
+        return chast
+    slova = z.split()
+    return [f for f in t if all(w in norm(imya(f)) for w in slova)]
+
+
+def cfg_chitat():
+    try:
+        d = json.load(open(CFG))
+    except (OSError, ValueError):
+        d = {}
+    d.setdefault('vol', UMOLCHANIE)
+    d.setdefault('on', False)
+    d.setdefault('nonce', 0)
+    return d
+
+
+def cfg_pisat(d):
+    tmp = CFG + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(d, f)
+    os.replace(tmp, CFG)
+
+
+def demon_zhiv():
+    try:
+        f = open(LOCK, 'a')
+    except OSError:
+        return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return False
+    except BlockingIOError:
+        return True
+    finally:
+        f.close()
+
+
+def sostoyanie():
+    try:
+        return json.load(open(STATE))
+    except (OSError, ValueError):
+        return {}
+
+
+def zapustit_demona():
+    if demon_zhiv() or os.environ.get('MUZYKA_BEZ_DEMONA'):      # проверка: демона не поднимаем
+        return True
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), '--demon'], stdin=subprocess.DEVNULL,
+                     stdout=open(LOG, 'a'), stderr=subprocess.STDOUT, start_new_session=True)
+    for _ in range(30):
+        time.sleep(0.1)
+        if demon_zhiv():
+            return True
+    return False
+
+
+# ---------- демон ----------
+
+def vremya(p):
+    try:
+        return float(open(p).read().strip()[:18])
+    except (OSError, ValueError):
+        return 0.0
+
+
+def most_status():
+    """dict от /say/status или None — мост молчит."""
+    try:
+        with urllib.request.urlopen(MOST + '/say/status', timeout=2) as r:
+            return json.loads(r.read().decode() or '{}')
+    except Exception:
+        return None
+
+
+def alexandr_govorit():
+    """«плюс плюс» сказан, фраза ещё не дослушана — музыка ждёт (иначе микрофон пишет её)."""
+    pz, dl = vremya(PAUZA), vremya(DALSHE)
+    return pz > dl and time.time() - pz < 120
+
+
+def golos_v_ocheredi():
+    try:
+        return any(not n.endswith('.tmp') for n in os.listdir(Q))
+    except OSError:
+        return False
+
+
+def dlitelnost(p):
+    r = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', p],
+                       capture_output=True, text=True, timeout=30)
+    return float(r.stdout.strip())
+
+
+_GLOCK = threading.Lock()
+
+
+def usilenie(p):
+    """дБ, на которые поднять/опустить трек, чтобы средняя громкость стала OPORA (кэш по имени и размеру)."""
+    key = '%s|%d' % (os.path.basename(p), os.path.getsize(p))
+    with _GLOCK:
+        try:
+            kesh = json.load(open(GAIN))
+        except (OSError, ValueError):
+            kesh = {}
+        if key in kesh:
+            return kesh[key]
+    r = subprocess.run(['ffmpeg', '-nostats', '-i', p, '-af', 'volumedetect', '-vn', '-f', 'null', '-'],
+                       capture_output=True, text=True, timeout=120)
+    m = re.search(r'mean_volume:\s*(-?[\d.]+) dB', r.stderr)
+    g = (OPORA - float(m.group(1))) if m else 0.0
+    g = max(-12.0, min(12.0, g))
+    with _GLOCK:
+        try:
+            kesh = json.load(open(GAIN))
+        except (OSError, ValueError):
+            pass
+        kesh[key] = round(g, 1)
+        try:
+            tmp = GAIN + '.tmp'
+            json.dump(kesh, open(tmp, 'w'))
+            os.replace(tmp, GAIN)
+        except OSError:
+            pass
+    return round(g, 1)
+
+
+def kusok(p, start, dlit, vol, gain_db, tmpdir, vhod=0.03, seg=None):
+    """mp3-кусок [start, start+dlit) с громкостью vol %. Возвращает (путь, длина куска, дошли до конца трека)."""
+    seg = seg or SEG
+    ostalos = dlit - start
+    konec = ostalos <= seg + 0.5
+    d = ostalos if konec else seg
+    db = gain_db + (20.0 * __import__('math').log10(max(vol, 1) / 100.0))
+    fi = 1.5 if start < 0.5 else vhod
+    fo = 2.0 if konec else 0.03
+    af = 'volume=%.1fdB,alimiter=limit=0.89,afade=t=in:d=%.2f,afade=t=out:st=%.2f:d=%.2f' % (
+        db, fi, max(0.0, d - fo), fo)
+    out = os.path.join(tmpdir, 'k%d.mp3' % int(time.time() * 1000))
+    subprocess.run(['ffmpeg', '-v', 'error', '-ss', '%.2f' % start, '-t', '%.2f' % d, '-i', p, '-vn', '-af', af,
+                    '-ac', '2', '-ar', '44100', '-b:a', '96k', '-f', 'mp3', '-y', out],
+                   check=True, timeout=60, stdin=subprocess.DEVNULL)
+    return out, d, konec
+
+
+class Gotovit(threading.Thread):
+    """Готовит кусок (ffmpeg) в отдельном потоке, чтобы главный цикл мог сразу реагировать на смену nonce."""
+
+    def __init__(self, klyuch, p, start_s, vol, tmpdir, vhod=0.03, seg=None):
+        super().__init__(daemon=True)
+        self.klyuch, self.p, self.start_s, self.vol, self.tmpdir, self.vhod = klyuch, p, start_s, vol, tmpdir, vhod
+        self.seg = seg
+        self.res, self.err, self.done, self.otmena = None, None, threading.Event(), False
+        self.start()
+
+    def run(self):
+        try:
+            self.res = kusok(self.p, self.start_s, dlitelnost(self.p), self.vol, usilenie(self.p), self.tmpdir,
+                             self.vhod, self.seg)
+        except Exception as e:
+            self.err = e
+        finally:
+            self.done.set()
+            if self.otmena:
+                self.ubrat()
+
+    def ubrat(self):
+        self.otmena = True
+        if self.res:
+            try:
+                os.remove(self.res[0])
+            except OSError:
+                pass
+            self.res = None
+
+
+def progret(p):
+    """Фоном считаем громкость всех треков, чтобы переключение на любой было мгновенным."""
+    def rabota():
+        for f in treki():
+            try:
+                usilenie(os.path.join(DIR, f))
+            except Exception:
+                pass
+    threading.Thread(target=rabota, daemon=True).start()
+
+
+class Igra(threading.Thread):
+    """Один POST /say на мост; закончился — res = end ('done' / 'stopped') или 'error'."""
+
+    def __init__(self, put, rezhim, ruchka='/say'):
+        super().__init__(daemon=True)
+        self.put, self.rezhim, self.ruchka, self.res, self.t0 = put, rezhim, ruchka, None, time.time()
+        self.start()
+
+    def run(self):
+        try:
+            req = urllib.request.Request('%s%s?mode=%s' % (MOST, self.ruchka, self.rezhim), data=open(self.put, 'rb').read(),
+                                         method='POST', headers={'Content-Type': 'audio/mpeg'})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                self.res = json.loads(r.read().decode() or '{}').get('end', 'done')
+        except Exception as e:
+            log('POST: %s %s' % (type(e).__name__, str(e)[:80]))
+            self.res = 'error'
+
+
+def most_umeet():
+    try:
+        with urllib.request.urlopen(MOST + '/status', timeout=2) as r:
+            return json.loads(r.read().decode() or '{}').get('umeet') or []
+    except Exception:
+        return []
+
+
+def vyzov(put):
+    try:
+        urllib.request.urlopen(MOST + put, timeout=3).read()
+    except Exception:
+        pass
+
+
+def fon_gromkost(v):
+    """Уровень приложения, % (100 = как закодировано в куске). Быстрый путь: /fon/gromkost?v=N."""
+    vyzov('/fon/gromkost?v=%d' % max(0, min(150, int(v))))
+
+
+def fon_ochered():
+    """Сколько секунд звука уже стоит в очереди приложения (новый кусок начнёт играть после них)."""
+    try:
+        with urllib.request.urlopen(MOST + '/fon/status', timeout=2) as r:
+            return float(json.loads(r.read().decode() or '{}').get('ochered_s') or 0)
+    except Exception:
+        return 0.0
+
+
+def plashka(tekst):
+    if tekst:
+        vyzov('/fon/plashka?pokaz=1&tekst=' + urllib.parse.quote(tekst))
+    else:
+        vyzov('/fon/plashka?pokaz=0')
+
+
+def demon_fon():
+    """Приложение 2.5.6+: куски идут в POST /fon?mode=oba, приложение само приглушает музыку под голосом.
+    POST возвращается, когда впереди меньше 12 с, — тогда готовим и шлём следующий кусок."""
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+    lk = open(LOCK, 'a')
+    try:
+        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    tmpdir = tempfile.mkdtemp(prefix='muzyka-')
+    log('демон (fon) пошёл')
+    cfg = cfg_chitat()
+    nonce = cfg['nonce']
+    ocher = []
+
+    def vybrat(zapros=None, posle=None):
+        t = treki()
+        if zapros:
+            n = naiti(zapros)
+            if n:
+                return n[0]
+        if not t:
+            return None
+        if not ocher:
+            ocher.extend(random.sample(t, len(t)))
+            if posle in ocher and len(ocher) > 1 and ocher[0] == posle:
+                ocher.append(ocher.pop(0))
+        return ocher.pop(0)
+
+    trek = vybrat(cfg.get('track'), None)
+    poz, gotov, pokazan = 0.0, None, None
+    progret(None)
+    # baza — громкость, на которой закодирован то, что сейчас слышно (для быстрого пути CLI);
+    # n_ok — номер быстрой команды, для которой приложение уже возвращено к 100 %
+    S = {'baza': cfg['vol'], 'n_ok': cfg.get('bystro_n', 0)}
+    fon_gromkost(100)
+
+    def zapis(igraet, pr=''):
+        try:
+            tmp = STATE + '.tmp'
+            json.dump({'pid': os.getpid(), 'igraet': igraet, 'trek': imya(trek) if trek else None,
+                       'poz': round(poz), 'vol': cfg['vol'], 'baza': S['baza'], 'prichina': pr,
+                       't': time.time()}, open(tmp, 'w'))
+            os.replace(tmp, STATE)
+        except OSError:
+            pass
+
+    def kusok_zaigral(vk, nk):
+        """Кусок, закодированный на громкости vk, начал играть: запоминаем базу; если это перекодировка
+        после быстрой команды nk (и новых быстрых не было) — приложение обратно к 100 %."""
+        S['baza'] = vk
+        zapis(True)
+        n = cfg_chitat().get('bystro_n', 0)
+        if n == nk and n != S['n_ok']:
+            S['n_ok'] = n
+            fon_gromkost(100)
+
+    def izmeneno(p):
+        """Выключили, сменился nonce (vkl / sleduyushchiy / udalit) или файл трека исчез."""
+        c = cfg_chitat()
+        return (not c['on']) or c['nonce'] != nonce or not os.path.exists(p)
+
+    def otmenit(g):
+        if g is not None:
+            g.ubrat()
+
+    try:
+        while trek:
+            cfg = cfg_chitat()
+            if not cfg['on']:
+                break
+            if cfg['nonce'] != nonce:
+                nonce = cfg['nonce']
+                vyzov('/fon/stop')
+                otmenit(gotov)
+                trek = vybrat(cfg.get('track'), trek)
+                cfg['track'] = None
+                cfg_pisat(cfg)
+                poz, gotov = 0.0, None
+                if not trek:
+                    break
+            p = os.path.join(DIR, trek)
+            if not os.path.exists(p):
+                otmenit(gotov)
+                vyzov('/fon/stop')
+                trek = vybrat(None, trek)
+                poz, gotov = 0.0, None
+                continue
+            if pokazan != trek:
+                pokazan = trek
+                plashka('%s - %s' % (imya(trek), avtor_treka(trek)))
+                istoriya_dobavit(trek)
+            vol = cfg['vol']
+            nk = cfg.get('bystro_n', 0)
+            if gotov is not None and gotov.klyuch == (trek, poz, vol):
+                g = gotov
+            else:
+                otmenit(gotov)
+                g = Gotovit((trek, poz, vol), p, poz, vol, tmpdir, 0.5 if poz > 0.5 else 0.03,
+                             PERVYY if poz < 0.5 else None)       # первый кусок трека короткий — старт сразу
+            gotov = None
+            while not g.done.wait(0.1):                    # ждём кусок, но смену nonce видим сразу
+                if izmeneno(p):
+                    break
+            if not g.done.is_set() or izmeneno(p):
+                g.ubrat()
+                continue
+            if g.err is not None or not g.res:
+                log('ffmpeg: %s %s' % (type(g.err).__name__, str(g.err)[:100]))
+                for _ in range(50):
+                    if izmeneno(p):
+                        break
+                    time.sleep(0.1)
+                continue
+            put, d, konec = g.res
+            och = fon_ochered()
+            ig = Igra(put, 'oba', '/fon')
+            zapis(True)
+            if vol != S['baza'] or nk != S['n_ok']:
+                t = threading.Timer(och, kusok_zaigral, (vol, nk))
+                t.daemon = True
+                t.start()
+            smena = False
+            while ig.res is None:
+                time.sleep(0.1)
+                if izmeneno(p):
+                    vyzov('/fon/stop')
+                    smena = True
+                    break
+                if gotov is None and time.time() - ig.t0 > 0.5 and not konec:
+                    gotov = Gotovit((trek, poz + d, vol), p, poz + d, vol, tmpdir)   # следующий кусок — в потоке
+            if smena:                                      # новый цикл сам подхватит nonce, ответа моста не ждём
+                otmenit(gotov)
+                gotov = None
+                try:
+                    os.remove(put)
+                except OSError:
+                    pass
+                continue
+            try:
+                os.remove(put)
+            except OSError:
+                pass
+            if ig.res != 'error':
+                if izmeneno(p):
+                    otmenit(gotov)
+                    gotov = None
+                    continue
+                poz += d
+                if konec:
+                    otmenit(gotov)
+                    trek = vybrat(None, trek)
+                    poz, gotov = 0.0, None
+            else:
+                otmenit(gotov)
+                gotov = None
+                time.sleep(3)
+    finally:
+        vyzov('/fon/stop')
+        fon_gromkost(100)                                  # приложение — в исходное
+        plashka('')
+        try:
+            os.remove(STATE)
+        except OSError:
+            pass
+        try:
+            for f in os.listdir(tmpdir):
+                os.remove(os.path.join(tmpdir, f))
+            os.rmdir(tmpdir)
+        except OSError:
+            pass
+        log('демон (fon) вышел')
+    return 0
+
+
+def istoriya_dobavit(trek):
+    try:
+        st = [l.strip() for l in open(ISTORIYA, encoding='utf-8') if l.strip()][-30:]
+    except OSError:
+        st = []
+    if not st or st[-1] != trek:
+        st.append(trek)
+    try:
+        open(ISTORIYA, 'w', encoding='utf-8').write('\n'.join(st[-30:]) + '\n')
+    except OSError:
+        pass
+
+
+def proshlyy_trek():
+    """Трек, игравший до нынешнего (есть в папке), или None."""
+    try:
+        st = [l.strip() for l in open(ISTORIYA, encoding='utf-8') if l.strip()]
+    except OSError:
+        return None
+    seychas = st[-1] if st else None
+    for t in reversed(st[:-1]):
+        if t != seychas and os.path.exists(os.path.join(DIR, t)):
+            return t
+    return None
+
+
+# ---------- шторка приложения (2.5.7): состояние мосту, команды из шторки ----------
+
+def pleylisty():
+    try:
+        return sorted(f[10:-4] for f in os.listdir(DIR) if f.startswith('.pleylist-') and f.endswith('.txt'))
+    except OSError:
+        return []
+
+
+def aktivnyy():
+    try:
+        return open(os.path.join(DIR, '.pleylist-aktivnyy'), encoding='utf-8').read().strip()
+    except OSError:
+        return ''
+
+
+def sostoyanie_pleera():
+    cfg = cfg_chitat()
+    st = sostoyanie()
+    vkl = bool(cfg['on'] and demon_zhiv())
+    trek = (st.get('trek') or '') if vkl else ''
+    return {'igraet': bool(vkl and st.get('igraet')), 'vkl': vkl, 'trek': trek,
+            'avtor': avtor_treka(trek) if trek else '', 'vol': cfg['vol'], 'prichina': st.get('prichina') or '',
+            'pleylisty': pleylisty(), 'aktivnyy': aktivnyy(), 'treki': [imya(f) for f in treki()]}
+
+
+def vypolnit(k, a):
+    """Команда шторки — то же, что голосом (вывод команды шторке не нужен)."""
+    import contextlib
+    import io
+    a = str(a or '').strip()
+    komanda = {'vkl': ['vkl'] + ([a] if a else []), 'stop': ['stop'], 'sled': ['sleduyushchiy'],
+               'pred': ['predydushchiy'], 'gromkost': ['gromkost', a, 'bystro'], 'vse': ['pleylist', '-', 'vse'],
+               'pleylist': ['pleylist', a, 'vkl']}.get(k)
+    if not komanda or (k in ('gromkost', 'pleylist') and not a):
+        return
+    with contextlib.redirect_stdout(io.StringIO()):
+        main(komanda)
+        if k in ('pleylist', 'vse') and cfg_chitat()['on'] and demon_zhiv():
+            main(['sleduyushchiy'])                          # из шторки — сразу, а не со следующего трека
+    log('шторка: %s %s' % (k, a[:60]))
+
+
+def pult():
+    """Демон шторки: раз в ~3 с — состояние мосту (если поменялось или раз в 5 с), между — ждёт команду."""
+    lk = open(PULT_LOCK, 'a')
+    try:
+        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+    mt = os.path.getmtime(os.path.abspath(__file__))
+    posl, posl_t = None, 0.0
+    while True:
+        try:
+            if os.path.getmtime(os.path.abspath(__file__)) != mt:
+                lk.close()
+                os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), 'pult'])   # обновили — новой версией
+        except OSError:
+            pass
+        try:
+            s = json.dumps(sostoyanie_pleera(), ensure_ascii=False)
+            if s != posl or time.time() - posl_t > 5:
+                req = urllib.request.Request(MOST + '/fon/pleer', data=s.encode('utf-8'), method='POST',
+                                             headers={'Content-Type': 'application/json'})
+                urllib.request.urlopen(req, timeout=5).read()
+                posl, posl_t = s, time.time()
+            with urllib.request.urlopen(MOST + '/fon/komanda?zhdat=3', timeout=10) as r:
+                k = json.loads(r.read().decode() or '{}')
+            if k.get('k'):
+                vypolnit(k['k'], k.get('a'))
+                posl = None                                  # сразу новое состояние
+        except Exception:
+            time.sleep(5)                                    # моста нет (закрыт, старое приложение) — тихо ждём
+
+
+def demon():
+    if 'fon' in most_umeet():
+        return demon_fon()
+    return demon_staryy()
+
+
+def demon_staryy():
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+    lk = open(LOCK, 'a')
+    try:
+        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    tmpdir = tempfile.mkdtemp(prefix='muzyka-')
+    log('демон пошёл')
+    cfg = cfg_chitat()
+    nonce = cfg['nonce']
+    vse = treki()
+    ocher = []
+
+    def vybrat(zapros=None, posle=None):
+        t = treki()
+        if zapros:
+            n = naiti(zapros)
+            if n:
+                return n[0]
+        if not t:
+            return None
+        if not ocher:
+            ocher.extend(random.sample(t, len(t)))
+            if posle in ocher and len(ocher) > 1 and ocher[0] == posle:
+                ocher.append(ocher.pop(0))
+        return ocher.pop(0)
+
+    trek = vybrat(cfg.get('track'), None)
+    anons = [0, None]
+    poz = 0.0
+    gotov = None          # (trek, poz, vol) -> (путь, длина, конец): заготовка следующего куска
+    ischem = None
+    tishina_s = None      # с какого момента мост молчит
+    prichina = 'ждёт'
+
+    def zapis(igraet, pr=''):
+        try:
+            tmp = STATE + '.tmp'
+            json.dump({'pid': os.getpid(), 'igraet': igraet, 'trek': imya(trek) if trek else None,
+                       'poz': round(poz), 'vol': cfg['vol'], 'prichina': pr, 't': time.time()}, open(tmp, 'w'))
+            os.replace(tmp, STATE)
+        except OSError:
+            pass
+
+    try:
+        while trek:
+            cfg = cfg_chitat()
+            if not cfg['on']:
+                break
+            if cfg['nonce'] != nonce:                     # vkl трек / sleduyushchiy
+                nonce = cfg['nonce']
+                trek = vybrat(cfg.get('track'), trek) if cfg.get('track') else vybrat(None, trek)
+                cfg['track'] = None
+                cfg_pisat(cfg)
+                poz, gotov = 0.0, None
+                if not trek:
+                    break
+            p = os.path.join(DIR, trek)
+            if not os.path.exists(p):
+                trek = vybrat(None, trek)
+                poz, gotov = 0.0, None
+                continue
+            # --- ждём тишины моста ---
+            st = most_status()
+            svobodno = (st is not None and not st.get('playing') and not golos_v_ocheredi()
+                        and not alexandr_govorit())
+            if not svobodno:
+                tishina_s = None
+                zapis(False, 'мост не отвечает' if st is None else 'говорит Ава или Александр')
+                time.sleep(0.4)
+                continue
+            if tishina_s is None:
+                tishina_s = time.time()
+            if time.time() - tishina_s < TISHINA:
+                zapis(False, 'пауза после голоса')
+                time.sleep(0.3)
+                continue
+            # --- кусок ---
+            try:
+                if gotov and gotov[0] == (trek, poz, cfg['vol']):
+                    put, d, konec = gotov[1]
+                else:
+                    put, d, konec = kusok(p, poz, dlitelnost(p), cfg['vol'], usilenie(p), tmpdir,
+                                          0.5 if poz > 0.5 else 0.03)
+            except Exception as e:
+                log('ffmpeg: %s %s' % (type(e).__name__, str(e)[:100]))
+                time.sleep(5)
+                continue
+            gotov = None
+            rez = os.environ.get('MUZYKA_REZHIM') or ('oba' if 'oba' in (st.get('rezhimy') or []) else 'vsluh')
+            st2 = most_status()
+            if st2 is None or st2.get('playing'):          # за это время заговорила Ава — не лезем
+                tishina_s = None
+                continue
+            ig = Igra(put, rez)
+            poz_nach, vol_nach = poz, cfg['vol']
+            zapis(True)
+            if time.time() - anons[0] > 80 or anons[1] != trek:   # строка «Now playing» в чате эфира (живёт 1,5 мин)
+                anons[:] = [time.time(), trek]
+                try:
+                    tx = urllib.parse.quote('Now playing: %s - Kevin MacLeod (CC BY 4.0)' % imya(trek))
+                    urllib.request.urlopen(MOST + '/chat/upr?pokaz=1&kto=Music&login=music&cvet=%23F8CF1E&id=muz&tekst=' + tx, timeout=3).read()
+                except Exception:
+                    pass
+            sled = None
+            while ig.res is None:
+                time.sleep(0.3)
+                c2 = cfg_chitat()
+                if (not c2['on'] or c2['nonce'] != nonce or c2['vol'] != vol_nach or alexandr_govorit()):
+                    try:
+                        urllib.request.urlopen(MOST + '/say/stop', timeout=2).read()
+                    except Exception:
+                        pass
+                    break
+                if sled is None and time.time() - ig.t0 > 1.5 and not konec:
+                    # заготовка следующего куска, пока играет этот
+                    try:
+                        sled = kusok(p, poz_nach + d, dlitelnost(p), vol_nach, usilenie(p), tmpdir)
+                        gotov = ((trek, poz_nach + d, vol_nach), sled)
+                    except Exception as e:
+                        log('prefetch: %s' % e)
+                        sled = False
+            for _ in range(20):                            # ждём ответ моста после stop
+                if ig.res is not None:
+                    break
+                time.sleep(0.1)
+            probilo = time.time() - ig.t0
+            try:
+                os.remove(put)
+            except OSError:
+                pass
+            if ig.res == 'done' and probilo >= d - 1.0:
+                poz = poz_nach + d
+                tishina_s = time.time() - TISHINA + 0.0     # без паузы между кусками
+                if konec:
+                    trek = vybrat(None, trek)
+                    poz, gotov = 0.0, None
+            else:
+                # оборвали (Ава заговорила, громкость, команда): продолжим с того же места
+                poz = poz_nach + min(probilo, d)
+                tishina_s = None
+                if poz >= dlitelnost(p) - 1:
+                    trek = vybrat(None, trek)
+                    poz = 0.0
+                if ig.res == 'error':
+                    time.sleep(3)
+    finally:
+        try:
+            os.remove(STATE)
+        except OSError:
+            pass
+        try:
+            for f in os.listdir(tmpdir):
+                os.remove(os.path.join(tmpdir, f))
+            os.rmdir(tmpdir)
+        except OSError:
+            pass
+        log('демон вышел')
+    return 0
+
+
+# ---------- команды ----------
+
+def skazat_sostoyanie():
+    cfg = cfg_chitat()
+    st = sostoyanie()
+    if not demon_zhiv() or not cfg['on']:
+        return 'Музыка выключена. Треков в папке: %d, громкость %d.' % (len(treki()), cfg['vol'])
+    if st.get('igraet'):
+        return 'Играет «%s», громкость %d.' % (st.get('trek'), cfg['vol'])
+    return 'Включена, сейчас пауза (%s); трек «%s», громкость %d.' % (st.get('prichina') or 'ждёт',
+                                                                         st.get('trek'), cfg['vol'])
+
+
+def main(a):
+    if a and a[0] == '--demon':
+        return demon()
+    if a and a[0] == 'pult':
+        return pult()
+    cmd = a[0].lower() if a else ''
+    rest = ' '.join(a[1:]).strip()
+    if cmd in ('', 'status'):
+        print(skazat_sostoyanie())
+        return 0
+    if cmd in ('vkl', 'on', 'start'):
+        if not treki():
+            print('В папке %s нет треков.' % DIR)
+            return 1
+        cfg = cfg_chitat()
+        if rest:
+            n = naiti(rest)
+            if not n:
+                print('Не нашла трек «%s». Есть: %s.' % (rest, ', '.join(imya(f) for f in treki())))
+                return 1
+            if len(n) > 1:
+                print('Подходит несколько: %s. Уточни.' % ', '.join(imya(f) for f in n))
+                return 1
+            cfg['track'] = n[0]
+        else:
+            cfg['track'] = None
+        was = demon_zhiv() and cfg['on']
+        cfg['on'] = True
+        cfg['nonce'] += 1
+        cfg_pisat(cfg)
+        if not zapustit_demona():
+            print('Демон музыки не поднялся, смотри /tmp/muzyka.log.')
+            return 1
+        print('Музыка %s%s, громкость %d.' % ('переключена' if was else 'включена',
+                                            (' на «%s»' % imya(cfg['track'])) if cfg['track'] else '', cfg['vol']))
+        return 0
+    if cmd in ('stop', 'vykl', 'off'):
+        cfg = cfg_chitat()
+        cfg['on'] = False
+        cfg_pisat(cfg)
+        print('Музыка выключена.')
+        return 0
+    if cmd in ('sleduyushchiy', 'sled', 'next', 'dalshe'):
+        cfg = cfg_chitat()
+        if not (cfg['on'] and demon_zhiv()):
+            print('Музыка не играет — сначала muzyka vkl.')
+            return 1
+        cfg['track'] = None
+        cfg['nonce'] += 1
+        cfg_pisat(cfg)
+        print('Следующий трек.')
+        return 0
+    if cmd in ('predydushchiy', 'pred', 'prev', 'nazad'):
+        p = proshlyy_trek()
+        if not p:
+            print('Прошлого трека не помню.')
+            return 1
+        cfg = cfg_chitat()
+        cfg['track'] = p
+        cfg['on'] = True
+        cfg['nonce'] += 1
+        cfg_pisat(cfg)
+        if not zapustit_demona():
+            print('Демон музыки не поднялся, смотри /tmp/muzyka.log.')
+            return 1
+        print('Назад: «%s».' % imya(p))
+        return 0
+    if cmd in ('gromkost', 'gromche', 'tishe', 'bystro'):
+        cfg = cfg_chitat()
+        slova = rest.split()
+        bystro = cmd == 'bystro' or 'bystro' in [w.lower() for w in slova]
+        rest = ' '.join(w for w in slova if w.lower() != 'bystro')
+        if cmd == 'bystro':
+            cmd = 'gromkost'
+        m = re.search(r'([+-]?)\s*(\d+)', rest)
+        if cmd != 'gromkost' and not m:
+            m = re.match(r'()(10)$', '10')
+        if not m:
+            print('Громкость сейчас %d. Скажи число от 0 до 100.' % cfg['vol'])
+            return 0
+        n = int(m.group(2))
+        if cmd == 'gromche':
+            nov = cfg['vol'] + n
+        elif cmd == 'tishe':
+            nov = cfg['vol'] - n
+        elif m.group(1) == '+':
+            nov = cfg['vol'] + n
+        elif m.group(1) == '-':
+            nov = cfg['vol'] - n
+        else:
+            nov = n
+        nov = max(0, min(100, nov))
+        was = cfg['vol']
+        cfg['vol'] = nov
+        bystro = bystro and cfg['on'] and demon_zhiv() and 'fon' in most_umeet()
+        if bystro:
+            cfg['bystro_n'] = cfg.get('bystro_n', 0) + 1
+        cfg_pisat(cfg)
+        if bystro:
+            baza = sostoyanie().get('baza') or was
+            fon_gromkost(round(nov * 100.0 / max(baza, 1)))      # очередь приложения — сразу
+        print('Громкость музыки: было %d, стало %d%s.' % (was, nov, ' (сразу)' if bystro else ''))
+        return 0
+    if cmd in ('pleylist', 'playlist'):
+        a = rest.split(None, 2)
+        if not a:
+            print('Плейлисты: ' + (', '.join(f[10:-4] for f in sorted(os.listdir(DIR)) if f.startswith('.pleylist-') and f.endswith('.txt')) or 'нет') + '.')
+            return 0
+        num, sub = a[0], (a[1] if len(a) > 1 else '')
+        arg = a[2] if len(a) > 2 else ''
+        akt = os.path.join(DIR, '.pleylist-aktivnyy')
+        if sub in ('dobavit', 'add'):
+            if arg in ('', 'tekushchiy'):
+                try:
+                    arg = (json.load(open(STATE)).get('trek') or '')
+                except Exception:
+                    arg = ''
+            n = naiti(arg) if arg else []
+            if len(n) != 1:
+                print('Не нашла трек. Скажи название.')
+                return 1
+            cur = pl_chitat(num)
+            if n[0] not in cur:
+                cur.append(n[0])
+            open(pl_put(num), 'w', encoding='utf-8').write('\n'.join(cur) + '\n')
+            print('В плейлист %s добавлен «%s». Там: %s.' % (num, imya(n[0]), ', '.join(imya(f) for f in cur)))
+            return 0
+        if sub in ('vkl', 'play'):
+            if not pl_chitat(num):
+                print('Плейлист %s пуст.' % num)
+                return 1
+            open(akt, 'w', encoding='utf-8').write(num)
+            print('Играет плейлист %s (со следующего трека).' % num)
+            return 0
+        if sub in ('vse', 'sbros'):
+            try:
+                os.remove(akt)
+            except OSError:
+                pass
+            print('Играют все треки.')
+            return 0
+        print('Плейлист %s: %s.' % (num, ', '.join(imya(f) for f in pl_chitat(num)) or 'пуст'))
+        return 0
+    if cmd in ('spisok', 'list'):
+        t = treki()
+        if not t:
+            print('Папка пуста.')
+        else:
+            print('Треков %d: %s.' % (len(t), ', '.join(imya(f) for f in t)))
+        return 0
+    if cmd in ('udalit', 'delete', 'rm'):
+        if not rest:
+            print('Какой трек удалить? Скажи название.')
+            return 1
+        n = naiti(rest)
+        if not n:
+            print('Не нашла трек «%s». Есть: %s.' % (rest, ', '.join(imya(f) for f in treki())))
+            return 1
+        if len(n) > 1:
+            print('Подходит несколько: %s. Уточни.' % ', '.join(imya(f) for f in n))
+            return 1
+        st = sostoyanie()
+        igraet_eto = (st.get('trek') == imya(n[0]))
+        cfg = cfg_chitat()
+        if demon_zhiv() and cfg['on'] and (igraet_eto or not st):
+            cfg['track'] = None                            # играет именно его — сразу на другой трек
+            cfg['nonce'] += 1
+            cfg_pisat(cfg)
+        os.remove(os.path.join(DIR, n[0]))                 # демон и сам видит исчезновение файла
+        for pl in pleylisty():                             # и из всех плейлистов (17.10: оставались мёртвые имена)
+            sp = pl_chitat(pl)
+            if n[0] in sp:
+                open(pl_put(pl), 'w', encoding='utf-8').write(''.join(x + '\n' for x in sp if x != n[0]))
+        try:
+            av = json.load(open(AVTORY, encoding='utf-8'))
+            if av.pop(imya(n[0]), None) is not None:
+                json.dump(av, open(AVTORY, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+        except (OSError, ValueError):
+            pass
+        print('Удалила «%s». Осталось треков: %d.' % (imya(n[0]), len(treki())))
+        return 0
+    if cmd in ('avtor', 'author'):
+        print(AVTOR)
+        return 0
+    print('muzyka [vkl [трек] | stop | sleduyushchiy | predydushchiy | gromkost N | spisok | udalit ИМЯ | avtor | pult]')
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

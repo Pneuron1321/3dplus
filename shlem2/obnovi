@@ -3,13 +3,17 @@
 # /usr/local/bin. Каждый файл сначала проверяется на синтаксис: битый не ставится.
 # CLAUDE.md и settings.json не трогает — их ставит Александр (защита авто-режима).
 # Уши (ushi) подхватывают новое сами через несколько секунд. Файл с меткой «obnovi: ne trogat»
-# (своя версия в шлеме) не затирается.
+# (своя версия в шлеме) не затирается. Файл, который правили прямо в шлеме (его отпечатка нет среди
+# всех когда-либо выложенных — список obnovi-sumy), тоже не затирается: версия из зеркала ложится рядом,
+# в /root/obnovi-novye, — правки сливает Claude Code (18.10: 17.10 Плюс правил уши в шлеме, obnovi стёр бы их).
 # Папка shlem — версия 1.0, её «обнови» первой версии; вторая берёт только из shlem2.
 B=${OBNOVI_BASE:-https://raw.githubusercontent.com/Pneuron1321/3dplus/claude/tender-goodall-41rwsn/shlem2}
 D=${OBNOVI_DIR:-/usr/local/bin}
 T=$(mktemp -d)
+NOV=${OBNOVI_NOVYE:-/root/obnovi-novye}
+curl -fsSL "$B/obnovi-sumy?t=$(date +%s)" -o "$T/.sumy" 2> /dev/null || : > "$T/.sumy"
 n=0
-for f in plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera nalet radar titr donat itogi obzor vedushchiy donaty zriteli golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya nagruzka gosti sinhron obnovi; do
+for f in plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera nalet radar titr donat itogi obzor vedushchiy donaty zriteli golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya nagruzka gosti sinhron muzyka obnovi; do
   if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f"; then echo "$f: не скачался"; continue; fi
   case $(head -1 "$T/$f") in
     *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$T/$f" ;;
@@ -19,6 +23,15 @@ for f in plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera nalet
   # Свой файл в шлеме (12.10: Плюс по просьбе Александра пересобрала соведущего прямо в шлеме и
   # пометила «obnovi: ne trogat») — не затираем: настройка Александра важнее зеркала.
   if [ "$f" != obnovi ] && grep -q 'obnovi: ne trogat' "$D/$f" 2> /dev/null; then echo "$f: свой в шлеме — не трогаю"; continue; fi
+  # Правлен прямо в шлеме (отпечатка нет среди выложенных версий) — не затираем, зеркальную кладём рядом.
+  if [ "$f" != obnovi ] && [ -f "$D/$f" ] && grep -q "^$f " "$T/.sumy"; then
+    h=$(sha256sum "$D/$f" 2> /dev/null | cut -c1-16)
+    if [ -n "$h" ] && ! grep -q "^$f $h\$" "$T/.sumy"; then
+      mkdir -p "$NOV" && cp "$T/$f" "$NOV/$f"
+      echo "$f: правлен в шлеме — не трогаю; версия из зеркала рядом: $NOV/$f (пусть Claude Code сольёт)"
+      continue
+    fi
+  fi
   # рядом и переименованием: файл подменяется целиком — работающий скрипт (и сам
   # obnovi, 06.10: «Unterminated quoted string») дочитывает старый, а не новый с середины
   cp "$T/$f" "$D/.$f.novyy" && chmod +x "$D/.$f.novyy" && mv -f "$D/.$f.novyy" "$D/$f" &&

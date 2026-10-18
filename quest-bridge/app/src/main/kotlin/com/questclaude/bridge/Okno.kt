@@ -73,9 +73,6 @@ object Okno {
     fun proporcii(kw: Int, kh: Int, povorot: Int): Float =
         if (povorot == 90 || povorot == 270) kh.toFloat() / kw else kw.toFloat() / kh
 
-    /** Окно стоя — выше, чем шире (айфон вертикально): Плюс держит телефон тоже стоя (2.4.0). */
-    fun stoya(kw: Int, kh: Int, povorot: Int): Boolean = kw > 0 && kh > 0 && proporcii(kw, kh, povorot) < 1f
-
     /**
      * Матрица текстурных координат (по столбцам, как у GL): точка окна (u, v) → точка картинки
      * камеры, повёрнутой на [povorot]° по часовой. Умножается справа на матрицу SurfaceTexture.

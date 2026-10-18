@@ -124,6 +124,10 @@ class FrameServerTest {
         override fun gromkost(q: Map<String, String>): String { this.q = q; return "{\"g\":true}" }
         override fun duck(q: Map<String, String>): String { this.q = q; return "{\"d\":true}" }
         override fun plashka(q: Map<String, String>): String { this.q = q; return "{\"p\":true}" }
+        val pult = PleerPult()
+        override fun pleer(json: String?): String = if (json != null) pult.zapisat(json) else pult.sostoyanie
+        override fun komanda(q: Map<String, String>): String = "{\"ok\":${pult.komanda(q["k"].orEmpty(), q["a"].orEmpty())}}"
+        override fun zhdatKomandu(ms: Long): String = pult.zhdat(ms)
     }
     @Volatile private var fonOn = true
 
@@ -178,6 +182,21 @@ class FrameServerTest {
         assertTrue(String(get("/status").body).contains("\"fon\""))
         fonOn = false
         assertEquals(404, get("/fon/status").code)
+    }
+
+    /** Мини-плеер (2.5.7): muzyka шлёт состояние (UTF-8) и ждёт команды; шторка кладёт их через пульт. */
+    @Test fun pleerSostoyanieIKomandy() {
+        val st = "{\"igraet\":true,\"trek\":\"Мой трек\",\"pleylisty\":[\"техно\"]}"
+        assertEquals("{\"ok\":true}", String(post("/fon/pleer", st.toByteArray(Charsets.UTF_8)).body))
+        assertEquals(st, String(get("/fon/pleer").body, Charsets.UTF_8))           // кириллица дошла как есть
+        assertEquals("{}", String(get("/fon/komanda?zhdat=0.2").body))             // команд нет — пусто по таймауту
+        assertEquals("{\"ok\":true}", String(get("/fon/pult?k=sled").body))
+        assertTrue(String(get("/fon/komanda?zhdat=1").body).contains("\"k\":\"sled\""))
+        val t0 = System.currentTimeMillis()
+        Thread { Thread.sleep(300); fon.pult.komanda("pred") }.start()
+        assertTrue(String(get("/fon/komanda?zhdat=5", 8000).body).contains("\"pred\""))   // ждёт и отдаёт сразу
+        assertTrue(System.currentTimeMillis() - t0 < 3000)
+        assertEquals("{\"ok\":false}", String(get("/fon/pult?k=rm").body))
     }
 
     @Test fun efirKeyStartStop() {

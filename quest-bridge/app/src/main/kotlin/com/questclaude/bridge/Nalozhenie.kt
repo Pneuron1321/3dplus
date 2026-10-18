@@ -35,15 +35,9 @@ import kotlin.math.sin
  * думает — взгляд вбок и точки над головой; Плюса нет — бледное. Налёт: всего и за этот эфир
  * одной строкой; сотня — золотая надпись и звон (звон слышит и эфир).
  *
- * Плюс снимает (2.3.7, Александр 11.10: «пусть держит телефон перед собой двумя руками, как бы
- * снимает; когда камера включена — снимает, когда нет — телефона в руках нет; REC и таймер не
- * надо»): пока камера телефона в эфире, Плюс двумя руками держит перед грудью iPhone
- * горизонтально, спинкой с камерами к зрителю. Руки и телефон — рендер той же модели 3dplus тем
- * же ракурсом, что лицо и плечи (plus-ruki-telefon.png поверх, plus-plechi-bez-ruk.png под
- * головой); дышит и покачивается вместе с бюстом. 2.3.8: телефон чёрный, на спинке вместо яблока —
- * жёлтый пришелец с макушки Плюса, надкушенный (дорисовано на картинке, docs/zagotovki/znachok.py).
- * 2.4.0 (Александр 13.10): окно камеры стоя (айфон вертикально) — и телефон у Плюса стоя
- * (plus-ruki-telefon-v.png, docs/zagotovki/ruki_telefon.py); пришелец надкушен с обеих сторон.
+ * Телефона в руках у Плюса нет (Александр 17.10: «уберем у него телефон из рук… вернем его в ту
+ * версию, где он был без рук»): съёмка iPhone двумя руками (2.3.7–2.5.6) убрана вместе с картинками
+ * рук, Плюс в кадре — бюст, как до 2.3.7, и когда камера в эфире.
  *
  * Левый низ (в самом углу) — роза ветров в 3D (2.3.5, Roza3D): лучи жёлтые и розово-фиолетовые,
  * обод красный, контуры тонкие чёрные; крутится и переворачивается сама, как попало (2.3.6) — это
@@ -86,8 +80,8 @@ class Nalozhenie(
     /** Гости эфира (2.5.0): плитки, имена, пузыри субтитров. */
     private val gosti: Gosti? = null,
 ) {
-    /** Что показывать (запоминает CaptureService): лицо, налёт, радар; telefon — Плюс снимает, когда видно окно камеры. */
-    class Pokaz(val lico: Boolean = true, val nalet: Boolean = true, val radar: Boolean = true, val telefon: Boolean = true)
+    /** Что показывать (запоминает CaptureService): лицо, налёт, радар. */
+    class Pokaz(val lico: Boolean = true, val nalet: Boolean = true, val radar: Boolean = true)
 
     private val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
     private val c = Canvas(bmp)
@@ -119,9 +113,6 @@ class Nalozhenie(
     private val lico = kartinka(ctx, "plus-lico.png")
     private val svet = kartinka(ctx, "plus-lico-svet.png")       // пришелец светится
     private val plechiImg = kartinka(ctx, "plus-plechi.png")     // плечи модели, тот же масштаб
-    private val plechiBez = kartinka(ctx, "plus-plechi-bez-ruk.png")    // плечи без рук — руки держат телефон
-    private val rukiTel = kartinka(ctx, "plus-ruki-telefon.png")        // обе руки с телефоном перед грудью, тот же масштаб
-    private val rukiTelV = kartinka(ctx, "plus-ruki-telefon-v.png")     // то же, телефон стоя — окно камеры стоя (2.4.0)
     private val nachalo = System.currentTimeMillis()                  // время розы
     private val dvizhenie = Roza3D.Dvizhenie()                        // как крутится роза в этом эфире
     @Volatile private var rabotaet = false
@@ -352,10 +343,7 @@ class Nalozhenie(
 
     private fun risovat(p: Pokaz, sost: String, now: Long) {
         c.drawColor(0, PorterDuff.Mode.CLEAR)
-        val snimaet = p.telefon && razvilka.kameraIdet() && plechiBez != null && rukiTel != null   // камера в эфире — снимает
-        val ruki = if (!snimaet) null else if (razvilka.kameraStoya() && rukiTelV != null) Ruki(rukiTelV, RUKI_V_X, RUKI_V_Y)
-            else Ruki(rukiTel!!, RUKI_X, RUKI_Y)                      // телефон стоя, когда и камера стоя
-        if (p.lico) lico?.let { golova(it, sost, now, ruki) }
+        if (p.lico) lico?.let { golova(it, sost, now) }
         if (p.nalet) poloska(now)
         if (cel.vidna) celPodPlechami()
     }
@@ -446,11 +434,7 @@ class Nalozhenie(
         ulybka = !govorit && now in ulybkaS..ulybkaDo
     }
 
-    /** Руки с телефоном: картинка и её левый верх в точках картинки головы 256. */
-    private class Ruki(val bmp: Bitmap, val x: Float, val y: Float)
-
-    private fun golova(f: Bitmap, sost: String, now: Long, ruki: Ruki?) {
-        val snimaet = ruki != null
+    private fun golova(f: Bitmap, sost: String, now: Long) {
         val govorit = sost == "govorit"
 
         val k = D / 256f
@@ -459,10 +443,10 @@ class Nalozhenie(
         val cx = left + D / 2f
         val podborodok = top + 221 * k
 
-        val levo = left + minOf(RUKI_X, -PLECHI_VBOK) * k - 6
+        val levo = left - PLECHI_VBOK * k - 6
         val sloy = c.saveLayer(levo, 0f, W.toFloat(), H.toFloat(), null)
         c.translate(sin(now / 2600.0).toFloat() * 3f, sin(now / 1400.0).toFloat() * 3f)   // покачивание и дыхание
-        (if (snimaet) plechiBez else plechiImg)?.let {                 // плечи модели — под головой, не кивают
+        plechiImg?.let {                                               // плечи модели — под головой, не кивают
             c.drawBitmap(it, null, RectF(left - PLECHI_VBOK * k, top + 218.2f * k,
                 left + (319 - PLECHI_VBOK) * k, top + (218.2f + 80) * k), kist)
         }
@@ -503,10 +487,6 @@ class Nalozhenie(
             }
         }
         c.restore()
-        ruki?.let {                                                    // руки с телефоном — перед грудью, поверх
-            c.drawBitmap(it.bmp, null, RectF(left + it.x * k, top + it.y * k,
-                left + (it.x + it.bmp.width) * k, top + (it.y + it.bmp.height) * k), kist)
-        }
         // строчная развёртка: 2 точки линия, 2 — нет; только на пикселях головы и плеч
         var y = 0f
         while (y < H) { c.drawRect(levo, y, W.toFloat(), y + 2f, razvyortka); y += 4f }
@@ -1056,16 +1036,7 @@ class Nalozhenie(
         /** Глазам Плюса во время эфира — кадров в секунду; в разговоре (кроме 2 с после вызова) — меньше. */
         const val GLAZA_EFIR = 2
         const val GLAZA_RAZGOVOR = 1
-        /**
-         * Руки с телефоном (plus-ruki-telefon.png, 325×79) — в точках картинки головы 256, как плечи:
-         * левый верх картинки; сняты рендером модели 3dplus тем же ракурсом, что лицо и плечи.
-         */
-        const val RUKI_X = -34.47f
-        const val RUKI_Y = 219.92f
         /** Цвета гостей g1…g3 (2.5.0): плитка, имя и субтитры — одного цвета. */
         val CVET_GOSTYA = intArrayOf(Color.rgb(255, 140, 200), Color.rgb(255, 170, 90), Color.rgb(190, 160, 255))
-        /** Телефон стоя (plus-ruki-telefon-v.png, 307×86, 2.4.0): верх телефона — под открытым ртом (212). */
-        const val RUKI_V_X = -25.67f
-        const val RUKI_V_Y = 212.88f
     }
 }

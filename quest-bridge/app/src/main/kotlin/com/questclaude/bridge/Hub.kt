@@ -79,6 +79,7 @@ object Hub {
         if (users.isEmpty()) {
             server?.stop()
             server = null
+            fon?.stop()                  // мост закрыт — очередь музыки не доигрывать (Александр 17.10)
         }
     }
 }

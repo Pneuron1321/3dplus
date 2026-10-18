@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""sobrat-sumy — список «отпечатков» всех когда-либо выложенных версий скриптов шлема (shlem/ в этом
+репозитории и shlem2/ в зеркале 3dplus) → shlem/obnovi-sumy. По нему obnovi отличает файл, который просто
+устарел (его отпечаток в списке — заменить можно), от файла, который правили прямо в шлеме (отпечатка нет —
+не затирать, новую версию положить рядом). Запуск перед каждым зеркалом:
+  python3 shlem/sobrat-sumy [путь к 3dplus]
+Строка списка: «имя первые-16-знаков-sha256». Секретов в нём нет — только отпечатки опубликованных файлов."""
+import hashlib
+import os
+import re
+import subprocess
+import sys
+
+TUT = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(TUT)
+ZERKALO = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(REPO), '3dplus')
+OBNOVI = open(os.path.join(TUT, 'obnovi'), encoding='utf-8').read()
+FAYLY = re.search(r'^for f in (.+); do$', OBNOVI, re.M).group(1).split()
+
+
+def blob_hash(repo, papka, f):
+    out = set()
+    if not os.path.isdir(os.path.join(repo, '.git')):
+        return out
+    kommity = subprocess.run(['git', '-C', repo, 'log', '--all', '--format=%H', '--', '%s/%s' % (papka, f)],
+                             capture_output=True, text=True).stdout.split()
+    bloby = set()
+    for k in kommity:
+        r = subprocess.run(['git', '-C', repo, 'rev-parse', '-q', '--verify', '%s:%s/%s' % (k, papka, f)],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            bloby.add(r.stdout.strip())
+    for b in bloby:
+        dannye = subprocess.run(['git', '-C', repo, 'cat-file', 'blob', b], capture_output=True).stdout
+        out.add(hashlib.sha256(dannye).hexdigest()[:16])
+    return out
+
+
+stroki = []
+for f in FAYLY:
+    h = blob_hash(REPO, 'shlem', f) | blob_hash(ZERKALO, 'shlem2', f)
+    put = os.path.join(TUT, f)
+    if os.path.exists(put):                           # нынешняя (ещё не закоммиченная) версия — тоже
+        h.add(hashlib.sha256(open(put, 'rb').read()).hexdigest()[:16])
+    stroki += ['%s %s' % (f, x) for x in sorted(h)]
+open(os.path.join(TUT, 'obnovi-sumy'), 'w').write('\n'.join(stroki) + '\n')
+print('obnovi-sumy: %d файлов, %d отпечатков' % (len(FAYLY), len(stroki)))

@@ -44,7 +44,7 @@ TOOLS = [
     {'name': 'kamera',
      'description': 'Камера телефона в эфире — как команда kamera: komanda пусто — как камера; svyaz; ugol '
                     'pn|ln|pv|lv [0.25]; bolshe|menshe [15]; povorot 90|180|270|0; vplotnuyu|otstup; '
-                    'sboku 4; snizu vplotnuyu|otstup; krupno; skryt; snimaet vkl|vykl.',
+                    'sboku 4; snizu vplotnuyu|otstup; krupno; skryt.',
      'inputSchema': {'type': 'object', 'properties': {'komanda': {'type': 'string'}, 'skazat': SKAZAT}}},
     {'name': 'efir',
      'description': 'Эфир: komanda status (или пусто) — как идёт; mic 4 | mic +25% | mic -20% — голос в эфире.',

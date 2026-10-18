@@ -195,7 +195,7 @@ class CaptureService : Service() {
             { sek -> try { File(filesDir, NALET).writeText(sek.toString()) } catch (e: Exception) { } })
         pokaz = try {
             File(filesDir, POKAZ).readText().trim().split(' ')
-                .let { Nalozhenie.Pokaz(it[0] != "0", it.getOrNull(1) != "0", it.getOrNull(2) != "0", it.getOrNull(3) != "0") }
+                .let { Nalozhenie.Pokaz(it[0] != "0", it.getOrNull(1) != "0", it.getOrNull(2) != "0") }
         } catch (e: Exception) { Nalozhenie.Pokaz() }
         cel = Cel({ try { File(filesDir, CEL).readText() } catch (e: Exception) { CEL_PERVAYA } },
             { t -> try { File(filesDir, CEL).writeText(t) } catch (e: Exception) { } })
@@ -354,17 +354,16 @@ class CaptureService : Service() {
         override fun status(): String {
             val k = kompas
             return nalet.status().dropLast(1) +
-                ",\"lico\":${pokaz.lico},\"pokaz\":${pokaz.nalet},\"radar\":${pokaz.radar},\"telefon\":${pokaz.telefon}," +
-                "\"snimaet\":${pokaz.telefon && razvilka?.kameraIdet() == true},\"v_efire\":${nalozhenie != null}," +
+                ",\"lico\":${pokaz.lico},\"pokaz\":${pokaz.nalet},\"radar\":${pokaz.radar},\"v_efire\":${nalozhenie != null}," +
                 "\"kompas\":\"${k?.tip ?: "none"}\",\"kurs\":${FrameServer.json(Radar.podpis(k?.kurs, k?.tip ?: "none"))}," +
                 "\"datchiki\":${FrameServer.json(k?.spisok() ?: "")}}"
         }
         override fun upr(q: Map<String, String>): String {
             val p = pokaz
             fun da(k: String, b: Boolean) = q[k]?.let { it != "0" } ?: b
-            pokaz = Nalozhenie.Pokaz(da("lico", p.lico), da("pokaz", p.nalet), da("radar", p.radar), da("telefon", p.telefon))
+            pokaz = Nalozhenie.Pokaz(da("lico", p.lico), da("pokaz", p.nalet), da("radar", p.radar))
             try {
-                File(filesDir, POKAZ).writeText(listOf(pokaz.lico, pokaz.nalet, pokaz.radar, pokaz.telefon).joinToString(" ") { if (it) "1" else "0" })
+                File(filesDir, POKAZ).writeText(listOf(pokaz.lico, pokaz.nalet, pokaz.radar).joinToString(" ") { if (it) "1" else "0" })
             } catch (e: Exception) { }
             q["koiny"]?.replace(',', '.')?.toDoubleOrNull()?.takeIf { it >= 0 && it < 10_000_000 }?.let { nalet.ustanovit(it) }
             if (q["sever"] == "1") kompas?.let { k ->

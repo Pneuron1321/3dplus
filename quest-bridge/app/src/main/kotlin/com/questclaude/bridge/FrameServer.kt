@@ -39,6 +39,8 @@ import kotlin.concurrent.thread
  *   POST /fon?mode=oba|efir|uho (MP3) -> фоновая музыка кусками, рядом с голосом (2.5.6); ждёт места в очереди
  *   GET /fon/status, /fon/stop, /fon/gromkost?v=|shlem=|efir= (0–150), /fon/duck?v=0.33,
  *       /fon/plashka?pokaz=1|0&tekst=…&avtor=… -> музыка: состояние, стоп, громкость, приглушение, полоска в кадре
+ *   POST /fon/pleer (JSON от muzyka), GET /fon/pleer -> мини-плеер (2.5.7): состояние плеера для шторки приложения;
+ *   GET /fon/komanda?zhdat=20 -> команда из шторки для плеера ({"k","a"} или {}), /fon/pult?k=sled&a= -> положить команду
  *   POST /chat/pachka        -> chat for the stream overlay in one batch (2.3.9): each body line is a /chat/upr query
  *   GET /efir                -> эфир: {"state":"off|podklyuchayus|efir|obryv", kbps, sec, zvuk, oshibka…}
  *   GET /efir/start[?size=720|1080&fps=&kbps=] -> начать эфир на Twitch (ключ — с /efir/key)
@@ -53,9 +55,9 @@ import kotlin.concurrent.thread
  *                              1 — с отступом 3 % высоты; bok=4 — отступ сбоку, % ширины (0 — вплотную; 2.3.8)
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}
  *   GET /nalet               -> плашки эфира: {"vsego":"123,45","za_efir":"1,20",…,"lico","pokaz","radar",
- *                              "telefon","snimaet","kompas":"absolute|relative|none","kurs":"247° WSW","datchiki"}
- *   GET /nalet/upr?lico=0|1&pokaz=0|1&radar=0|1&telefon=0|1&sever=1&koiny=123.45 -> показать/скрыть лицо,
- *                              налёт, радар; Плюс снимает телефоном (2.3.5); «север здесь»; перенести налёт
+ *                              "kompas":"absolute|relative|none","kurs":"247° WSW","datchiki"}
+ *   GET /nalet/upr?lico=0|1&pokaz=0|1&radar=0|1&sever=1&koiny=123.45 -> показать/скрыть лицо,
+ *                              налёт, радар; «север здесь»; перенести налёт
  *   GET /gosti               -> гости эфира (2.5.0): комната, звук, видео, сеть — без ключей и адреса
  *   GET /gosti/start, /gosti/stop -> открыть / закрыть комнату (сервер 127.0.0.1:8771 для туннеля)
  *   GET /gosti/upr?chto=vpustit|otklonit|vygnat|skryt|pokazat|zaglushit|vklyuchit|novaya|vpusk|mest&kto=ИМЯ|id&dop=…
@@ -172,6 +174,12 @@ class FrameServer(
         fun duck(q: Map<String, String>): String
         /** pokaz=1|0, tekst, avtor — полоска «сейчас играет» в кадре эфира. */
         fun plashka(q: Map<String, String>): String
+        /** Мини-плеер (2.5.7): json — состояние от muzyka (POST), null — отдать его (GET). */
+        fun pleer(json: String?): String
+        /** k, a — команда плееру из шторки (или от скрипта). */
+        fun komanda(q: Map<String, String>): String
+        /** Плеер ждёт команду до ms; нет — «{}». */
+        fun zhdatKomandu(ms: Long): String
     }
 
     /** Гости эфира (Gosti; в тестах — подделка). Ответы — JSON; ключи и адрес туннеля сюда не попадают. */
@@ -487,6 +495,38 @@ class FrameServer(
                     val mode = when (query["mode"]) { "uho" -> "uho"; "efir" -> "efir"; else -> "oba" }
                     reply(out, 200, "application/json; charset=utf-8", f.kusok(mp3, mode).toByteArray(Charsets.UTF_8))
                 }
+            }
+            "/fon/pleer" -> {
+                val f = fon()
+                if (f == null) reply(out, 404, "application/json", "{\"ok\":false,\"oshibka\":\"нет музыки\"}".toByteArray(Charsets.UTF_8))
+                else if (length <= 0) reply(out, 200, "application/json; charset=utf-8", f.pleer(null).toByteArray(Charsets.UTF_8))
+                else if (length > 65536) reply(out, 413, "application/json", "{\"ok\":false}".toByteArray())
+                else {
+                    val chars = CharArray(length)
+                    var got = 0
+                    c.soTimeout = 5000
+                    while (got < length) {
+                        val k = reader.read(chars, got, length - got)
+                        if (k < 0) break
+                        got += k
+                    }
+                    val t = String(ByteArray(got) { chars[it].code.toByte() }, Charsets.UTF_8)   // ISO-8859-1: символ = байт
+                    reply(out, 200, "application/json; charset=utf-8", f.pleer(t).toByteArray(Charsets.UTF_8))
+                }
+            }
+            "/fon/komanda" -> {
+                val f = fon()
+                if (f == null) reply(out, 404, "application/json", "{}".toByteArray())
+                else {
+                    val ms = ((query["zhdat"]?.toDoubleOrNull() ?: 0.0) * 1000).toLong()
+                    c.soTimeout = 0
+                    reply(out, 200, "application/json; charset=utf-8", f.zhdatKomandu(ms).toByteArray(Charsets.UTF_8))
+                }
+            }
+            "/fon/pult" -> {
+                val f = fon()
+                if (f == null) reply(out, 404, "application/json", "{\"ok\":false}".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8", f.komanda(query).toByteArray(Charsets.UTF_8))
             }
             "/fon/status", "/fon/stop", "/fon/gromkost", "/fon/duck", "/fon/plashka" -> {
                 val f = fon()

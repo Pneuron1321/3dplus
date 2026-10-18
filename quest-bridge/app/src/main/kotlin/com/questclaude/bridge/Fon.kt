@@ -20,6 +20,8 @@ import kotlin.concurrent.thread
  */
 class Fon(private val dir: File, private val nastroyki: File) : FrameServer.FonUpr {
     val miks = FonMiks()
+    /** Мини-плеер (2.5.7): состояние muzyka и команды из шторки приложения. */
+    val pult = PleerPult()
     private val n = AtomicLong()
     @Volatile private var rezhim = "oba"
     private var potok: Thread? = null
@@ -47,6 +49,16 @@ class Fon(private val dir: File, private val nastroyki: File) : FrameServer.FonU
         if (ok) zapustit()
         return "{\"ok\":$ok,\"sek\":${okr(st.size / 2.0 / Vstavka.RATE)},\"ochered_s\":${okr(miks.ochered.toDouble() / Vstavka.RATE)}}"
     }
+
+    override fun pleer(json: String?): String = if (json != null) pult.zapisat(json) else
+        (pult.sostoyanie.ifEmpty { "{}" }.let { if (it.trimEnd().endsWith("}") && it.length > 2) it.trimEnd().dropLast(1) + ",\"zhiv\":${pult.zhiv()}}" else "{\"zhiv\":false}" })
+
+    override fun komanda(q: Map<String, String>): String {
+        fun d(s: String?) = s?.let { try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it } }.orEmpty()
+        return "{\"ok\":${pult.komanda(d(q["k"]), d(q["a"]))}}"
+    }
+
+    override fun zhdatKomandu(ms: Long): String = pult.zhdat(ms)
 
     override fun stop(): String {
         miks.stop()

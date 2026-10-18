@@ -78,6 +78,8 @@ while :; do
   # Синхронист (2.5.0): субтитры по каждому голосу — Александр, игра, гости (Whisper и перевод в Groq);
   # пока нет эфира или фраз, только ждёт приложение. Гости и туннель — по команде: gosti start.
   [ -x /usr/local/bin/sinhron ] && setsid nohup /usr/local/bin/sinhron demon >> /tmp/sinhron-demon.log 2>&1 < /dev/null &
+  # шторка плеера в приложении (2.5.7): muzyka pult шлёт мосту состояние и берёт команды из шторки
+  [ -x /usr/local/bin/muzyka ] && setsid nohup /usr/local/bin/muzyka pult >> /tmp/muzyka-pult.log 2>&1 < /dev/null &
   # чёрный ящик: раз в 2 с — эфир (кадры, потери, звук) и процессор помощников (nagruzka sboi)
   setsid nohup /usr/local/bin/nagruzka demon >> /tmp/nagruzka-demon.log 2>&1 < /dev/null &
   # Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
@@ -88,6 +90,7 @@ while :; do
   # помощнику dumat (высокое усилие, /root/.claude/agents/dumat.md).
   # Мышь в tmux: джойстик шлема листает вывод, а не историю отправленного
   # (без неё Termux превращает прокрутку в стрелки).
+  T0=$(date +%s)
   tmux -u new-session -A -s plus -c "$D" claude $CONT --effort low \; set -g mouse on
   CONT=; S=
   printf '\nПлюс вышел. Уши, голос и помощники работают.\n'
@@ -99,6 +102,10 @@ while :; do
     q|Q|й|Й) exit 0 ;;
     c|C|с|С) CONT=--continue ;;
   esac
+  # 17.10: окна нет (Termux закрыли, а этот скрипт остался, родитель — init) — tmux и read кончаются
+  # сразу, и цикл крутился вхолостую, каждым витком запуская помощников: 25 % процессора весь эфир.
+  # Виток — не короче 10 с.
+  d=$(( $(date +%s) - T0 )); [ "$d" -lt 10 ] && sleep $(( 10 - d ))
   if [ -n "$MT" ] && [ "$(stat -c %Y "$ME" 2> /dev/null)" != "$MT" ] && bash -n "$ME" 2> /dev/null; then
     printf 'plus обновлён — поднимаюсь новой версией.\n'
     exec "$ME" $CONT

@@ -654,15 +654,6 @@ class Razvilka(private val w: Int, private val h: Int) {
     private fun kameraVidna() = kst != null && kw > 0 && vid.rezhim != "skryt" &&
         System.nanoTime() - kameraNs < 1_000_000_000L
 
-    /** Камера телефона в эфире: кадры идут, окно не скрыто (с любого потока) — Плюс снимает (2.3.7). */
-    fun kameraIdet(): Boolean {
-        val ns = kameraNs
-        return ns != 0L && kw > 0 && vid.rezhim != "skryt" && System.nanoTime() - ns < 1_000_000_000L
-    }
-
-    /** Окно камеры стоя (айфон вертикально, с поворотом окна) — Плюс держит телефон стоя (2.4.0). */
-    fun kameraStoya(): Boolean = Okno.stoya(kw, kh, vid.povorot)
-
     /** Окно камеры поверх кадра эфира (начало координат GL — внизу слева). */
     private fun okno(o: Out) {
         if (!kameraVidna()) return

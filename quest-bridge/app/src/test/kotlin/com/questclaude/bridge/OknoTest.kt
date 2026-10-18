@@ -2,8 +2,6 @@ package com.questclaude.bridge
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Место окна камеры в кадре эфира 1920×1080 (начало координат — внизу слева, как в GL). */
@@ -71,18 +69,6 @@ class OknoTest {
         assertArrayEquals(intArrayOf(1920 - 270, 0, 270, 480), Okno.mesto(1920, 1080, ar, Okno.Vid("ugol", "pn", 0.25f, 90, true, 0f)))
         assertArrayEquals(intArrayOf(1920 - 310, 0, 310, 552), Okno.mesto(1920, 1080, ar, Okno.Vid("ugol", "pn", 0.2875f, 90, true, 0f)))
         assertEquals(16f / 9, Okno.proporcii(1920, 1080, 180))
-    }
-
-    /** Александр 13.10 (2.4.0): «камера снимается вертикально, а Плюс держит телефон горизонтально» —
-     *  окно стоя (поток боком, поворот 90/270, или поток сразу стоя) — и телефон у Плюса стоя. */
-    @Test fun telefonStoyaKakOkno() {
-        assertTrue(Okno.stoya(1920, 1080, 90))           // айфон вертикально, поток 16:9 боком, повёрнут
-        assertTrue(Okno.stoya(1920, 1080, 270))
-        assertTrue(Okno.stoya(1080, 1920, 0))            // поток сразу стоя
-        assertFalse(Okno.stoya(1920, 1080, 0))           // лёжа — телефон лёжа, как в 2.3.8
-        assertFalse(Okno.stoya(1920, 1080, 180))
-        assertFalse(Okno.stoya(1080, 1920, 90))
-        assertFalse(Okno.stoya(0, 0, 90))                // кадров ещё не было — как раньше
     }
 
     /** Точка окна (u, v) → точка картинки камеры по матрице поворота (по столбцам). */

@@ -15,8 +15,8 @@ android {
         // 34: правила Android 14 для MediaProjection соблюдены (служба переднего плана,
         // колбэк до createVirtualDisplay, одноразовый токен). Служба нужна с targetSdk 29.
         targetSdk = 34
-        versionCode = 256
-        versionName = "2.5.6"
+        versionCode = 257
+        versionName = "2.5.7"
         // Quest 3 — arm64; остальные ABI Vosk и JNA только раздували бы APK.
         ndk { abiFilters += "arm64-v8a" }
     }

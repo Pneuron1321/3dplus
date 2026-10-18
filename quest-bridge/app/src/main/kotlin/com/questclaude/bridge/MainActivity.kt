@@ -67,6 +67,7 @@ class MainActivity : Activity() {
             efir720 = CheckBox(this@MainActivity).apply { text = "Эфир в 720p — легче для сети (обычно 1080p)" }
             addView(efir720)
             addView(button("ИТОГИ ВЕЧЕРА: показать / убрать (тёмный экран в эфире)") { itogiKnopka() })
+            Pleer(this@MainActivity).vstavit(this)                // мини-плеер (2.5.7): шторка под кнопкой
             addView(button("КАМЕРА ТЕЛЕФОНА: подключить айфон") { kameraKnopka() }.apply {
                 setOnLongClickListener { kameraNovyKlyuch(); true }
             })

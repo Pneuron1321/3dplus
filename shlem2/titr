@@ -29,9 +29,12 @@ MODELI = os.environ.get('TITR_MODEL', 'openai/gpt-oss-20b,openai/gpt-oss-120b').
 LOG = os.environ.get('TITR_LOG', '/tmp/titr.log')
 ISTORIYA = os.environ.get('TITR_ISTORIYA', '/tmp/titr-istoriya.log')   # разговор вечера — для соведущего
 KIRILL = re.compile('[А-Яа-яЁёІіЇїЄєҐґ]')
+# 17.10: перевод реплик соведущей шёл в мужском роде и на «вы» («я уверен… ваше настроение»), а голос женский
+PLUS_ONA = ('Plus is female: in Russian she speaks of herself in feminine forms (я поняла, я уверена) and addresses '
+            'Alexander informally as «ты», never «вы». ')
 ZADANIE = ('You write live-stream subtitles. Translate the user text (spoken to or by Plus, a voice '
            'assistant, during a VR game stream) into short natural {yazyk}. Keep names (Plus, '
-           'Alexander), game terms and numbers. Output only the translation, one line, no quotes, '
+           'Alexander), game terms and numbers. ' + PLUS_ONA + 'Output only the translation, one line, no quotes, '
            'no notes.')
 
 
@@ -68,7 +71,7 @@ def groq_key():
 
 ZADANIE_MNOGO = ('You write live-stream subtitles. The user sends numbered lines (spoken by Plus, a voice '
                  'assistant, during a VR game stream). Translate each line separately into short natural '
-                 '{yazyk}. Keep names (Plus, Alexander), game terms and numbers. Output exactly the same '
+                 '{yazyk}. Keep names (Plus, Alexander), game terms and numbers. ' + PLUS_ONA + 'Output exactly the same '
                  'number of lines, each starting with its number and a dot, nothing else.')
 
 

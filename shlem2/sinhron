@@ -3,7 +3,7 @@
 «каждый из потоков звука — мой голос, голоса в игре, голоса каждого из подключившихся — слушался для
 субтитров: если на английском — вторые на русском, если на русском — вторые на английском».
   Приложение 2 режет речь каждого голоса на фразы (/titry/rech, WAV 16 кГц): ya — микрофон
-  Александра, igra — звук игры, g1…g3 — гости. Здесь: Whisper large-v3-turbo в Groq (свой лимит,
+  Александра, igra — звук игры, g1…g3 — гости. Здесь: Whisper large-v3-turbo в Groq, на платном — large-v3 (свой лимит,
   отдельно от слуха Плюса на large-v3), язык — сам; подсказка — имена письмом языка голоса, игре —
   никакой; услышал один язык, а написал другим — ещё раз с языком; фильтр выдумок Whisper, тишины и
   повтора подсказки; перевод пачкой (английский → русский, остальное → английский), второй ряд тем же
@@ -40,7 +40,7 @@ import uuid
 
 MOST = os.environ.get('SINHRON_MOST', 'http://localhost:8766')
 GROQ = os.environ.get('SINHRON_GROQ', 'https://api.groq.com/openai/v1')
-MODEL = os.environ.get('SINHRON_MODEL', 'whisper-large-v3-turbo')
+MODEL_TURBO, MODEL_POLNAYA = 'whisper-large-v3-turbo', 'whisper-large-v3'
 PEREVOD = os.environ.get('SINHRON_PEREVOD', 'openai/gpt-oss-20b,llama-3.1-8b-instant').split(',')
 KEY = os.environ.get('SINHRON_KEY', '/root/.groq-key')
 RPM_F = os.environ.get('SINHRON_RPM_F', '/root/.sinhron-rpm')
@@ -100,6 +100,12 @@ def rpm():
         return max(1.0, min(600.0, float(open(RPM_F).read().strip())))
     except (OSError, ValueError):
         return float(os.environ.get('SINHRON_RPM', 18))
+
+
+def model():
+    """Бесплатный Groq — turbo (свой лимит, отдельно от слуха Плюса на large-v3); платный (sinhron platnyy, лимитов
+    нет) — полная large-v3: по-русски точнее (Александр 17.10: «слабовато субтитры распознаёт»)."""
+    return os.environ.get('SINHRON_MODEL') or (MODEL_POLNAYA if ash() == 0 and rpm() > 20 else MODEL_TURBO)
 
 
 def ash():
@@ -407,7 +413,7 @@ class Sinhron:
 
     def whisper(self, f, key, yazyk=None, pod=''):
         b = uuid.uuid4().hex
-        polya = {'model': MODEL, 'response_format': 'verbose_json', 'temperature': '0'}
+        polya = {'model': model(), 'response_format': 'verbose_json', 'temperature': '0'}
         if pod:
             polya['prompt'] = pod
         if yazyk:
@@ -545,7 +551,7 @@ class Sinhron:
                 d = dict(self.schet, rpm=rpm(), ash=ash(), zvuk=None if self.zvuk is None else round(self.zvuk),
                          ostalos_den=self.ostalos_den, ostalos_perevod=self.ostalos_perevod,
                          v_ocheredi=len(self.ochered), pauza=max(0, round(self.pauza_do - time.time())),
-                         most=self.zhiv_most, staroe=self.staroe, oshibka=self.oshibka, model=MODEL,
+                         most=self.zhiv_most, staroe=self.staroe, oshibka=self.oshibka, model=model(),
                          igra_pauza=max(0, round((self.igra_pauza_do - time.time()) / max(SEK, 0.001))),
                          perevod=PEREVOD[self.perevod_model].strip(), ms=int(time.time() * 1000))
                 tmp = SOST + '.novyy'
@@ -601,8 +607,8 @@ def main(a):
             f.write('120' if p else '18')
         with open(ASH_F, 'w') as f:
             f.write('0' if p else str(int(ASH)))
-        print('Groq платный: Whisper до 120 запросов в минуту, секунды звука не считаю.' if p else
-              'Groq бесплатный: Whisper до 18 запросов в минуту и 7000 секунд звука в час.')
+        print('Groq платный: Whisper до 120 запросов в минуту, секунды звука не считаю, модель полная (large-v3).' if p else
+              'Groq бесплатный: Whisper до 18 запросов в минуту и 7000 секунд звука в час, модель turbo.')
         return 0
     if a and a[0] in ('igra', 'ya', 'gosti') and len(a) >= 2:
         if a[0] == 'gosti' and a[1] in ('u_plitki', 'vnizu'):

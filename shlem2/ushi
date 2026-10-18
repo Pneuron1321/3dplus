@@ -373,6 +373,7 @@ def delta_stroka(bylo, stalo):
 def golosom(text, pometka='(голосом) '):
     """Фраза Александра: вписать, а если на экране
     вопрос — сказать об этом, фраза ждёт (dognat)."""
+    text += ved_pometka()           # о чём он говорил с соведущей — Плюс знает без команд
     if DELTA:
         stalo = sostoyanie()
         if PROSHLOE[0] is not None:
@@ -784,11 +785,158 @@ def nastroyki_st():
     return st
 
 
+# ---------- прямой разговор с соведущей (17.10, Александр) ----------
+# Фраза, начинающаяся со «соведущая/соведущий» (и как слышит Whisper: «со ведущая», «со-ведущий»), — прямо ей,
+# минуя Плюса: `vedushchiy sprosi`, Плюсу ничего не уходит (он и ответил бы «тихо»). Заговорил сразу после её
+# реплики (дослух) без слова «соведущая» — это ответ ей, пока он не скажет «плюс» или не пройдёт ~2 минуты.
+# Все фразы Александра (ей и Плюсу) — в общий журнал /root/.vedushchiy/dialog.jsonl.
+VED_BIN = os.environ.get('USHI_VED', '/usr/local/bin/vedushchiy')
+VED_OFF = os.environ.get('VED_OFF', '/root/.vedushchiy-off')
+VED_GOVORILA = os.environ.get('VED_GOVORILA', '/tmp/vedushchiy-govorila')
+VED_DIALOG = os.environ.get('VED_DIALOG', '/root/.vedushchiy/dialog.jsonl')
+VED_PAUZA = float(os.environ.get('USHI_VED_PAUZA', 120))
+_PL = r'(?:п?люс|plus)'
+_RAZD = r'[\s,.!?…:;«»"\'-]*'
+SOVED = re.compile(r'^' + _RAZD + r'(?:' + _PL + r'[\s,.!?…-]+' + _PL + r'[\s,.!?…-]+)?'
+                   r'(?:со[\s-]*ве[дт][уюо][щш]\w*|со[\s-]*вед\w*|co[\s-]?host\w*)(?!\w)' + _RAZD, re.I)
+# управление соведущей (Плюс выполняет vedushchiy vkl/vykl/kazhdye): «соведущий, давай», «соведущего выключи»
+SOVED_KOMANDA = re.compile(r'^(?:давай|раз в \d+|каждые \d+|вкл\w*|выкл\w*|включ\w*|выключ\w*|отключ\w*|'
+                           r'замолч\w*|не нужн\w*|пока не|хватит)(?!\w)', re.I)
+
+
+def ved_dialog(t, komu):
+    """Фраза Александра — в общий журнал (дёшево, без процессов)."""
+    try:
+        os.makedirs(os.path.dirname(VED_DIALOG), exist_ok=True)
+        with open(VED_DIALOG, 'a') as f:
+            f.write(json.dumps({'t': round(time.time(), 1), 'rol': 'alex', 'komu': komu, 'tekst': t[:600]},
+                               ensure_ascii=False) + '\n')
+        if os.path.getsize(VED_DIALOG) > 200000:
+            st = open(VED_DIALOG, errors='replace').read().splitlines()[-300:]
+            open(VED_DIALOG + '.tmp', 'w').write('\n'.join(st) + '\n')
+            os.replace(VED_DIALOG + '.tmp', VED_DIALOG)
+    except OSError:
+        pass
+
+
+def ved_govorila_posledney():
+    """Последней говорила соведущая (после неё Плюс не отвечал) и не больше VED_PAUZA секунд назад."""
+    try:
+        tg = os.path.getmtime(VED_GOVORILA)
+    except OSError:
+        return False
+    if time.time() - tg > VED_PAUZA:
+        return False
+    try:
+        tp = os.path.getmtime(G_POSL)
+    except OSError:
+        tp = 0.0
+    return tg >= tp
+
+
+VED_DOSTAVLENO = '/tmp/ushi-dialog.dostavleno'   # t последней записи dialog.jsonl, о которой Плюс уже знает
+VED_POSL_ZAPISANO = '/tmp/ushi-dialog.posl'       # mtime ответа Плюса (golos.posl), уже внесённого в dialog.jsonl
+VED_POMETKA_MIN = 60                               # записи старше (минут) Плюсу не напоминаем
+
+
+def ved_zapis(rol, komu, tekst, t=None):
+    try:
+        os.makedirs(os.path.dirname(VED_DIALOG), exist_ok=True)
+        with open(VED_DIALOG, 'a') as f:
+            f.write(json.dumps({'t': round(t or time.time(), 1), 'rol': rol, 'komu': komu, 'tekst': tekst[:600]},
+                               ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
+def ved_plus_otvet():
+    """Последний ответ Плюса (его текст уши и так видят в golos.posl) — в общий журнал, один раз."""
+    try:
+        mt = os.path.getmtime(G_POSL)
+        zap = float(open(VED_POSL_ZAPISANO).read() or 0) if os.path.exists(VED_POSL_ZAPISANO) else None
+        if zap is None:
+            open(VED_POSL_ZAPISANO, 'w').write(str(mt))     # первый запуск: старое не пишем
+            return
+        if mt <= zap:
+            return
+        open(VED_POSL_ZAPISANO, 'w').write(str(mt))
+        t = ' '.join(open(G_POSL, errors='replace').read().split())
+        if t:
+            ved_zapis('plus', 'alex', t[:400], mt)
+    except (OSError, ValueError):
+        pass
+
+
+def ved_pometka():
+    """«(с соведущей с прошлого раза: Александр: «…» — она: «…»)» — новые записи журнала разговора с ней
+    (не больше 3, по 200 знаков, без дублей); нет новых — пусто. Плюс знает о них без команд."""
+    ved_plus_otvet()
+    try:
+        last = float(open(VED_DOSTAVLENO).read() or 0)
+    except (OSError, ValueError):
+        last = 0.0
+    novye, t_max, vidno = [], last, set()
+    try:
+        for l in open(VED_DIALOG, errors='replace').read().splitlines()[-40:]:
+            try:
+                z = json.loads(l)
+            except ValueError:
+                continue
+            if not isinstance(z, dict) or z.get('t', 0) <= last:
+                continue
+            t_max = max(t_max, z.get('t', 0))
+            if time.time() - z.get('t', 0) > VED_POMETKA_MIN * 60:
+                continue
+            if z.get('rol') == 'ved' or (z.get('rol') == 'alex' and z.get('komu') == 'ved'):
+                tx = ' '.join(str(z.get('ru') or z.get('tekst') or '').split())[:200]
+                kto = 'она' if z.get('rol') == 'ved' else 'Александр'
+                if tx and (kto, tx) not in vidno:
+                    vidno.add((kto, tx))
+                    novye.append('%s: «%s»' % (kto, tx))
+    except OSError:
+        return ''
+    try:
+        if t_max > last:
+            open(VED_DOSTAVLENO, 'w').write(str(t_max))
+    except OSError:
+        pass
+    if not novye:
+        return ''
+    return ' (с соведущей с прошлого раза: %s)' % ' — '.join(novye[-3:])
+
+
+def k_vedushchey(t, dosluh):
+    """None — фраза Плюсу; иначе (текст ей, продолжение ли)."""
+    m = SOVED.match(t)
+    if m:
+        ost = t[m.end():].strip(' .!?…,')
+        if SOVED_KOMANDA.match(ost.lower()):
+            return None
+        return ost, False
+    if dosluh and ved_govorila_posledney() and not PLUS1.match(t) and not PLUS2.match(t):
+        return t, True
+    return None
+
+
+def vedushchey(ost, prod):
+    """Запустить `vedushchiy sprosi` в отрыве (модель думает секунды — уши не ждут)."""
+    try:
+        subprocess.Popen([VED_BIN, 'sprosi'] + (['--dosluh'] if prod else []) + ['--', ost],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=open('/tmp/vedushchiy-sprosi.log', 'a'), start_new_session=True)
+        return True
+    except OSError as e:
+        print(time.strftime('%H:%M:%S'), 'sprosi не запустился:', type(e).__name__, flush=True)
+        return False
+
+
 def handle(e, sluh):
     kind = e['kind']
     t = e.get('text', '').strip()
     # заговорил в секунду после ответа Плюса, без «плюс плюс»
     dosluh = kind == 'text' and e.get('how') == 'dosluh'
+    if kind == 'text':
+        ved_plus_otvet()
     if kind == 'wake':                  # раньше всего: Ава замолкает
         VYZOV_MS[0] = e.get('ms') or int(time.time() * 1000)
         VYZOV_KAK[0] = t
@@ -885,10 +1033,20 @@ def handle(e, sluh):
     elif kind == 'text' and low in ('компакт плюс',
                                     'compact plus'):
         compact('go')
+    elif kind == 'text' and t and k_vedushchey(t, dosluh) is not None \
+            and not os.path.exists(VED_OFF):
+        ost, prod = k_vedushchey(t, dosluh)
+        print(time.strftime('%H:%M:%S'), 'соведущей%s: %s' % (' (продолжение)' if prod else '', ost[:80]), flush=True)
+        if vedushchey(ost, prod):
+            metka('vpisal', e['id'])
     elif kind == 'text' and VZGLYAD.match(low):
+        ved_dialog(t, 'plus')
         if vzglyad(t):
             metka('vpisal', e['id'])
     elif kind == 'text' and t:
+        ved_dialog(t, 'plus')
+        if os.path.exists(VED_OFF) and SOVED.match(t) and not SOVED_KOMANDA.match(t[SOVED.match(t).end():].lower()):
+            t += ' [соведущая выключена: скажи Александру, что она выключена; включить — «соведущий, давай»]'
         if golosom(t, POSLE if dosluh else '(голосом) '):
             metka('vpisal', e['id'])
 
