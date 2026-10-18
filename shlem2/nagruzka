@@ -273,18 +273,39 @@ def korni():
 KORNI_KESH = [0.0, set()]
 
 
+def svoy_uid(pid):
+    """Процесс того же пользователя, что и мы (Termux/Ubuntu); игра, мост и система — чужие."""
+    try:
+        return os.stat('/proc/%s' % pid).st_uid == os.getuid()
+    except OSError:
+        return False
+
+
+def predki(pid):
+    res, p, n = set(), PPID.get(pid), 0
+    while p and p not in ('0', '1') and n < 64:
+        res.add(p)
+        p, n = PPID.get(p), n + 1
+    return res
+
+
 def verh_pomoshchnika(pid, kor):
-    """Верхний процесс дерева помощника, к которому относится pid, или None (свой, Плюс, система)."""
+    """Верхний процесс дерева помощника, к которому относится pid, или None (свой, Плюс, система).
+    18.10: на Android все приложения (игра, мост, сам Termux) растут из одного системного zygote — поэтому
+    чужие (другой пользователь) и всё, что выше окна Плюса (общие предки), помощником не бывают никогда."""
     p, verh, n = pid, None, 0
     moy = str(os.getpid())
     while p and n < 64:
         if p == moy or p in kor:
             return verh if p in kor else None
-        if any(x in SVOI for x in imena_procesa(p)):
+        if not svoy_uid(p) or any(x in SVOI for x in imena_procesa(p)):
             return None
         rod = PPID.get(p)
         if rod in (None, '0', '1') or rod not in PPID:
-            return p                                  # сирота: сам себе верх
+            # сирота (родитель — init): помощник, если он не предок окна Плюса и не наш
+            return None if any(p in predki(k) for k in kor) or p in predki(moy) else p
+        if not svoy_uid(rod):
+            return None                               # ребёнок системы (сам Termux) — не помощник
         verh, p, n = p, rod, n + 1
     return None
 
@@ -307,13 +328,16 @@ def potoki(pid):
         return []
 
 
-def poderevo(verh):
-    """verh и все его потомки (по последнему снимку)."""
+def poderevo(verh, kor=()):
+    """verh и все его потомки (по последнему снимку) — кроме своих демонов, окна Плюса, чужих и всего под ними."""
     deti, res, ochered = {}, [], [verh]
     for p, r in PPID.items():
         deti.setdefault(r, []).append(p)
+    moy = str(os.getpid())
     while ochered:
         p = ochered.pop()
+        if p != verh and (p in kor or p == moy or not svoy_uid(p) or any(x in SVOI for x in imena_procesa(p))):
+            continue
         res.append(p)
         ochered.extend(deti.get(p, []))
     return res
@@ -418,7 +442,7 @@ class Povodok:
             if v in self.prizhaty or len(okno) < OKNO or sum(okno) / len(okno) < POROG:
                 continue
             deti = {}
-            for p in poderevo(v)[1:]:
+            for p in poderevo(v, kor)[1:]:
                 n = korotkoe_imya(p)
                 deti[n] = deti.get(n, 0) + 1
             self.prizhaty[v] = {'imya': korotkoe_imya(v), 't': time.time(), 'sr': round(sum(okno) / len(okno)),
@@ -433,7 +457,7 @@ class Povodok:
                       'Посадила её на одно ядро — доделает медленнее, а игре и эфиру просторнее. Скажи Плюсу «пусть '
                       'работает в полную» — отпущу.' % (x['imya'] + (' (%s)' % x['sostav'] if x['sostav'] else ''),
                                                        sum(okno) / len(okno)))
-            for p in poderevo(v):                     # и новые дети (следующий curl) — так же
+            for p in poderevo(v, kor):                # и новые дети (следующий curl) — так же
                 prizhat(p, self.yadro if x['yadro'] else None)
         self.zapisat()
 

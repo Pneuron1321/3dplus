@@ -28,6 +28,16 @@ object Pamyat {
         val f = File(ctx.filesDir, "pamyat.log")
         file = f
         zapis("— приложение запущено (pid ${android.os.Process.myPid()}); прошлая запись выше —")
+        // 18.10: мост закрылся дважды без нагрузки, причины не видно — падение пишем сюда же, потом как обычно
+        val bylo = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val sw = java.io.StringWriter()
+                e.printStackTrace(java.io.PrintWriter(sw))
+                zapis("ПАДЕНИЕ в потоке «${t.name}»: " + sw.toString().take(3000).replace("\n", " ⏎ "))
+            } catch (x: Throwable) { }
+            bylo?.uncaughtException(t, e)
+        }
         val am = ctx.applicationContext.getSystemService(ActivityManager::class.java)
         thread(name = "pamyat", isDaemon = true) {
             while (true) {

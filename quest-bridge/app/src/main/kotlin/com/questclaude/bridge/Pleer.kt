@@ -34,6 +34,8 @@ class Pleer(private val ctx: Context) {
             override fun onStopTrackingTouch(s: SeekBar) { tyanu = false; komanda("gromkost", s.progress.toString()) }
         })
     }
+    private var seychasTrek = ""
+    private val udalitKnopka = knopka("🗑 удалить этот трек") { if (seychasTrek.isNotEmpty()) udalit(seychasTrek) }
     private val pleylisty = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
     private val treki = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
     private val panel = LinearLayout(ctx).apply {
@@ -47,11 +49,12 @@ class Pleer(private val ctx: Context) {
             addView(pusk)
             addView(knopka("вперёд ⏭") { komanda("sled") })
         })
+        addView(udalitKnopka)
         addView(TextView(ctx).apply { text = "Громкость музыки"; textSize = 15f })
         addView(gromkost)
         addView(TextView(ctx).apply { text = "Плейлисты"; textSize = 15f })
         addView(HorizontalScrollView(ctx).apply { addView(pleylisty) })
-        addView(TextView(ctx).apply { text = "Треки (нажми — заиграет)"; textSize = 15f })
+        addView(TextView(ctx).apply { text = "Треки (нажми — заиграет, держи — удалить)"; textSize = 15f })
         addView(treki)
     }
     private val zagolovok = knopka("🎵 МУЗЫКА ▸") { otkryt(!otkryta) }
@@ -93,6 +96,8 @@ class Pleer(private val ctx: Context) {
         igraet = j.optBoolean("igraet")
         val trek = j.optString("trek")
         val avtor = j.optString("avtor")
+        seychasTrek = if (igraet) trek else ""
+        udalitKnopka.visibility = if (seychasTrek.isNotEmpty()) View.VISIBLE else View.GONE
         seychas.text = when {
             igraet && trek.isNotEmpty() -> "▶ $trek — $avtor"
             j.optBoolean("vkl") -> "Включена, пауза: ${j.optString("prichina").ifEmpty { "ждёт" }}"
@@ -114,8 +119,20 @@ class Pleer(private val ctx: Context) {
         if ("$trek|$spisok" != bylSpisok) {
             bylSpisok = "$trek|$spisok"
             treki.removeAllViews()
-            for (n in spisok.take(80)) treki.addView(knopka(if (n == trek) "▶ $n" else n) { komanda("vkl", n) })
+            for (n in spisok.take(80)) treki.addView(knopka(if (n == trek) "▶ $n" else n) { komanda("vkl", n) }.apply {
+                setOnLongClickListener { udalit(n); true }
+            })
         }
+    }
+
+    /** Удалить трек — только после «да» с его названием (17.10 удалился не тот). */
+    private fun udalit(trek: String) {
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle("Удалить трек?")
+            .setMessage("«$trek» уйдёт из папки и из всех плейлистов.")
+            .setPositiveButton("Удалить") { _, _ -> komanda("udalit", trek) }
+            .setNegativeButton("Нет", null)
+            .show()
     }
 
     private fun komanda(k: String, a: String = "") {

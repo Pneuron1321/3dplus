@@ -397,6 +397,8 @@ def demon_fon():
     def vybrat(zapros=None, posle=None):
         t = treki()
         if zapros:
+            if os.path.exists(os.path.join(DIR, zapros)):   # 18.10: vkl/шторка кладут имя файла — его и играть
+                return zapros
             n = naiti(zapros)
             if n:
                 return n[0]
@@ -613,8 +615,8 @@ def vypolnit(k, a):
     a = str(a or '').strip()
     komanda = {'vkl': ['vkl'] + ([a] if a else []), 'stop': ['stop'], 'sled': ['sleduyushchiy'],
                'pred': ['predydushchiy'], 'gromkost': ['gromkost', a, 'bystro'], 'vse': ['pleylist', '-', 'vse'],
-               'pleylist': ['pleylist', a, 'vkl']}.get(k)
-    if not komanda or (k in ('gromkost', 'pleylist') and not a):
+               'pleylist': ['pleylist', a, 'vkl'], 'udalit': ['udalit', a]}.get(k)
+    if not komanda or (k in ('gromkost', 'pleylist', 'udalit') and not a):
         return
     with contextlib.redirect_stdout(io.StringIO()):
         main(komanda)
@@ -679,12 +681,13 @@ def demon_staryy():
     log('демон пошёл')
     cfg = cfg_chitat()
     nonce = cfg['nonce']
-    vse = treki()
     ocher = []
 
     def vybrat(zapros=None, posle=None):
         t = treki()
         if zapros:
+            if os.path.exists(os.path.join(DIR, zapros)):   # 18.10: vkl/шторка кладут имя файла — его и играть
+                return zapros
             n = naiti(zapros)
             if n:
                 return n[0]
@@ -700,9 +703,7 @@ def demon_staryy():
     anons = [0, None]
     poz = 0.0
     gotov = None          # (trek, poz, vol) -> (путь, длина, конец): заготовка следующего куска
-    ischem = None
     tishina_s = None      # с какого момента мост молчит
-    prichina = 'ждёт'
 
     def zapis(igraet, pr=''):
         try:

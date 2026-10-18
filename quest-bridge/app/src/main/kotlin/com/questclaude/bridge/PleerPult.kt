@@ -26,7 +26,7 @@ class PleerPult(private val chasy: () -> Long = { System.currentTimeMillis() }) 
     /** Плеер жив: присылал состояние меньше 15 с назад. */
     fun zhiv(): Boolean = sostoyanie.isNotEmpty() && chasy() - sostoyanieMs < 15_000
 
-    /** Команда плееру: k — vkl, stop, sled, pred, gromkost, pleylist, vse; a — трек, число, плейлист. */
+    /** Команда плееру: k — vkl, stop, sled, pred, gromkost, pleylist, vse, udalit; a — трек, число, плейлист. */
     fun komanda(k: String, a: String = ""): Boolean {
         if (k !in KOMANDY) return false
         val j = "{\"k\":${FrameServer.json(k)},\"a\":${FrameServer.json(a.take(200))},\"t\":${chasy()}}"
@@ -41,6 +41,6 @@ class PleerPult(private val chasy: () -> Long = { System.currentTimeMillis() }) 
     fun zhdat(ms: Long): String = komandy.pollFirst(ms.coerceIn(0, 25_000), TimeUnit.MILLISECONDS) ?: "{}"
 
     companion object {
-        val KOMANDY = setOf("vkl", "stop", "sled", "pred", "gromkost", "pleylist", "vse")
+        val KOMANDY = setOf("vkl", "stop", "sled", "pred", "gromkost", "pleylist", "vse", "udalit")
     }
 }
