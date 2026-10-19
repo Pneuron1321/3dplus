@@ -27,6 +27,9 @@
 # 220 знаков, первая — как раньше, до запятой; внутри — метки фраз из синтеза (edge-tts присылает
 # время каждой фразы): на «плюс плюс» Ава продолжит с начала прерванной фразы, субтитр идёт
 # по фразе в её время, перевод — один на ответ, внутри этого процесса (titr как модуль).
+# Громкость голоса Авы (19.10, Александр): /root/.golos-gromkost — проценты, по умолчанию 100; читается на каждой
+# реплике (перезапуск не нужен), звук уменьшается ffmpeg-ом перед игрой — для моста и play-audio. Музыку и
+# соведущую (.ved, у неё свой файл) это не трогает. Выше 100 не усиливаем.
 # Молчать совсем — /root/.golos-off. Лог — /tmp/golos.log, метки — /tmp/zamer.log (zamer).
 #
 #   golos          — демон (второй не запустится: замок /tmp/golos-demon.lock)
@@ -69,6 +72,7 @@ TITR = os.environ.get('GOLOS_TITR', '/usr/local/bin/titr')     # субтитр�
 # ускорение на новую реплику — ещё +25 % от них: 1,15 × 1,25 ≈ +44 %.
 TEMP = os.environ.get('GOLOS_TEMP', '+15%')
 BYSTREE = os.environ.get('GOLOS_BYSTREE', '+44%')
+GROMKOST = os.environ.get('GOLOS_GROMKOST', '/root/.golos-gromkost')   # % громкости Авы (по умолчанию 100)
 KESH = os.environ.get('GOLOS_KESH', '/root/.cache/golos')   # короткие фразы — готовым звуком
 POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')      # последний ответ — «плюс плюс повтори»
 # синтез не вышел и со второй попытки (нет сети) — Ава говорит это из кэша, а не молчит (не чаще
@@ -131,6 +135,37 @@ def vremya(put):
         return float(open(put).read().strip() or 0)
     except (OSError, ValueError):
         return 0.0
+
+
+def gromkost_avy():
+    """Доля громкости Авы из файла (проценты, 100 — как есть; выше 100 и мусор — 100)."""
+    try:
+        v = float(open(GROMKOST).read().strip().rstrip('%').replace(',', '.') or 100)
+    except (OSError, ValueError):
+        return 1.0
+    return min(1.0, max(0.0, v / 100.0)) if v >= 0 else 1.0
+
+
+def umenshit(put):
+    """Звук Авы тише по файлу громкости: ffmpeg volume на месте (nice, 48 кбит/с как у edge-tts — длительность
+    та же). Сбой — звук как есть, Ава не молчит."""
+    d = gromkost_avy()
+    if d >= 0.995:
+        return
+    tmp = put + '.vol.mp3'
+    try:
+        r = subprocess.run(['nice', '-n', '10', 'ffmpeg', '-y', '-loglevel', 'error', '-i', put, '-af',
+                            'volume=%.3f' % d, '-c:a', 'libmp3lame', '-b:a', '48k', tmp],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        if r.returncode == 0 and os.path.getsize(tmp) > 0:
+            os.replace(tmp, put)
+            return
+    except Exception as e:
+        log('громкость: не вышло:', type(e).__name__, str(e)[:80])
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
 
 
 # ---------- текст для уха ----------
@@ -362,7 +397,7 @@ class Sintez:
                     return True
             except Exception as e:
                 if type(e).__name__ == 'NoAudioReceived':
-                    log('нечего сказать: edge-tts не вернул звука')
+                    log('нечего сказать: edge-tts не вернул звука —', tekst[:60])   # 19.10: какая фраза пропала
                     self.ubrat(tmp)
                     return None
                 log('синтез не вышел (попытка %d):' % popytka, type(e).__name__, str(e)[:120])
@@ -1129,6 +1164,8 @@ class Golos:
                 tl.metki = None                # фраза из кэша — без чужих меток прошлого синтеза
             ok = self.gotovyy(k.tekst, temp, put, k.golos)
             nachala, dlit = None, 0.0
+            if ok and k.golos is None:
+                umenshit(put)              # громкость Авы; соведущая (.ved) — не трогаем
             if ok:
                 try:
                     dlit = self.dlit_f(put)
@@ -1190,6 +1227,7 @@ class Golos:
             shutil.copyfile(kesh(BEZ_SETI, TEMP), put)
         except OSError:
             return
+        umenshit(put)
         log('синтез не вышел — сказала «Четыре»')
         self.igrok = self.Most(put, 'uho') if self.rezhim == 'uho' else self.Termux(put)
         self.igrok.vne_ocheredi = True
@@ -1205,6 +1243,7 @@ class Golos:
             shutil.copyfile(kesh(NE_SLYSHNO, TEMP), put)
         except OSError:
             return
+        umenshit(put)
         log('сказала Александру: «Меня не слышно в эфире»')
         self.zapisat_kuda('termux')
         self.igrok = self.Termux(put)

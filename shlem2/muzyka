@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# obnovi: ne trogat  (18.10 ползунок выше потолка 150 %: переигровка с позиции, резерв muzyka.bak-polzunok; 18.10 правка плейлиста: очередь демона фильтруется по активному плейлисту; vkl «Имя» ищет по всем трекам; резерв muzyka.bak-pleylist; 19.10 слияние: основа — версия из шлема, из зеркала добавлена команда muzyka udalit в CLI; резерв muzyka.bak-slitie)
 # muzyka — фоновая музыка для эфира (версия 0.1, 17.10). Треки — /root/muzyka (CC0 / CC-BY, без Content ID).
 #
 #   muzyka                  — что играет
@@ -88,6 +89,13 @@ def pl_chitat(n):
         return []
 
 
+def vse_treki():
+    try:
+        return sorted(f for f in os.listdir(DIR) if f.lower().endswith(EXT) and not f.startswith('.'))
+    except OSError:
+        return []
+
+
 def treki():
     try:
         vse = sorted(f for f in os.listdir(DIR) if f.lower().endswith(EXT) and not f.startswith('.'))
@@ -125,7 +133,9 @@ def norm(s):
 
 def naiti(zapros):
     """Трек по части названия. Возвращает список совпадений (пусто — нет, 1 — нашли, больше — неясно)."""
-    t = treki()
+    t = vse_treki()                                        # ручной выбор — из всех треков; активный плейлист не сбрасывается
+    if zapros in t:                                        # уже имя файла (vkl кладёт в конфиг n[0]) — искать по названию не нужно
+        return [zapros]
     z = norm(zapros)
     if not z:
         return []
@@ -369,6 +379,15 @@ def fon_ochered():
         return 0.0
 
 
+def fon_ochered_n():
+    """Как fon_ochered, но None, если мост не ответил (тогда позицию не угадать)."""
+    try:
+        with urllib.request.urlopen(MOST + '/fon/status', timeout=2) as r:
+            return float(json.loads(r.read().decode() or '{}').get('ochered_s') or 0)
+    except Exception:
+        return None
+
+
 def plashka(tekst):
     if tekst:
         vyzov('/fon/plashka?pokaz=1&tekst=' + urllib.parse.quote(tekst))
@@ -397,13 +416,12 @@ def demon_fon():
     def vybrat(zapros=None, posle=None):
         t = treki()
         if zapros:
-            if os.path.exists(os.path.join(DIR, zapros)):   # 18.10: vkl/шторка кладут имя файла — его и играть
-                return zapros
             n = naiti(zapros)
             if n:
                 return n[0]
         if not t:
             return None
+        ocher[:] = [x for x in ocher if x in t]                # очередь — только из активного плейлиста (смена плейлиста — не ждёт, пока доиграет старая)
         if not ocher:
             ocher.extend(random.sample(t, len(t)))
             if posle in ocher and len(ocher) > 1 and ocher[0] == posle:
@@ -416,7 +434,42 @@ def demon_fon():
     # baza — громкость, на которой закодирован то, что сейчас слышно (для быстрого пути CLI);
     # n_ok — номер быстрой команды, для которой приложение уже возвращено к 100 %
     S = {'baza': cfg['vol'], 'n_ok': cfg.get('bystro_n', 0)}
+    # pereigrat (18.10, ползунок): приложение держит максимум 150 %, а ползунок шторки просит больше
+    # (N / baza > 1,5) — CLI ставит 150 и поднимает pereigrat_n; демон сбрасывает очередь и играет трек
+    # с той же позиции заново, на новой громкости (первый кусок короткий). Серия движений — одна переигровка.
+    PG = {'n': cfg.get('pereigrat_n', 0), 'kor': False}
     fon_gromkost(100)
+
+    def pg_est():
+        return cfg_chitat().get('pereigrat_n', 0) != PG['n']
+
+    def pg_pozitsiya(konec_pos):
+        """Ждём, пока ползунок успокоится (0,5 с без новых команд, но не дольше 3 с); возвращаем позицию трека,
+        которая слышна сейчас (конец очереди минус то, что в ней осталось), или None, если мост молчит."""
+        t0 = time.time()
+        last = cfg_chitat().get('pereigrat_n', 0)
+        ts = t0
+        while True:
+            time.sleep(0.1)
+            n = cfg_chitat().get('pereigrat_n', 0)
+            if n != last:
+                last, ts = n, time.time()
+            if time.time() - ts >= 0.5 or time.time() - t0 >= 3:
+                break
+        PG['n'] = last
+        och = fon_ochered_n()
+        if och is None:
+            return None
+        return max(0.0, min(konec_pos, konec_pos - och + 0.3))
+
+    def pg_sbros(a):
+        PG['kor'] = True
+        for x in PG.get('tm', []):                         # отложенные «кусок заиграл» от сброшенной очереди — не нужны
+            x.cancel()
+        PG['tm'] = []
+        vyzov('/fon/stop')
+        fon_gromkost(100)                                  # очередь пуста — приложение к 100 %, база станет новой
+        log('переигровка с %.0f с (ползунок выше потолка приложения)' % a)
 
     def zapis(igraet, pr=''):
         try:
@@ -469,6 +522,16 @@ def demon_fon():
                 trek = vybrat(None, trek)
                 poz, gotov = 0.0, None
                 continue
+            if pg_est():
+                if poz > 0.5:
+                    a = pg_pozitsiya(poz)
+                    if a is not None:
+                        otmenit(gotov)
+                        gotov = None
+                        pg_sbros(a)
+                        poz = a
+                else:
+                    PG['n'] = cfg.get('pereigrat_n', 0)
             if pokazan != trek:
                 pokazan = trek
                 plashka('%s - %s' % (imya(trek), avtor_treka(trek)))
@@ -479,8 +542,11 @@ def demon_fon():
                 g = gotov
             else:
                 otmenit(gotov)
+                if PG['kor']:
+                    S['baza'] = vol                        # очередь пуста: что закодируем сейчас — то и будет слышно
+                    zapis(True)
                 g = Gotovit((trek, poz, vol), p, poz, vol, tmpdir, 0.5 if poz > 0.5 else 0.03,
-                             PERVYY if poz < 0.5 else None)       # первый кусок трека короткий — старт сразу
+                             PERVYY if (poz < 0.5 or PG['kor']) else None)       # первый кусок короткий — старт сразу
             gotov = None
             while not g.done.wait(0.1):                    # ждём кусок, но смену nonce видим сразу
                 if izmeneno(p):
@@ -498,11 +564,14 @@ def demon_fon():
             put, d, konec = g.res
             och = fon_ochered()
             ig = Igra(put, 'oba', '/fon')
+            PG['kor'] = False
             zapis(True)
             if vol != S['baza'] or nk != S['n_ok']:
                 t = threading.Timer(och, kusok_zaigral, (vol, nk))
                 t.daemon = True
                 t.start()
+                PG.setdefault('tm', []).append(t)
+                PG['tm'] = [x for x in PG['tm'] if x.is_alive()]
             smena = False
             while ig.res is None:
                 time.sleep(0.1)
@@ -510,6 +579,13 @@ def demon_fon():
                     vyzov('/fon/stop')
                     smena = True
                     break
+                if pg_est() and poz + d > 0.5:
+                    a = pg_pozitsiya(poz + d)
+                    if a is not None:
+                        pg_sbros(a)
+                        poz = a
+                        smena = True
+                        break
                 if gotov is None and time.time() - ig.t0 > 0.5 and not konec:
                     gotov = Gotovit((trek, poz + d, vol), p, poz + d, vol, tmpdir)   # следующий кусок — в потоке
             if smena:                                      # новый цикл сам подхватит nonce, ответа моста не ждём
@@ -686,13 +762,12 @@ def demon_staryy():
     def vybrat(zapros=None, posle=None):
         t = treki()
         if zapros:
-            if os.path.exists(os.path.join(DIR, zapros)):   # 18.10: vkl/шторка кладут имя файла — его и играть
-                return zapros
             n = naiti(zapros)
             if n:
                 return n[0]
         if not t:
             return None
+        ocher[:] = [x for x in ocher if x in t]                # очередь — только из активного плейлиста (смена плейлиста — не ждёт, пока доиграет старая)
         if not ocher:
             ocher.extend(random.sample(t, len(t)))
             if posle in ocher and len(ocher) > 1 and ocher[0] == posle:
@@ -939,12 +1014,17 @@ def main(a):
         was = cfg['vol']
         cfg['vol'] = nov
         bystro = bystro and cfg['on'] and demon_zhiv() and 'fon' in most_umeet()
+        sam = 0
         if bystro:
             cfg['bystro_n'] = cfg.get('bystro_n', 0) + 1
+            st = sostoyanie()
+            baza = st.get('baza') if st.get('baza') is not None else was
+            sam = round(nov * 100.0 / max(baza, 1))
+            if sam > 150 and st.get('igraet'):         # потолок приложения 150 %: выше — только перекодировкой
+                cfg['pereigrat_n'] = cfg.get('pereigrat_n', 0) + 1
         cfg_pisat(cfg)
         if bystro:
-            baza = sostoyanie().get('baza') or was
-            fon_gromkost(round(nov * 100.0 / max(baza, 1)))      # очередь приложения — сразу
+            fon_gromkost(sam)                          # очередь приложения — сразу (зажмёт до 150)
         print('Громкость музыки: было %d, стало %d%s.' % (was, nov, ' (сразу)' if bystro else ''))
         return 0
     if cmd in ('pleylist', 'playlist'):

@@ -41,7 +41,9 @@ import uuid
 MOST = os.environ.get('SINHRON_MOST', 'http://localhost:8766')
 GROQ = os.environ.get('SINHRON_GROQ', 'https://api.groq.com/openai/v1')
 MODEL_TURBO, MODEL_POLNAYA = 'whisper-large-v3-turbo', 'whisper-large-v3'
-PEREVOD = os.environ.get('SINHRON_PEREVOD', 'openai/gpt-oss-20b,llama-3.1-8b-instant').split(',')
+# 19.10: llama-3.1-8b-instant Groq больше не отдаёт (404 весь вечер), а 20b упиралась в 429 — запасная теперь 120b
+# (как у titr); модель, ответившая 404, до перезапуска не зовём.
+PEREVOD = os.environ.get('SINHRON_PEREVOD', 'openai/gpt-oss-20b,openai/gpt-oss-120b').split(',')
 KEY = os.environ.get('SINHRON_KEY', '/root/.groq-key')
 RPM_F = os.environ.get('SINHRON_RPM_F', '/root/.sinhron-rpm')
 ASH_F = os.environ.get('SINHRON_ASH_F', '/root/.sinhron-ash')
@@ -69,6 +71,11 @@ GALLYU = re.compile(
     r'ставьте лайк|dimatorzok|диматорзок|диматург|thanks? (?:you )?for watching|amara\.org|'
     r'дякую за перегляд|subtitles? by|please subscribe|like and subscribe|transcribed by|'
     r'^\W*(?:музыка|аплодисменты|music|applause|смех|laughter)\W*$', re.I)
+# Игра (19.10, GTA через HDMI Link): Whisper на музыке, стрельбе и радио пишет одно и то же — «I'm going to
+# go», «I'm sorry», «you», японское «спасибо за просмотр» — и подписи звуков капсом («PHONE RINGS», «BOOM!»).
+# В игре: одно слово (или одно и то же подряд — «Minus, minus»), такие фразы, подписи звуков и языки кроме ru/uk/en — мимо.
+GALLYU_IGRA = re.compile(r"i'?m going to go|i'?m sorry|thank you|i don'?t have it|ご視聴|おやすみ|ありがとう", re.I)
+IGRA_YAZYKI = ('ru', 'uk', 'en')
 KOROTKIE = re.compile(r'^\W*(?:спасибо|thank you|thanks|you|ага|угу|да|bye|пока)\W*$', re.I)
 # Подсказка Whisper — имена письмом того языка, на котором голос говорил в прошлый раз. Игре — никакой:
 # 16.10 русская подсказка заставила Whisper писать английскую игру по-русски («Мы близко к победе» —
@@ -139,6 +146,15 @@ def slova(t):
     return re.findall(r'\w+', t.lower())
 
 
+def podpis_zvuka(t):
+    """Подпись звука, а не речь: «PHONE RINGS», «BOOM!», «[музыка]», «*смех*»."""
+    t = t.strip()
+    if re.fullmatch(r'[\[(*].*[\])*]\W*', t):
+        return True
+    bukvy = [c for c in t if c.isalpha()]
+    return len(bukvy) >= 4 and sum(c.isupper() for c in bukvy) >= 0.8 * len(bukvy)
+
+
 def ekho(t, podskazka):
     """Whisper на шуме повторяет подсказку: кусок — почти одни имена из неё или её длинный кусок."""
     s = slova(t)
@@ -195,6 +211,7 @@ class Sinhron:
         self.ostalos_den = None               # запросов Whisper на сегодня (из ответа Groq)
         self.ostalos_perevod = None
         self.perevod_model = 0
+        self.mertvye = set()      # модели перевода, ответившие 404
         self.prompt = {}                      # прошлая фраза голоса — подсказка Whisper
         self.yaz = {}                         # язык прошлой фразы голоса — письмо имён в подсказке
         self.poslednee = {}                   # (golos) → (текст, когда) — не повторять одно и то же
@@ -330,8 +347,13 @@ class Sinhron:
         d, zag = self.whisper(f, key, pod=pod)
         self.schet['zaprosov'] += 1
         yazyk = LANGS.get((d.get('language') or '').lower(), (d.get('language') or '')[:2].lower())
-        tekst = self.otbor(d, porog, pod)
-        if f.golos == 'igra':
+        igra = f.golos == 'igra'
+        tekst = self.otbor(d, porog, pod, igra)
+        if tekst and igra and yazyk not in IGRA_YAZYKI:
+            self.schet['vydumki'] += 1
+            log('игра не на ru/uk/en (%s): %s' % (yazyk, tekst[:60]))
+            tekst = ''
+        if igra:
             self._igra_itog(bool(tekst))
         if not tekst:
             return
@@ -344,7 +366,7 @@ class Sinhron:
             pod = self.podskazka(f.golos, nado)
             d2, _ = self.whisper(f, key, nado, pod)
             self.schet['zaprosov'] += 1
-            tekst = self.otbor(d2, porog, pod)
+            tekst = self.otbor(d2, porog, pod, igra)
             yazyk = nado
             if not tekst:
                 return
@@ -387,7 +409,7 @@ class Sinhron:
             pr = ''
         return ((NAMES_EN if en else NAMES) + pr)[-220:]
 
-    def otbor(self, d, porog, podskazka=''):
+    def otbor(self, d, porog, podskazka='', igra=False):
         """Текст без выдумок и тишины — по каждому куску Whisper отдельно: в склейке одна пустая фраза
         не должна съесть остальные. Пусто — нечего показывать (счётчики — почему)."""
         segs = d.get('segments')
@@ -401,7 +423,8 @@ class Sinhron:
             cr = sg.get('compression_ratio', 1) or 1
             if len(t) < 2:
                 continue
-            if GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4 or ekho(t, podskazka):
+            if (GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4 or ekho(t, podskazka)
+                    or podpis_zvuka(t) or igra and (len(set(slova(t))) <= 1 or GALLYU_IGRA.search(t))):
                 self.schet['vydumki'] += 1
                 log('выдумка', t[:60])
                 continue
@@ -496,6 +519,8 @@ class Sinhron:
         poryadok = PEREVOD[self.perevod_model:] + PEREVOD[:self.perevod_model]
         for model in poryadok:
             model = model.strip()
+            if model in self.mertvye:
+                continue
             body = {'model': model, 'temperature': 0.2, 'max_completion_tokens': 120 + 90 * len(pachka),
                     'messages': [{'role': 'system', 'content': zadanie}, {'role': 'user', 'content': '\n'.join(stroki)}]}
             if 'gpt-oss' in model:
@@ -511,6 +536,8 @@ class Sinhron:
                 t = (d['choices'][0]['message'].get('content') or '').strip()
             except urllib.error.HTTPError as e:
                 log('перевод', model, 'HTTP', e.code)
+                if e.code == 404:
+                    self.mertvye.add(model)            # модели больше нет — не зовём до перезапуска
                 continue
             except Exception as e:
                 log('перевод', model, type(e).__name__)
@@ -519,7 +546,8 @@ class Sinhron:
             for line in t.splitlines():
                 m = re.match(r'\s*(\d+)[.)]\s*(.+)', line)
                 if m and 1 <= int(m.group(1)) <= len(pachka):
-                    p = m.group(2).strip().strip('"«»“”').strip()
+                    p = re.sub(r'^\[to \w+\]\s*', '', m.group(2).strip(), flags=re.I)   # 19.10: «[to English]» в кадре
+                    p = p.strip('"«»“”').strip()
                     if p and len(p) <= 3 * len(pachka[int(m.group(1)) - 1][1]) + 40:     # не сочинение
                         out[int(m.group(1)) - 1] = p
             self.schet['perevodov'] += 1
