@@ -724,6 +724,9 @@ def chek_plus(vopros, ms, uid):
 
 
 TITR = os.environ.get('USHI_TITR', '/usr/local/bin/titr')
+# 19.10, Александр: команды Плюсу — не в кадр («чтобы люди видели только разговор»). Показывать их снова —
+# файл /root/.titry-komandy (разговор в кадр и так кладёт sinhron).
+TITR_KOMANDY = os.environ.get('USHI_TITR_KOMANDY', '/root/.titry-komandy')
 
 
 class TitrModul:
@@ -1006,8 +1009,8 @@ def handle(e, sluh):
         elif not t and not chek:
             say('Не расслышала.')
     print(time.strftime('%H:%M:%S'), kind, t, flush=True)
-    if kind in ('text', 'chek') and t:
-        titr_ya(t)                      # субтитр эфира: что сказал Александр (по-английски)
+    if kind in ('text', 'chek') and t and os.path.exists(TITR_KOMANDY):
+        titr_ya(t)                      # субтитр эфира: что сказал Александр Плюсу (только если включено)
     low = t.lower().strip(' .!?,…')
     if chek:
         chek_plus(t, VYZOV_MS[0], e['id'])

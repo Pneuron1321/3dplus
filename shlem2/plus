@@ -51,6 +51,13 @@ lenta() {
   tmux set -p -t "$LID" @lenta 1 2> /dev/null && \
     tmux set-hook -t plus after-select-pane "if -F '#{@lenta}' 'last-pane'" 2> /dev/null
 }
+# 19.10: резерв данных раз в день (тетрадь и журнал соведущей, плейлисты) — копий не было; 7 последних дней.
+R=/root/rezerv/$(date +%F)
+if [ ! -d "$R" ] && mkdir -p "$R" 2> /dev/null; then
+  cp -a /root/.vedushchiy "$R/vedushchiy" 2> /dev/null
+  cp -a /root/muzyka/.pleylist-* /root/muzyka/avtory.json /root/.muzyka.json "$R/" 2> /dev/null
+  ls -1d /root/rezerv/20??-??-??/ 2> /dev/null | head -n -7 | while read -r d; do rm -rf "$d"; done
+fi
 CONT=; S=
 while [ $# -gt 0 ]; do
   case "$1" in

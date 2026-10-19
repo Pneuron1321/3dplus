@@ -82,6 +82,14 @@ KOROTKIE = re.compile(r'^\W*(?:спасибо|thank you|thanks|you|ага|угу
 # и перевод «на русский» второй строкой), а на шуме он повторял саму подсказку («Саша, Александр, Твич»).
 NAMES = 'Плюс, Саша, Александр, GTA, Twitch. '
 NAMES_EN = 'Plus, Sasha, Alexander, GTA, Twitch. '
+# Команды Плюсу — не в кадр (19.10, Александр: «убери их, чтобы люди видели только разговор»): фраза микрофона,
+# пришедшаяся на окно вызова (уши: golos.pauza на «плюс плюс» — golos.dalshe, когда фраза услышана), в Whisper
+# не идёт; по тексту — «плюс плюс», «копи-копи», «плюс, тихо» (команды после ответа Плюса, без вызова).
+POZVAL = os.environ.get('SINHRON_POZVAL', '/tmp/golos.pauza')
+USLYSHAL = os.environ.get('SINHRON_USLYSHAL', '/tmp/golos.dalshe')
+KOMANDA_RE = re.compile(r'\b(?:плюс|plus)[\s,.!-]+(?:плюс|plus)\b|'
+                        r'\b(?:копи|копий|копия|капи|copy)[\s,.!-]+(?:копи|копий|копия|капи|copy)\b|'
+                        r'^\W*(?:плюс|plus)[\s,.!-]+(?:тихо|tiho)\b', re.I)
 IMENA = set('плюс саша александр gta гта twitch твич plus sasha alexander'.split())
 
 
@@ -146,6 +154,24 @@ def slova(t):
     return re.findall(r'\w+', t.lower())
 
 
+def vremya_f(p):
+    try:
+        return float(open(p).read().strip()[:20] or 0)
+    except (OSError, ValueError):
+        return 0.0
+
+
+def v_okne_komandy(nachalo, konec, now=None):
+    """Фраза [nachalo, konec] пришлась на окно вызова Плюса: от «плюс плюс» (с запасом 1,5 с — сами слова
+    вызова) до «фраза услышана». Окно ещё открыто — всё, что после вызова; застрявшее дольше минуты — нет."""
+    pz, dl = vremya_f(POZVAL), vremya_f(USLYSHAL)
+    if not pz:
+        return False
+    if pz > dl:
+        return (now or time.time()) - pz < 60 and konec > pz - 1.5
+    return nachalo < dl and konec > pz - 1.5
+
+
 def podpis_zvuka(t):
     """Подпись звука, а не речь: «PHONE RINGS», «BOOM!», «[музыка]», «*смех*»."""
     t = t.strip()
@@ -171,8 +197,9 @@ def most(put, timeout=4):
 
 
 class Fraza:
-    def __init__(self, golos, wav, tihih, db, prishla):
+    def __init__(self, golos, wav, tihih, db, prishla, nachalo=None):
         self.golos, self.wav, self.tihih, self.db, self.prishla = golos, wav, tihih, db, prishla
+        self.nachalo = nachalo if nachalo else prishla - self.sek - 0.6     # приложение не сказало — по приходу
 
     @property
     def sek(self):
@@ -235,7 +262,12 @@ class Sinhron:
                 self.staroe = r.status == 404
                 if r.status == 200 and telo[:4] == b'RIFF':
                     f = Fraza(r.getheader('X-Golos', ''), telo, float(r.getheader('X-Tihih', '0.5')),
-                              float(r.getheader('X-Db', '-30')), time.time())
+                              float(r.getheader('X-Db', '-30')), time.time(),
+                              float(r.getheader('X-Nachalo') or 0) / 1000.0)
+                    if f.golos == 'ya' and v_okne_komandy(f.nachalo, f.nachalo + f.sek):
+                        self.schet['komandy'] = self.schet.get('komandy', 0) + 1
+                        c.close()
+                        continue                      # команда Плюсу — не в кадр и не в Whisper
                     with self.lock:
                         self.ochered.append(f)
                         self.schet['fraz'] += 1
@@ -348,7 +380,7 @@ class Sinhron:
         self.schet['zaprosov'] += 1
         yazyk = LANGS.get((d.get('language') or '').lower(), (d.get('language') or '')[:2].lower())
         igra = f.golos == 'igra'
-        tekst = self.otbor(d, porog, pod, igra)
+        tekst = self.otbor(d, porog, pod, igra, f.golos == 'ya')
         if tekst and igra and yazyk not in IGRA_YAZYKI:
             self.schet['vydumki'] += 1
             log('игра не на ru/uk/en (%s): %s' % (yazyk, tekst[:60]))
@@ -366,7 +398,7 @@ class Sinhron:
             pod = self.podskazka(f.golos, nado)
             d2, _ = self.whisper(f, key, nado, pod)
             self.schet['zaprosov'] += 1
-            tekst = self.otbor(d2, porog, pod, igra)
+            tekst = self.otbor(d2, porog, pod, igra, f.golos == 'ya')
             yazyk = nado
             if not tekst:
                 return
@@ -409,7 +441,7 @@ class Sinhron:
             pr = ''
         return ((NAMES_EN if en else NAMES) + pr)[-220:]
 
-    def otbor(self, d, porog, podskazka='', igra=False):
+    def otbor(self, d, porog, podskazka='', igra=False, ya=False):
         """Текст без выдумок и тишины — по каждому куску Whisper отдельно: в склейке одна пустая фраза
         не должна съесть остальные. Пусто — нечего показывать (счётчики — почему)."""
         segs = d.get('segments')
@@ -422,6 +454,10 @@ class Sinhron:
             lp = sg.get('avg_logprob', 0) or 0
             cr = sg.get('compression_ratio', 1) or 1
             if len(t) < 2:
+                continue
+            if ya and KOMANDA_RE.search(t):               # команда Плюсу — не в кадр (по куску: склейка не пропадёт)
+                self.schet['komandy'] = self.schet.get('komandy', 0) + 1
+                log('команда Плюсу — не в кадр:', t[:60])
                 continue
             if (GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4 or ekho(t, podskazka)
                     or podpis_zvuka(t) or igra and (len(set(slova(t))) <= 1 or GALLYU_IGRA.search(t))):

@@ -701,6 +701,7 @@ class Golos:
         self.mik_ot = None         # с какого времени непрерывно есть данные микрофона (None — нет данных)
         self.mik_gromko = 0.0      # когда Александр последний раз был громче порога
         self.ved_zhdu = None       # (uid реплики соведущей, с какого времени ждёт тишины)
+        self.mik_ved = []          # микрофон, пока звучит соведущая: её эхо — чтобы потом обрывать её на его голос
 
     # --- приём ---
     def chitat_rezhim(self):
@@ -1094,6 +1095,12 @@ class Golos:
         """Поток: пока в очереди есть реплика соведущей — громкость микрофона Александра."""
         self.mik_zhiv = True
         while True:
+            ig = self.igrok
+            zvuchit_ved = ig is not None and getattr(getattr(ig, 'kusok', None), 'golos', None) == VOICE_VED
+            if self.mik_ved and not zvuchit_ved:
+                v, self.mik_ved = sorted(self.mik_ved), []
+                log('соведущая звучала: микрофон медиана %d, громче всего %d дБ (%d замеров)' % (
+                    v[len(v) // 2], v[0], len(v)))
             with self.cv:
                 nado = any(k.golos == VOICE_VED for k in self.q)
             if not nado:
@@ -1107,8 +1114,10 @@ class Golos:
             else:
                 if self.mik_ot is None:
                     self.mik_ot = now
-                if db <= ved_porog():
+                if db <= ved_porog() and ig is None:   # пока звучит голос, микрофон слышит его эхо, не Александра
                     self.mik_gromko = now
+                if zvuchit_ved:
+                    self.mik_ved.append(db)
             time.sleep(shag)
 
     def ved_mozhno(self, k):
