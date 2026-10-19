@@ -15,7 +15,11 @@ TUT = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(TUT)
 ZERKALO = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(REPO), '3dplus')
 OBNOVI = open(os.path.join(TUT, 'obnovi'), encoding='utf-8').read()
-FAYLY = re.search(r'^for f in (.+); do$', OBNOVI, re.M).group(1).split()
+_m = re.search(r'^FAJLY="([^"]+)"$', OBNOVI, re.M) or re.search(r'^for f in (.+); do$', OBNOVI, re.M)
+FAYLY = _m.group(1).split()
+if len(FAYLY) < 10 or any(f.startswith('$') for f in FAYLY):
+    # 19.10: список в obnovi сменил вид — вышло «1 файл, 0 отпечатков», и obnovi затёр бы правки шлема
+    sys.exit('sobrat-sumy: не нашла список файлов в obnovi (%s) — отпечатки не собираю' % FAYLY)
 
 
 def blob_hash(repo, papka, f):
