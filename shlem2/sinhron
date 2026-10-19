@@ -82,11 +82,9 @@ KOROTKIE = re.compile(r'^\W*(?:спасибо|thank you|thanks|you|ага|угу
 # и перевод «на русский» второй строкой), а на шуме он повторял саму подсказку («Саша, Александр, Твич»).
 NAMES = 'Плюс, Саша, Александр, GTA, Twitch. '
 NAMES_EN = 'Plus, Sasha, Alexander, GTA, Twitch. '
-# Команды Плюсу — не в кадр (19.10, Александр: «убери их, чтобы люди видели только разговор»): фраза микрофона,
-# пришедшаяся на окно вызова (уши: golos.pauza на «плюс плюс» — golos.dalshe, когда фраза услышана), в Whisper
-# не идёт; по тексту — «плюс плюс», «копи-копи», «плюс, тихо» (команды после ответа Плюса, без вызова).
-POZVAL = os.environ.get('SINHRON_POZVAL', '/tmp/golos.pauza')
-USLYSHAL = os.environ.get('SINHRON_USLYSHAL', '/tmp/golos.dalshe')
+# Слова вызова Плюса — не в кадр: «плюс плюс», «копи-копи», «плюс, тихо» вырезаются из текста, остальное идёт как
+# есть. 19.10 ночью было «вся фраза в окне вызова — мимо», и разговор с Плюсом пропал из субтитров целиком —
+# Александр: «я думал, ты уберёшь только сами триггер-фразы».
 KOMANDA_RE = re.compile(r'\b(?:плюс|plus)[\s,.!-]+(?:плюс|plus)\b|'
                         r'\b(?:копи|копий|копия|капи|copy)[\s,.!-]+(?:копи|копий|копия|капи|copy)\b|'
                         r'^\W*(?:плюс|plus)[\s,.!-]+(?:тихо|tiho)\b', re.I)
@@ -152,24 +150,6 @@ def pismo(t):
 
 def slova(t):
     return re.findall(r'\w+', t.lower())
-
-
-def vremya_f(p):
-    try:
-        return float(open(p).read().strip()[:20] or 0)
-    except (OSError, ValueError):
-        return 0.0
-
-
-def v_okne_komandy(nachalo, konec, now=None):
-    """Фраза [nachalo, konec] пришлась на окно вызова Плюса: от «плюс плюс» (с запасом 1,5 с — сами слова
-    вызова) до «фраза услышана». Окно ещё открыто — всё, что после вызова; застрявшее дольше минуты — нет."""
-    pz, dl = vremya_f(POZVAL), vremya_f(USLYSHAL)
-    if not pz:
-        return False
-    if pz > dl:
-        return (now or time.time()) - pz < 60 and konec > pz - 1.5
-    return nachalo < dl and konec > pz - 1.5
 
 
 def podpis_zvuka(t):
@@ -264,10 +244,6 @@ class Sinhron:
                     f = Fraza(r.getheader('X-Golos', ''), telo, float(r.getheader('X-Tihih', '0.5')),
                               float(r.getheader('X-Db', '-30')), time.time(),
                               float(r.getheader('X-Nachalo') or 0) / 1000.0)
-                    if f.golos == 'ya' and v_okne_komandy(f.nachalo, f.nachalo + f.sek):
-                        self.schet['komandy'] = self.schet.get('komandy', 0) + 1
-                        c.close()
-                        continue                      # команда Плюсу — не в кадр и не в Whisper
                     with self.lock:
                         self.ochered.append(f)
                         self.schet['fraz'] += 1
@@ -455,10 +431,11 @@ class Sinhron:
             cr = sg.get('compression_ratio', 1) or 1
             if len(t) < 2:
                 continue
-            if ya and KOMANDA_RE.search(t):               # команда Плюсу — не в кадр (по куску: склейка не пропадёт)
+            if ya and KOMANDA_RE.search(t):               # слова вызова — вон, сам разговор с Плюсом — в кадр
                 self.schet['komandy'] = self.schet.get('komandy', 0) + 1
-                log('команда Плюсу — не в кадр:', t[:60])
-                continue
+                t = re.sub(r'\s{2,}', ' ', KOMANDA_RE.sub(' ', t)).strip(' ,.!-—')
+                if len(slova(t)) < 1:
+                    continue
             if (GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4 or ekho(t, podskazka)
                     or podpis_zvuka(t) or igra and (len(set(slova(t))) <= 1 or GALLYU_IGRA.search(t))):
                 self.schet['vydumki'] += 1
