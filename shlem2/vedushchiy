@@ -1812,6 +1812,59 @@ def obnovilsya(mt):
     os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
 
 
+def lenta(pid=None, shag=1.0):
+    """Полоса внизу окна Плюса в Termux (19.10, Александр: «хочу видеть её речь и перевод после каждой фразы»):
+    реплики соведущей и строка перевода под каждой — по мере того, как она говорит. pid — Claude в окне:
+    его нет — выходим (иначе окно tmux не закроется и plus не поднимет Плюса снова)."""
+    def zhiv():
+        if not pid:
+            return True
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+
+    def pechat(stroki):
+        for l in stroki:
+            if l.startswith(PEREVOD_STROKA):
+                print('\033[36m' + l + '\033[0m')
+            elif l.strip():
+                print('\033[1;95m' + l + '\033[0m')
+        sys.stdout.flush()
+
+    print('\033[2mСоведущая — реплики и перевод:\033[0m')
+    pechat(hvost(LOG, 4))
+    try:
+        poz = os.path.getsize(LOG)
+    except OSError:
+        poz = 0
+    ostatok = ''
+    while zhiv():
+        time.sleep(shag)
+        try:
+            razmer = os.path.getsize(LOG)
+        except OSError:
+            continue
+        if razmer < poz:                                   # журнал начат заново
+            poz, ostatok = 0, ''
+        if razmer == poz:
+            continue
+        try:
+            with open(LOG, 'rb') as f:
+                f.seek(poz)
+                kusok = f.read(razmer - poz)
+        except OSError:
+            continue
+        poz = razmer
+        tekst = ostatok + kusok.decode('utf-8', 'replace')
+        *stroki, ostatok = tekst.split('\n')
+        pechat(stroki)
+    return 0
+
+
 def main(a):
     if a and a[0] == 'demon':
         return demon()
@@ -1835,6 +1888,11 @@ def main(a):
                 pass
             print('Соведущий включён: лента копится, говорит раз в %d мин.' % kazhdye())
         return 0
+    if a and a[0] == 'lenta':                                 # полоса внизу окна Плюса: реплики и перевод
+        try:
+            return lenta(int(a[1]) if len(a) > 1 and a[1].isdigit() else None)
+        except KeyboardInterrupt:
+            return 0
     if a and a[0] == 'chto':
         stroki = hvost(LOG, 16)
         print('Соведущий за вечер сказал (оригинал и перевод):' if stroki else 'Соведущий сегодня ещё ничего не говорил.')

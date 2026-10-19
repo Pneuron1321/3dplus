@@ -63,6 +63,7 @@ G_DALSHE = '/tmp/golos.dalshe'  # голос: продолжить
 G_Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')    # очередь голоса-демона
 G_LOCK = os.environ.get('GOLOS_LOCK', '/tmp/golos-demon.lock')
 G_POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')   # последний ответ Плюса
+G_DOSLUH_KTO = os.environ.get('GOLOS_DOSLUH_KTO', '/tmp/golos.dosluh-kto')   # чей голос открыл «дослух»
 POVTORI = ('повтори', 'повтори пожалуйста', 'ещё раз', 'еще раз',
            'повтори ещё раз', 'повтори еще раз')
 REZHIM = os.environ.get('GOLOS_REZHIM',
@@ -788,7 +789,7 @@ def nastroyki_st():
 # ---------- прямой разговор с соведущей (17.10, Александр) ----------
 # Фраза, начинающаяся со «соведущая/соведущий» (и как слышит Whisper: «со ведущая», «со-ведущий»), — прямо ей,
 # минуя Плюса: `vedushchiy sprosi`, Плюсу ничего не уходит (он и ответил бы «тихо»). Заговорил сразу после её
-# реплики (дослух) без слова «соведущая» — это ответ ей, пока он не скажет «плюс» или не пройдёт ~2 минуты.
+# реплики (дослух) без слова «соведущая» — это ответ ей; в секунду после ответа Плюса — Плюсу (19.10: как с Плюсом).
 # Все фразы Александра (ей и Плюсу) — в общий журнал /root/.vedushchiy/dialog.jsonl.
 VED_BIN = os.environ.get('USHI_VED', '/usr/local/bin/vedushchiy')
 VED_OFF = os.environ.get('VED_OFF', '/root/.vedushchiy-off')
@@ -820,7 +821,14 @@ def ved_dialog(t, komu):
 
 
 def ved_govorila_posledney():
-    """Последней говорила соведущая (после неё Плюс не отвечал) и не больше VED_PAUZA секунд назад."""
+    """Секунду «дослуха» открыл голос соведущей (19.10, Александр: «сделай, как с Плюсом» — не два
+    минуты разговора с ней, а ответ сразу после её реплики). Голос старше 19.10 (файла нет) — как раньше:
+    последней говорила соведущая (после неё Плюс не отвечал) и не больше VED_PAUZA секунд назад."""
+    try:
+        kto = open(G_DOSLUH_KTO).read().strip()
+        return kto == 'ved' and time.time() - os.path.getmtime(G_DOSLUH_KTO) <= VED_PAUZA
+    except OSError:
+        pass
     try:
         tg = os.path.getmtime(VED_GOVORILA)
     except OSError:

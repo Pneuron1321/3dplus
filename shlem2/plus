@@ -38,6 +38,19 @@ for d in os.listdir('/proc'):
     except OSError:
         pass
 PY
+# 19.10: полоса внизу окна — что сказала соведущая и перевод (Александр: «хочу видеть её речь и перевод после
+# каждой фразы»). Высота — строк в /root/.ved-lenta (по умолчанию 6; 0 — без полосы). Ткнул в полосу — фокус
+# возвращается Плюсу: уши набирают фразы в активную панель. Claude вышел — полоса закрывается следом.
+lenta() {
+  N=$(cat /root/.ved-lenta 2> /dev/null)
+  case "$N" in ''|*[!0-9]*) N=6 ;; esac
+  [ "$N" -eq 0 ] && return
+  [ -x /usr/local/bin/vedushchiy ] || return
+  LP=$(tmux display-message -p -t plus '#{pane_pid}' 2> /dev/null) || return
+  LID=$(tmux split-window -d -v -l "$N" -t plus -P -F '#{pane_id}' "/usr/local/bin/vedushchiy lenta $LP" 2> /dev/null) || return
+  tmux set -p -t "$LID" @lenta 1 2> /dev/null && \
+    tmux set-hook -t plus after-select-pane "if -F '#{@lenta}' 'last-pane'" 2> /dev/null
+}
 CONT=; S=
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -91,7 +104,11 @@ while :; do
   # Мышь в tmux: джойстик шлема листает вывод, а не историю отправленного
   # (без неё Termux превращает прокрутку в стрелки).
   T0=$(date +%s)
-  tmux -u new-session -A -s plus -c "$D" claude $CONT --effort low \; set -g mouse on
+  if ! tmux has-session -t plus 2> /dev/null; then
+    tmux -u new-session -d -s plus -c "$D" claude $CONT --effort low \; set -g mouse on
+    lenta
+  fi
+  tmux -u attach -t plus
   CONT=; S=
   printf '\nПлюс вышел. Уши, голос и помощники работают.\n'
   printf 'Через 10 с Плюс поднимется снова. Enter — сразу, c — продолжить прошлый разговор, q — закрыть всё.\n'

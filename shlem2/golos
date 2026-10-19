@@ -95,6 +95,15 @@ EFIR_IDYOT = ('efir', 'podklyuchayus', 'obryv')
 SREZ_ZAPAS = 0.12         # с: чат ждёт — порцию обрываем за столько до следующей фразы (в паузе между ними)
 BAJT_SEK = 6000.0         # edge-tts: 48 кбит/с — 6000 байт на секунду звука
 DOSLUH = ('hook', 'potok0', 'potok', 'ved')   # после чего уши слушают секунду без «плюс плюс»
+# Чей голос открыл секунду «дослуха» — Плюса или соведущей (19.10): фраза в эту секунду — тому, кто говорил.
+DOSLUH_KTO = os.environ.get('GOLOS_DOSLUH_KTO', '/tmp/golos.dosluh-kto')
+# Соведущая не перебивает (19.10, Александр: «она начинает говорить, даже когда я говорю»): её реплика ждёт,
+# пока микрофон Александра (micDb в /status моста) не помолчит VED_TISHINA с; не дождалась за VED_ZHDAT —
+# промолчала. Порог — громче этого (меньше число дБ) — речь; как у секунды «дослуха» в мосте.
+VED_POROG_F = os.environ.get('GOLOS_VED_POROG', '/root/.ved-porog')
+VED_POROG = 38
+VED_TISHINA = 1.0
+VED_ZHDAT = 30.0
 
 
 def log(*a):
@@ -555,6 +564,23 @@ def most_umeet():
         return False
 
 
+def mik_db():
+    """Громкость микрофона Александра сейчас (дБ ниже полной шкалы: 90 — тишина); None — моста или ушей нет."""
+    try:
+        with urllib.request.urlopen(MOST + '/status', timeout=1) as r:
+            v = json.loads(r.read().decode('utf-8', 'replace')).get('micDb')
+        return v if isinstance(v, int) and v >= 0 else None
+    except Exception:
+        return None
+
+
+def ved_porog():
+    try:
+        return max(20, min(70, int(open(VED_POROG_F).read().strip())))
+    except (OSError, ValueError):
+        return VED_POROG
+
+
 def most_vsluh():
     """Чем мост играет «вслух»: «oba» (2.3.9+: в шлем и прямо в эфир), «vsluh» (старше: обычным звуком —
     его пишет захват звука эфира) или None — мост не отвечает (тогда play-audio Termux)."""
@@ -607,7 +633,7 @@ class Kusok:
 
 class Golos:
     def __init__(self, sintez=None, termux=Termux, most=Most, dosluh=None, dlit=None, titr=False, most_oba=None,
-                 efir=None):
+                 efir=None, mik=None):
         self.sintez = sintez or Sintez()
         self.Termux, self.Most = termux, most
         self.dosluh = dosluh or Rot.dosluh
@@ -634,6 +660,12 @@ class Golos:
         self.bez_seti_t = 0.0      # когда последний раз говорили «Четыре» (голоса нет)
         self.ne_slyshno_t = 0.0    # когда последний раз говорили «Меня не слышно в эфире»
         self.zhdu_dosluh = False   # доиграл ответ: замолчит совсем — уши слушают секунду
+        self.dosluh_kto = 'plus'   # чей голос откроет эту секунду
+        self.mik_f = mik or mik_db
+        self.mik_zhiv = False      # поток слушает микрофон (в демоне; в проверках — по желанию)
+        self.mik_ot = None         # с какого времени непрерывно есть данные микрофона (None — нет данных)
+        self.mik_gromko = 0.0      # когда Александр последний раз был громче порога
+        self.ved_zhdu = None       # (uid реплики соведущей, с какого времени ждёт тишины)
 
     # --- приём ---
     def chitat_rezhim(self):
@@ -941,7 +973,7 @@ class Golos:
             if end == 'done' or k is None:
                 if k is not None:
                     self.vybrosit(lambda x: x is k)
-                    self.zhdu_dosluh = self.zhdu_dosluh or k.dosluh
+                    self.zhdat_dosluh(k)
             elif end == 'stopped':
                 self.vnesh = time.time()   # мост оборвал сам — это вызов, ждём «дальше»
                 self.titry.otmena()
@@ -971,6 +1003,7 @@ class Golos:
             if not self.q:
                 if self.zhdu_dosluh:       # договорила всё после ответа — слушай секунду
                     self.zhdu_dosluh = False
+                    self.zapisat_dosluh_kto()
                     self.dosluh()
                 return
             k = self.q[0]
@@ -979,9 +1012,12 @@ class Golos:
             return                         # ещё готовится
         if put is False or put == PUSTO:
             self.vybrosit(lambda x: x is k)
-            self.zhdu_dosluh = self.zhdu_dosluh or k.dosluh
+            self.zhdat_dosluh(k)
             if put is False:
                 self.bez_seti()
+            return
+        if k.golos == VOICE_VED and not self.ved_mozhno(k):
+            self.plus_vperyod()            # ждёт тишины — ответ Плюса (если есть) не держит
             return
         if k.pervyy:
             metka('zvuk', k.uid, self.rezhim)
@@ -1004,6 +1040,72 @@ class Golos:
         if not uho and not k.chat:  # субтитр — только вслух: «в ухо» зрители не слышат; чат — и так в кадре
             self.titry.pokazat(k, getattr(self.igrok, 't0', time.time()), k.nachala.get(temp) or [0.0],
                                k.dlit.get(temp) or 0.0)
+
+    def zhdat_dosluh(self, k):
+        if k.dosluh:
+            self.zhdu_dosluh = True
+            self.dosluh_kto = 'ved' if k.golos == VOICE_VED else 'plus'
+
+    def zapisat_dosluh_kto(self):
+        """Уши: фраза в секунду «дослуха» — тому, чей голос её открыл (соведущей или Плюсу)."""
+        try:
+            open(DOSLUH_KTO + '.tmp', 'w').write(self.dosluh_kto)
+            os.replace(DOSLUH_KTO + '.tmp', DOSLUH_KTO)
+        except OSError:
+            pass
+
+    # --- соведущая ждёт, пока Александр договорит ---
+    def slushat_mik(self, shag=0.15):
+        """Поток: пока в очереди есть реплика соведущей — громкость микрофона Александра."""
+        self.mik_zhiv = True
+        while True:
+            with self.cv:
+                nado = any(k.golos == VOICE_VED for k in self.q)
+            if not nado:
+                self.mik_ot = None
+                time.sleep(0.2)
+                continue
+            db = self.mik_f()
+            now = time.time()
+            if db is None:
+                self.mik_ot = None         # моста или ушей нет — ждать нечего
+            else:
+                if self.mik_ot is None:
+                    self.mik_ot = now
+                if db <= ved_porog():
+                    self.mik_gromko = now
+            time.sleep(shag)
+
+    def ved_mozhno(self, k):
+        """Можно ли начать порцию соведущей: Александр молчит VED_TISHINA с. Нет потока или данных микрофона —
+        можно (как раньше). Ждёт дольше VED_ZHDAT — реплику выбрасываем: к месту она уже не будет."""
+        if not self.mik_zhiv:
+            return True
+        now = time.time()
+        if self.ved_zhdu is None or self.ved_zhdu[0] != k.uid:
+            self.ved_zhdu = (k.uid, now)
+        ot = self.mik_ot
+        if ot is None and now - self.ved_zhdu[1] > 0.6:
+            return True                    # поток спросил, а данных нет — мост молчит про микрофон
+        if ot is not None and now - max(ot, self.mik_gromko) >= VED_TISHINA:
+            if now - self.ved_zhdu[1] > VED_TISHINA + 0.5:
+                log('соведущая дождалась паузы: %.1f с' % (now - self.ved_zhdu[1]))
+            self.ved_zhdu = None
+            return True
+        if now - self.ved_zhdu[1] > VED_ZHDAT:
+            uid = k.uid
+            self.vybrosit(lambda x: x.uid == uid)
+            self.ved_zhdu = None
+            log('соведущая промолчала: Александр говорил дольше %d с' % VED_ZHDAT)
+        return False
+
+    def plus_vperyod(self):
+        """Первая не-соведущая порция очереди — вперёд (соведущая ждёт паузы, Плюс отвечает сразу)."""
+        with self.cv:
+            i = next((i for i, x in enumerate(self.q) if x.golos != VOICE_VED), None)
+            if i:
+                self.q.insert(0, self.q.pop(i))
+                self.cv.notify_all()
 
     def gotovit(self):
         """Поток синтеза: готовит первые куски очереди в их нынешнем темпе."""
@@ -1194,6 +1296,7 @@ def demon():
         '· режим', g.rezhim)
     threading.Thread(target=g.gotovit, daemon=True).start()
     threading.Thread(target=g.progret, daemon=True).start()
+    threading.Thread(target=g.slushat_mik, daemon=True).start()
     st = os.path.getmtime(ME)
     n = 0
     while True:
