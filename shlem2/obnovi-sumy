@@ -1,9 +1,11 @@
 plus-lib 3ca4e57fffa6d4e0
+plus-lib 7e45aa9decbb4170
 plus-lib 85c8ec66ad9bee66
 plus-lib e838e5245ca10979
 plus-lib f1d06f40281d28cb
 plus-mcp 045acbbb8a971757
 plus-mcp 17ff455569a1a87e
+plus-mcp 71fda62f9423cb52
 ushi 19d06e87f4234529
 ushi 1a99dec332a4e0cd
 ushi 1b6db9834970e104
@@ -92,6 +94,7 @@ kamera 3385083b81c4d60c
 kamera 70c0a50d24e8e626
 kamera 8fe2ee9d9269fe26
 kamera a38a6a9d028d7905
+kamera a3de759bb80db5c1
 kamera b08ff40336e4f9b8
 kamera bc52e5570f6b62f5
 kamera c7d6236a68bd2154
@@ -147,6 +150,7 @@ golos 6120929ffe27269d
 golos 7b96642b339eb6a0
 golos 867c0a8489b59f25
 golos 8d7cdae7aa7d5e8f
+golos 92a7b914779461a5
 golos 96c6b456a0f3fcab
 golos 98af65d70354d411
 golos a311743ee39946bb
@@ -257,6 +261,7 @@ CLAUDE.md 0b465be5dc3a031e
 CLAUDE.md 0d86c905d9637af2
 CLAUDE.md 13c213a1c8da5fed
 CLAUDE.md 15d52c8d11374387
+CLAUDE.md 22afe773a991f21f
 CLAUDE.md 23255ee879443c27
 CLAUDE.md 248aa4d0355fc5a9
 CLAUDE.md 25c9ea3846910a64

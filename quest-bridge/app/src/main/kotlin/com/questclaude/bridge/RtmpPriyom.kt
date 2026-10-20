@@ -39,6 +39,9 @@ class RtmpPriyom(
         fun kadr(annexB: ByteArray, ptsUs: Long, key: Boolean)
         /** Камера отключилась. */
         fun konec()
+        /** Звук телефона (2.5.9, для клипа): заголовок AAC (AudioSpecificConfig) и кадры AAC без обёртки. */
+        fun zvukNachalo(asc: ByteArray) {}
+        fun zvuk(aac: ByteArray, ptsUs: Long) {}
     }
 
     /** vykl — сервер не слушает; zhdu — ждёт камеру; idyot — камера шлёт видео. */
@@ -290,6 +293,7 @@ class RtmpPriyom(
                 17 -> if (m.isNotEmpty()) komanda(Flv.amf0(m.copyOfRange(1, m.size)))   // AMF3-обёртка над AMF0
                 18 -> meta(Flv.amf0(m))
                 9 -> if (tekushchaya === this) video(m, ts)
+                8 -> if (tekushchaya === this) zvuk(m, ts)
             }
         }
 
@@ -350,6 +354,13 @@ class RtmpPriyom(
             val m = a.firstOrNull { it is Map<*, *> } as? Map<*, *> ?: return
             (m["width"] as? Double)?.let { shirina = it.toInt() }
             (m["height"] as? Double)?.let { vysota = it.toInt() }
+        }
+
+        /** Звук FLV (тип 8): только AAC (формат 10) — заголовок и кадры; другой звук клипу не нужен. */
+        private fun zvuk(m: ByteArray, ts: Long) {
+            if (m.size < 3 || (m[0].toInt() and 0xff) ushr 4 != 10) return
+            val d = m.copyOfRange(2, m.size)
+            if (m[1].toInt() == 0) priyomnik.zvukNachalo(d) else priyomnik.zvuk(d, ts * 1000)
         }
 
         private fun video(m: ByteArray, ts: Long) {

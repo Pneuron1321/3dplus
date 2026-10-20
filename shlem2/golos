@@ -89,6 +89,9 @@ ZARANEE = ('Не расслышала.', 'Теперь в ухо.', 'Тепер�
 PAUZY_SINTEZA = (0.3, 0.8, 1.5)
 PAUZA_MAKS = 200          # с: пауза дольше — прерванное устарело, не договариваем
 VPERED = 2                # сколько кусков готовить заранее, пока звучит текущий
+POTOKOV_SINTEZA = 2       # 20.10: вторая порция синтезируется вместе с первой, не после — короче пауза между ними
+HVOST = 0.25              # с тишины после последнего слова порции остаётся (запас: метка конца бывает раньше звука)
+HVOST_MAKS = 0.45         # тишина длиннее — срезаем до HVOST
 # Порции (12.10): вторая — до 120 знаков (успеть синтезировать, пока звучит первая), дальше — до 220.
 PORCIYA = tuple(int(x) for x in os.environ.get('GOLOS_PORCIYA', '120,220').split(','))
 MOST_SLOMAN = 600         # с: мост не сыграл «вслух» — столько играем через play-audio (самооткат)
@@ -163,6 +166,36 @@ def umenshit(put):
             return
     except Exception as e:
         log('громкость: не вышло:', type(e).__name__, str(e)[:80])
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
+def obrezat_hvost(put, metki):
+    """20.10, Александр: «иногда она делает большую паузу — после запятой, после точки». Хвост тишины edge-tts
+    в конце файла звучит паузой перед следующей порцией. Где кончилось последнее слово, знают метки синтеза:
+    тишину длиннее HVOST_MAKS срезаем до HVOST (копией кадров mp3 — без пережатия). Нет меток — как есть."""
+    if not metki:
+        return
+    konec = max(o + d for o, d, _ in metki)
+    try:
+        dlit = os.path.getsize(put) / BAJT_SEK
+    except Exception:
+        return
+    if not konec or dlit - konec <= HVOST_MAKS:
+        return
+    tmp = put + '.hvost.mp3'
+    try:
+        r = subprocess.run(['nice', '-n', '10', 'ffmpeg', '-y', '-loglevel', 'error', '-i', put, '-t',
+                            '%.3f' % (konec + HVOST), '-c', 'copy', tmp],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        if r.returncode == 0 and os.path.getsize(tmp) > 0:
+            os.replace(tmp, put)
+            log('хвост тишины: %.2f с → %.2f с' % (dlit - konec, HVOST))
+            return
+    except Exception as e:
+        log('хвост: не вышло:', type(e).__name__, str(e)[:80])
     try:
         os.remove(tmp)
     except OSError:
@@ -1184,6 +1217,7 @@ class Golos:
                     for k in self.q[:VPERED + 1]:
                         if k.temp not in k.mp3:
                             zadacha = (k, k.temp)
+                            k.mp3[k.temp] = None   # в работе: второй поток синтеза берёт следующую
                             break
                     else:
                         self.cv.wait(1)
@@ -1227,7 +1261,10 @@ class Golos:
         sintez = (lambda: self.sintez(tekst, temp, put)) if golos is None else \
             (lambda: self.sintez(tekst, temp, put, golos=golos))
         if len(tekst) > 80:
-            return sintez()
+            ok = sintez()
+            if ok:
+                obrezat_hvost(put, getattr(self.sintez, 'metki', None))
+            return ok
         f = kesh(tekst, temp, golos)
         try:
             shutil.copyfile(f, put)
@@ -1238,6 +1275,7 @@ class Golos:
         ok = sintez()
         if not ok:
             return ok
+        obrezat_hvost(put, getattr(self.sintez, 'metki', None))
         try:
             os.makedirs(KESH, exist_ok=True)
             shutil.copyfile(put, f + '.tmp')
@@ -1366,7 +1404,8 @@ def demon():
     g = Golos()
     log('голос готов:', 'edge-tts в памяти' if g.sintez.mod else 'программа edge-tts',
         '· режим', g.rezhim)
-    threading.Thread(target=g.gotovit, daemon=True).start()
+    for _ in range(POTOKOV_SINTEZA):
+        threading.Thread(target=g.gotovit, daemon=True).start()
     threading.Thread(target=g.progret, daemon=True).start()
     threading.Thread(target=g.slushat_mik, daemon=True).start()
     st = os.path.getmtime(ME)

@@ -22,7 +22,12 @@ import kotlin.concurrent.thread
 class Kamera(
     private val dir: File,
     private val gruppa: (Boolean) -> Unit = {},   // замок групповых пакетов Wi-Fi (для plus.local)
+    klipDir: File = File(dir, "klip"),
 ) : RtmpPriyom.Priyomnik, FrameServer.KameraUpr {
+    /** Круг последних двух минут видео телефона как есть — для клипа (2.5.9). */
+    val klip = KlipZapis(klipDir)
+    /** Сохранить клип (ставит служба глаз: ей нужен Context для галереи). */
+    @Volatile var sohranitKlip: ((Int) -> String)? = null
     private val lock = Any()
     @Volatile private var klyuch = zagruzitKlyuch()
     private val priyom = RtmpPriyom(RtmpPriyom.PORT, { klyuch }, this)
@@ -91,12 +96,14 @@ class Kamera(
     override fun nachalo(sps: ByteArray, pps: ByteArray, w: Int, h: Int) = synchronized(lock) {
         aifon.zakryt()                                   // телефон подключился — страница больше не нужна
         this.sps = sps; this.pps = pps; mw = w; mh = h
+        klip.golova(sps, pps, w, h)
         if (w > 0 && h > 0) { this.w = w; this.h = h; razvilka?.kameraRazmer(w, h) }
         ostanovit()
         zapustit()
     }
 
     override fun kadr(annexB: ByteArray, ptsUs: Long, key: Boolean) = synchronized(lock) {
+        klip.video(annexB, ptsUs, key)                   // круг клипа — и без эфира
         val d = dec ?: return@synchronized
         try {
             val i = d.dequeueInputBuffer(10_000)
@@ -116,7 +123,15 @@ class Kamera(
         }
     }
 
+    override fun zvukNachalo(asc: ByteArray) = klip.zvukGolova(asc)
+
+    override fun zvuk(aac: ByteArray, ptsUs: Long) = klip.zvuk(aac, ptsUs)
+
+    override fun klip(q: Map<String, String>): String =
+        sohranitKlip?.invoke(q["sek"]?.toIntOrNull() ?: 120) ?: "{\"oshibka\":\"клип: служба глаз не готова\"}"
+
     override fun konec() = synchronized(lock) {
+        klip.konec()
         ostanovit()
         sps = null; pps = null
     }
@@ -185,12 +200,12 @@ class Kamera(
         val ip = ip()
         return "{\"state\":\"${priyom.state}\",\"ot\":${priyom.ot?.let { FrameServer.json(it) } ?: "null"}," +
             "\"razmer\":\"${w}x$h\",\"fps\":${priyom.fps},\"kbps\":${priyom.kbps},\"kadrov\":${priyom.kadrov}," +
-            "\"pokazano\":$pokazano,\"propushcheno\":$propushcheno,\"v_efire\":${dec != null}," +
+            "\"pokazano\":$pokazano,\"klip_sek\":${klip.sekund},\"propushcheno\":$propushcheno,\"v_efire\":${dec != null}," +
             "\"vid\":\"${v.rezhim}\",\"gde\":\"${v.gde}\",\"dolya\":${v.dolya}," +
             "\"povorot\":${v.povorot},\"vplotnuyu\":${v.vplotnuyu},\"sboku\":${v.sboku}," +
             "\"slushaet\":${priyom.slushaet},\"popytok\":${priyom.popytok},\"perezapuskov\":${priyom.perezapuskov}," +
             "\"adres\":${ip?.let { FrameServer.json("rtmp://$it:${RtmpPriyom.PORT}/kamera") } ?: "null"}," +
-            "\"oshibka\":${(oshibka ?: priyom.oshibka)?.let { FrameServer.json(it) } ?: "null"}}"
+            "\"oshibka\":${(oshibka ?: priyom.oshibka ?: klip.oshibka)?.let { FrameServer.json(it) } ?: "null"}}"
     }
 
     override fun vid(q: Map<String, String>): String {

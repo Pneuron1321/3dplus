@@ -71,6 +71,7 @@ class MainActivity : Activity() {
             addView(button("КАМЕРА ТЕЛЕФОНА: подключить айфон") { kameraKnopka() }.apply {
                 setOnLongClickListener { kameraNovyKlyuch(); true }
             })
+            addView(button("КЛИП КАМЕРЫ: сохранить последние 2 минуты") { klipKnopka() })
             addView(button("Уши и Плюс, без захвата (идёт стрим)") { allInOne = true; noEyes = true; askPermissions() })
             addView(button("Начать захват") { askCapture() })
             addView(button("Остановить захват") { stopService(Intent(this@MainActivity, CaptureService::class.java)) })
@@ -134,6 +135,20 @@ class MainActivity : Activity() {
         kameraStatus = "Камера: открываю страницу…"
         thread(isDaemon = true) {
             kameraStatus = k.stranicaTekst()
+            kameraDo = System.currentTimeMillis() + 120_000
+        }
+    }
+
+    /** Клип камеры (2.5.9): последние 2 минуты видео телефона как пришли — в «Фильмы/Plus». */
+    private fun klipKnopka() {
+        val k = CaptureService.kamera
+        if (k == null) { kameraStatus = "Клип: сначала «Начать захват» (или «ВСЁ СРАЗУ»)."; return }
+        kameraStatus = "Клип: сохраняю…"
+        thread(isDaemon = true) {
+            val j = k.klip(emptyMap())
+            kameraStatus = Regex("\"put\":\"([^\"]+)\".*\"sek\":(\\d+).*\"mb\":(\\d+)").find(j)?.let {
+                "Клип сохранён: ${it.groupValues[1]} (${it.groupValues[2]} с, ${it.groupValues[3]} МБ)."
+            } ?: ("Клип: " + (Regex("\"oshibka\":\"([^\"]+)").find(j)?.groupValues?.get(1) ?: j))
             kameraDo = System.currentTimeMillis() + 120_000
         }
     }

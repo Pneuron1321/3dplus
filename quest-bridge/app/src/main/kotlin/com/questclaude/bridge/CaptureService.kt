@@ -182,8 +182,12 @@ class CaptureService : Service() {
         Hub.efir = upr
         val wifi = applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
         val gruppa = wifi?.createMulticastLock("plus-kamera")?.apply { setReferenceCounted(false) }
-        kamera = Kamera(filesDir) { on -> if (on) gruppa?.acquire() else if (gruppa?.isHeld == true) gruppa.release() }
-            .also { it.start(); Hub.kamera = it }
+        kamera = Kamera(filesDir, { on -> if (on) gruppa?.acquire() else if (gruppa?.isHeld == true) gruppa.release() },
+            File(cacheDir, "klip"))
+            .also { k ->
+                k.sohranitKlip = { sek -> KlipMp4.sohranit(this, k.klip, sek) }   // клип камеры (2.5.9) — в «Фильмы/Plus»
+                k.start(); Hub.kamera = k
+            }
         val gostiFayly = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
         gosti = Gosti(filesDir) { kamera?.stranicaGosti() }.also { g ->
             g.fayl = { imya -> gostiFayly[imya] ?: try { assets.open("gosti/$imya").use { it.readBytes() }.also { gostiFayly[imya] = it } } catch (e: Exception) { null } }

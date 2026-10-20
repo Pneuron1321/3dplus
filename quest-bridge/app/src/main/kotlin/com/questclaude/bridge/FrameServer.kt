@@ -135,6 +135,8 @@ class FrameServer(
         fun vid(q: Map<String, String>): String
         /** Открыть на 2 минуты страницу для айфона; ответ — её адреса (без ключа). */
         fun stranica(): String = "{\"oshibka\":\"нет страницы\"}"
+        /** Клип камеры (2.5.9): последние sek (до 120) секунд видео телефона как есть — в «Фильмы/Plus». */
+        fun klip(q: Map<String, String>): String = "{\"oshibka\":\"клипов нет\"}"
     }
 
     /**
@@ -361,13 +363,14 @@ class FrameServer(
                     reply(out, 200, "application/json; charset=utf-8", json.toByteArray(Charsets.UTF_8))
                 }
             }
-            "/kamera", "/kamera/vid", "/kamera/stranica" -> {
+            "/kamera", "/kamera/vid", "/kamera/stranica", "/kamera/klip" -> {
                 val k = kamera()
                 if (k == null) reply(out, 503, "application/json", "{\"state\":\"vykl\",\"oshibka\":\"захват не идёт\"}".toByteArray())
                 else reply(out, 200, "application/json; charset=utf-8",
                     when (path) {
                         "/kamera/vid" -> k.vid(query)
                         "/kamera/stranica" -> k.stranica()
+                        "/kamera/klip" -> k.klip(query)
                         else -> k.status()
                     }.toByteArray(Charsets.UTF_8))
             }

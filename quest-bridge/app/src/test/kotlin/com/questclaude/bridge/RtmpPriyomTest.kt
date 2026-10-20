@@ -30,6 +30,10 @@ class RtmpPriyomTest {
         override fun nachalo(sps: ByteArray, pps: ByteArray, w: Int, h: Int) { nachala += Triple(sps, pps, w to h) }
         override fun kadr(annexB: ByteArray, ptsUs: Long, key: Boolean) { kadry += Triple(annexB, ptsUs, key) }
         override fun konec() { koncov++ }
+        val asc = CopyOnWriteArrayList<ByteArray>()
+        val zvuki = CopyOnWriteArrayList<Pair<ByteArray, Long>>()
+        override fun zvukNachalo(asc: ByteArray) { this.asc += asc }
+        override fun zvuk(aac: ByteArray, ptsUs: Long) { zvuki += aac to ptsUs }
     }
 
     @After fun stop() { priyom?.close() }
@@ -91,6 +95,11 @@ class RtmpPriyomTest {
         val s = pts.sorted()
         assertEquals(k.size, s.distinct().size)
         for ((a, b) in s.zipWithNext()) assertTrue("шаг ${b - a} мкс", b - a in 30_000L..37_000L)
+        // звук телефона (2.5.9, для клипа): заголовок AAC 44,1 кГц моно и ~43 кадра AAC в секунду
+        assertEquals(1, l.asc.size)
+        assertEquals(44100 to 1, KlipZapis.aac(l.asc[0]))
+        assertTrue("кадров звука ${l.zvuki.size}", l.zvuki.size in 120..140)
+        assertTrue(l.zvuki.zipWithNext().all { (a, b) -> b.second >= a.second })
     }
 
     @Test fun chuzhoyKlyuch() {

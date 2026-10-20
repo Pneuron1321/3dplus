@@ -311,7 +311,7 @@ def kamera_skazat(telo):
 
 def kamera(a):
     """kamera — как камера; svyaz; ugol pn|ln|pv|lv [0.25]; bolshe|menshe [15]; povorot 90|180|270|0;
-    vplotnuyu|otstup; sboku 4; snizu vplotnuyu|otstup; krupno; skryt."""
+    vplotnuyu|otstup; sboku 4; snizu vplotnuyu|otstup; krupno; skryt; klip [60]."""
     a = list(a)
     U = os.environ.get('KAMERA_URL') or APP
     c = a[0] if a else ''
@@ -328,6 +328,20 @@ def kamera(a):
         if r is None:
             return 1, [MOLCHIT], None
         return kamera_skazat(r[1]) + (None,)
+    if c in ('klip', 'clip'):
+        # 2.5.9: последние N секунд видео телефона как пришли (полное качество) — MP4 в «Фильмы/Plus»
+        if a2 and not a2.isdigit():
+            return 1, ['kamera klip 60 — последние 60 секунд (до 120; без числа — 2 минуты).'], None
+        r = zapros(U, '/kamera/klip' + ('?sek=' + a2 if a2 else ''), 60)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if r[0] == 404:
+            return 1, ['Клип: это приложение ещё не умеет клипы — нужна версия 2.5.9.'], None
+        d = razobrat(r[1]) or {}
+        if not d.get('ok'):
+            return 1, ['Клип: ' + (d.get('oshibka') or 'не сохранился')], None
+        return 0, ['Клип сохранён: %s — %s с, %s МБ%s. Он в галерее шлема, папка Plus.' % (
+            d.get('put'), d.get('sek'), d.get('mb'), '' if d.get('zvuk') else ', без звука (телефон не шлёт звук)')], None
     if c in ('svyaz', 'podklyuchit', 'aifon'):
         r = zapros(U, '/kamera/stranica', 10)
         if r is None:
@@ -389,7 +403,7 @@ def kamera(a):
         return kamera_skazat(r[1]) + (None,)
     return 0, ['kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera '
                'bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera sboku 4; kamera '
-               'snizu vplotnuyu|otstup; kamera krupno; kamera skryt.'], None
+               'snizu vplotnuyu|otstup; kamera krupno; kamera skryt; kamera klip [60] — клип камеры в полном качестве.'], None
 
 
 INSTRUMENTY = {'kadr': kadr, 'efir': efir, 'kamera': kamera}
