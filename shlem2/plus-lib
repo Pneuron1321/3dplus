@@ -441,6 +441,12 @@ def karta(a):
     else:
         out = 'Android не видит звук карты: среди входов нет USB (%s).' % (
             ', '.join(str(v.get('imya')) for v in vhody) or 'входов нет')
+    if d.get('idyot') and d.get('zaglushen'):
+        out += ' Android глушит эту запись (нули вместо звука).'
+    elif d.get('idyot') and d.get('db_maks') is not None and d.get('db_maks') <= -89:
+        out += ' С карты приходит полная тишина — звук не доходит до карты (PS4) или карта его не отдаёт.'
+    if d.get('marshrut'):
+        out += ' Вход: %s.' % d['marshrut']
     if d.get('oshibka'):
         out += ' ' + d['oshibka']
     return 0, [out], None

@@ -36,6 +36,9 @@ class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.K
     @Volatile private var oshibka: String? = null
     @Volatile private var hz = 0
     @Volatile private var kanalov = 0
+    @Volatile private var dbMaks = -90f                  // громче всего за последние 0,5 с
+    @Volatile private var zaglushen = false              // Android сам глушит нашу запись (фон, чужой микрофон)
+    @Volatile private var marshrut = ""                  // с какого входа на самом деле пишет
     private val nastroyki = File(dir, "karta-zvuk")
 
     private val slushatel = object : AudioDeviceCallback() {
@@ -122,6 +125,8 @@ class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.K
             val st = ShortArray(rate / 100 * 2)
             var srednee = 0.0
             var n = 0
+            var pik = 0
+            marshrut = rec.routedDevice?.let { "${it.productName} (тип ${it.type})" }.orEmpty()
             while (rabotaet) {
                 val got = rec.read(b, 0, b.size)
                 if (got <= 0) { Thread.sleep(5); continue }
@@ -130,12 +135,16 @@ class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.K
                 val vyhod: ShortArray
                 val dlina: Int
                 if (stereo) {
-                    for (i in 0 until got) { val v = (b[i] * g).toInt().coerceIn(-32768, 32767); b[i] = v.toShort(); s += v.toDouble() * v }
+                    for (i in 0 until got) {
+                        val v = (b[i] * g).toInt().coerceIn(-32768, 32767); b[i] = v.toShort(); s += v.toDouble() * v
+                        if (v > pik) pik = v else if (-v > pik) pik = -v
+                    }
                     vyhod = b; dlina = got
                 } else {
                     for (i in 0 until got) {
                         val v = (b[i] * g).toInt().coerceIn(-32768, 32767)
                         st[2 * i] = v.toShort(); st[2 * i + 1] = v.toShort(); s += v.toDouble() * v
+                        if (v > pik) pik = v else if (-v > pik) pik = -v
                     }
                     vyhod = st; dlina = got * 2
                 }
@@ -144,7 +153,10 @@ class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.K
                 if (n >= 50) {                                                    // раз в 0,5 с — громкость для status
                     val r = sqrt(srednee / n)
                     db = if (r < 1) -90f else (20 * log10(r / 32768.0)).toFloat()
-                    srednee = 0.0; n = 0
+                    dbMaks = if (pik < 1) -90f else (20 * log10(pik / 32768.0)).toFloat()
+                    zaglushen = try { rec.activeRecordingConfiguration?.isClientSilenced == true } catch (e: Exception) { false }
+                    rec.routedDevice?.let { marshrut = "${it.productName} (тип ${it.type})" }
+                    srednee = 0.0; n = 0; pik = 0
                 }
             }
         } catch (e: Exception) {
@@ -166,7 +178,8 @@ class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.K
         val vse = vhody().joinToString(",") { "{\"imya\":${FrameServer.json(it.productName?.toString().orEmpty())},\"tip\":${it.type}," +
             "\"usb\":${it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET}}" }
         return "{\"vkl\":$vkl,\"idyot\":${rabotaet && d != null},\"karta\":${d?.let { FrameServer.json(it.productName?.toString().orEmpty()) } ?: "null"}," +
-            "\"hz\":$hz,\"kanalov\":$kanalov,\"db\":${Math.round(db)},\"gromkost\":${Math.round(grom * 100)}," +
+            "\"hz\":$hz,\"kanalov\":$kanalov,\"db\":${Math.round(db)},\"db_maks\":${Math.round(dbMaks)}," +
+            "\"zaglushen\":$zaglushen,\"marshrut\":${FrameServer.json(marshrut)},\"gromkost\":${Math.round(grom * 100)}," +
             "\"oshibka\":${oshibka?.let { FrameServer.json(it) } ?: "null"},\"vhody\":[$vse]}"
     }
 

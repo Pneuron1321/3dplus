@@ -183,6 +183,12 @@ class EarService : Service() {
         var chekMs = 0L                                // «чек чек плюс»: фраза — столько мс, без пауз
         var dosluhFraza = false                        // фраза без вызова — в секунду после ответа Плюса
         val buf = ShortArray(RATE / 10)              // 0,1 с
+        // 2.6.1: вставили карту захвата — Android делает её микрофоном по умолчанию для всех, и уши слушали бы
+        // PS4 вместо Александра. Держимся за встроенный микрофон шлема.
+        try {
+            getSystemService(AudioManager::class.java).getDevices(AudioManager.GET_DEVICES_INPUTS)
+                .firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC }?.let { rec.setPreferredDevice(it) }
+        } catch (e: Exception) { }
         rec.startRecording()
         // Микрофон читает свой поток (2.2.9): голос Александра уходит в эфир сразу, а распознавание
         // берёт куски из очереди. Раньше всё шло одним потоком — после «плюс плюс» распознаватели
