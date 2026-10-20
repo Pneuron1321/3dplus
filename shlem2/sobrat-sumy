@@ -41,11 +41,11 @@ def blob_hash(repo, papka, f):
 
 
 stroki = []
-for f in FAYLY:
+for f in FAYLY + ['CLAUDE.md']:                       # 20.10: правила Плюса — тоже слиянием (obnovi pravila)
     h = blob_hash(REPO, 'shlem', f) | blob_hash(ZERKALO, 'shlem2', f)
     put = os.path.join(TUT, f)
     if os.path.exists(put):                           # нынешняя (ещё не закоммиченная) версия — тоже
         h.add(hashlib.sha256(open(put, 'rb').read()).hexdigest()[:16])
     stroki += ['%s %s' % (f, x) for x in sorted(h)]
 open(os.path.join(TUT, 'obnovi-sumy'), 'w').write('\n'.join(stroki) + '\n')
-print('obnovi-sumy: %d файлов, %d отпечатков' % (len(FAYLY), len(stroki)))
+print('obnovi-sumy: %d файлов, %d отпечатков' % (len(FAYLY) + 1, len(stroki)))
