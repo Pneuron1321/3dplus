@@ -54,6 +54,9 @@ import kotlin.concurrent.thread
  *                              pov=0|90|180|270 — повернуть картинку по часовой, kray=0 — вплотную снизу (сверху),
  *                              1 — с отступом 3 % высоты; bok=4 — отступ сбоку, % ширины (0 — вплотную; 2.3.8)
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}
+ *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 120) с видео телефона — MP4 в «Фильмы/Plus»
+ *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}
+ *   GET /karta/upr?vkl=0|1&g=100 -> звук карты в шлем и эфир вкл/выкл, громкость %
  *   GET /nalet               -> плашки эфира: {"vsego":"123,45","za_efir":"1,20",…,"lico","pokaz","radar",
  *                              "kompas":"absolute|relative|none","kurs":"247° WSW","datchiki"}
  *   GET /nalet/upr?lico=0|1&pokaz=0|1&radar=0|1&sever=1&koiny=123.45 -> показать/скрыть лицо,
@@ -95,6 +98,8 @@ class FrameServer(
     private val rechi: Rechi? = null,
     /** Фоновая музыка (2.5.6). */
     private val fon: () -> FonUpr? = { null },
+    /** Звук карты захвата (2.6.0). */
+    private val karta: () -> KartaUpr? = { null },
 ) {
     class Frame(val jpeg: ByteArray, val width: Int, val height: Int, val timeMs: Long, val count: Long)
 
@@ -165,6 +170,12 @@ class FrameServer(
      * Фоновая музыка (2.5.6, Fon; в тестах — подделка): второй канал рядом с голосом, приглушается под
      * голосом. Ответы — JSON.
      */
+    /** Звук карты захвата в шлем и эфир (2.6.0): status — какие входы видит Android; upr — vkl=0|1, g=0..150. */
+    interface KartaUpr {
+        fun status(): String
+        fun upr(q: Map<String, String>): String
+    }
+
     interface FonUpr {
         /** Кусок MP3 в очередь (mode: oba | efir | uho); ждёт, пока впереди станет меньше запаса. */
         fun kusok(mp3: ByteArray, mode: String): String
@@ -478,6 +489,12 @@ class FrameServer(
                     val end = g.play(mp3, when (query["mode"]) { "uho" -> "uho"; "efir" -> "efir"; "oba" -> "oba"; else -> "vsluh" })
                     reply(out, 200, "application/json", "{\"end\":\"$end\"}".toByteArray())
                 }
+            }
+            "/karta", "/karta/upr" -> {
+                val k = karta()
+                if (k == null) reply(out, 503, "application/json", "{\"oshibka\":\"мост ещё не запущен\"}".toByteArray(Charsets.UTF_8))
+                else reply(out, 200, "application/json; charset=utf-8",
+                    (if (path == "/karta/upr") k.upr(query) else k.status()).toByteArray(Charsets.UTF_8))
             }
             "/fon" -> {
                 val f = fon()

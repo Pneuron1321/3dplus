@@ -51,6 +51,13 @@ object Hub {
     @Volatile var say: FrameServer.Say? = null
     /** Фоновая музыка (2.5.6, /fon…): ставит первая служба, как голос. */
     @Volatile var fon: Fon? = null
+    /** Звук карты захвата (2.6.0, /karta…): ставит первая служба, как музыку. */
+    @Volatile var karta: KartaZvuk? = null
+
+    @Synchronized fun kartaZapustit(ctx: android.content.Context, dir: java.io.File) {
+        if (karta == null) karta = try { KartaZvuk(ctx.applicationContext, dir).also { it.start() } } catch (e: Exception) { null }
+    }
+
     /** Музыка в звук эфира: ставит Efir, пока эфир идёт (Fon кладёт, эфир берёт). */
     @Volatile var fonLenta: Lenta? = null
 
@@ -67,7 +74,7 @@ object Hub {
                 override fun rot(sek: Double) { say?.rot(sek) }
                 override val govorit get() = say?.govorit ?: false
             }, { t, n -> plenkaRisunok(t, n) }, { lastWakeMs }, { efir }, { n -> Pamyat.hvost(n) }, { kamera }, { nalet },
-                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg }, { gosti }, rechi, { fon })
+                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg }, { gosti }, rechi, { fon }, { karta })
             s.start()
             server = s
         }

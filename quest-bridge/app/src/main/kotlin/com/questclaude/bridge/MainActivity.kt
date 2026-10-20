@@ -41,7 +41,7 @@ class MainActivity : Activity() {
         override fun run() {
             // ключ камеры — только без эфира: экран приложения попадает в кадр
             if (kameraStatus.startsWith("КАМЕРА ТЕЛЕФОНА") && System.currentTimeMillis() > kameraDo) kameraStatus = ""
-            status.text = listOf(kameraStatus, efirStatus, CaptureService.status, EarService.status, sleepStatus, plusStatus, Shlem.termuxReply)
+            status.text = listOf(kameraStatus, efirStatus, Hub.karta?.kratko().orEmpty(), CaptureService.status, EarService.status, sleepStatus, plusStatus, Shlem.termuxReply)
                 .filter { it.isNotEmpty() }.joinToString("\n\n")
             efirBtn.text = if (efirIdyot()) "ЭФИР: закончить" else "ЭФИР: начать (Twitch)"
             ui.postDelayed(this, 1000)

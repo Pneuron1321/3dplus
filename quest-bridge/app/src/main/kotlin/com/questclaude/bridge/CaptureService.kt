@@ -171,6 +171,7 @@ class CaptureService : Service() {
         try {
             if (Hub.say == null) Hub.say = Golos(cacheDir)
             if (Hub.fon == null) Hub.fon = Fon(cacheDir, java.io.File(filesDir, "fon-nastroyki"))
+            Hub.kartaZapustit(this, filesDir)                    // звук карты захвата (2.6.0)
             Hub.acquire("capture")
             serving = true
         } catch (e: Exception) {
