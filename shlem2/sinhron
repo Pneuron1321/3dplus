@@ -67,13 +67,19 @@ IGRA_PAUZA_MAKS = 120.0
 LANGS = {'russian': 'ru', 'ukrainian': 'uk', 'english': 'en'}
 # Выдумки Whisper на тишине, шуме и музыке (из субтитров, на которых его учили) — как у ушей.
 GALLYU = re.compile(
-    r'субтитр|корректор|продолжение следует|спасибо за (?:просмотр|внимание)|подписывайтесь|'
+    r'субтитр\w* (?:сделал|создавал|подготовил|делал)|редактор субтитров|корректор|продолжение следует|спасибо за (?:просмотр|внимание)|подписывайтесь|'
     r'ставьте лайк|dimatorzok|диматорзок|диматург|thanks? (?:you )?for watching|amara\.org|'
     r'дякую за перегляд|subtitles? by|please subscribe|like and subscribe|transcribed by|'
     r'^\W*(?:музыка|аплодисменты|music|applause|смех|laughter)\W*$', re.I)
 # Игра (19.10, GTA через HDMI Link): Whisper на музыке, стрельбе и радио пишет одно и то же — «I'm going to
 # go», «I'm sorry», «you», японское «спасибо за просмотр» — и подписи звуков капсом («PHONE RINGS», «BOOM!»).
 # В игре: одно слово (или одно и то же подряд — «Minus, minus»), такие фразы, подписи звуков и языки кроме ru/uk/en — мимо.
+# 19.10: просто слово «субтитры» было выдумкой — и «Немного изменилось поведение субтитров» Александра пропало.
+# Оскорбления (19.10 в игре: «…fuck all n…») — в кадр не идут: Twitch спрашивает со стримера за всё, что в эфире.
+# Слово заменяется звёздочками, остальная фраза остаётся. Мат Александра — его дело, тут только ненависть.
+OSKORB = re.compile(r'\b(?:nigg\w*|n[i1]gga\w*|fagg?ot\w*|retard\w*|kike\w*|chink\w*|tranny\w*|'
+                    r'пидор\w*|пидар\w*|педик\w*|ниггер\w*|нигер\w*|жид(?:ы|ов|ам|овск\w*|яр\w*)?\b|'
+                    r'чурк\w*|хач(?:и|ей|ам|ик\w*)?\b|даун(?:ы|ов|ам)?\b)', re.I)
 GALLYU_IGRA = re.compile(r"i'?m going to go|i'?m sorry|thank you|i don'?t have it|ご視聴|おやすみ|ありがとう", re.I)
 IGRA_YAZYKI = ('ru', 'uk', 'en')
 KOROTKIE = re.compile(r'^\W*(?:спасибо|thank you|thanks|you|ага|угу|да|bye|пока)\W*$', re.I)
@@ -444,6 +450,7 @@ class Sinhron:
             if (nsp > porog and lp < -0.6) or lp < -1.2:
                 self.schet['tishina'] += 1
                 continue
+            t = OSKORB.sub(lambda m: m.group(0)[0] + '*' * (len(m.group(0)) - 1), t)
             ostalos.append(t)
         return ' '.join(ostalos).strip()
 
@@ -528,7 +535,8 @@ class Sinhron:
         zadanie = ('You translate live-stream subtitles (a VR game stream with guests). Each user line is '
                    '"N. [to LANGUAGE] text". Translate every line into its target language: short, natural, '
                    'spoken style; keep names (Plus, Alexander, guest names), game terms and numbers; add '
-                   'nothing. Answer with exactly the same number of lines, each "N. translation".')
+                   'nothing. Alexander (the streamer) is male, Plus is female: keep Russian gender forms right. '
+                   'Answer with exactly the same number of lines, each "N. translation".')
         poryadok = PEREVOD[self.perevod_model:] + PEREVOD[:self.perevod_model]
         for model in poryadok:
             model = model.strip()

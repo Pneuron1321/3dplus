@@ -30,8 +30,10 @@ LOG = os.environ.get('TITR_LOG', '/tmp/titr.log')
 ISTORIYA = os.environ.get('TITR_ISTORIYA', '/tmp/titr-istoriya.log')   # разговор вечера — для соведущего
 KIRILL = re.compile('[А-Яа-яЁёІіЇїЄєҐґ]')
 # 17.10: перевод реплик соведущей шёл в мужском роде и на «вы» («я уверен… ваше настроение»), а голос женский
+# 19.10: а Александра перевод звал в женском роде («ты выиграла», «любопытной») — он мужчина
 PLUS_ONA = ('Plus is female: in Russian she speaks of herself in feminine forms (я поняла, я уверена) and addresses '
-            'Alexander informally as «ты», never «вы». ')
+            'Alexander informally as «ты», never «вы». Alexander is male: "you" is always masculine in Russian '
+            '(ты выиграл, ты вышел, ты сам), never feminine. ')
 ZADANIE = ('You write live-stream subtitles. Translate the user text (spoken to or by Plus, a voice '
            'assistant, during a VR game stream) into short natural {yazyk}. Keep names (Plus, '
            'Alexander), game terms and numbers. ' + PLUS_ONA + 'Output only the translation, one line, no quotes, '

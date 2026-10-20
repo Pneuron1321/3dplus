@@ -1296,7 +1296,15 @@ def ukorotit(rech, predel):
         n += w
     t = ' '.join(res)
     if len(t.split()) > predel:
-        t = ' '.join(t.split()[:predel]).rstrip(',;:—-') + '.'
+        # 19.10: рез по слову давал «…because a map that plays.» — полмысли в эфире. Режем по последней
+        # запятой / двоеточию / тире в пределе; нет такой — первое предложение целиком, если не вдвое длиннее
+        slova_ = t.split()
+        gran = max((i for i in range(5, predel) if re.search(r'[,;:—]$', slova_[i]) or
+                    i + 1 < len(slova_) and slova_[i + 1] in ('—', '-')), default=None)
+        if gran is not None:
+            t = ' '.join(slova_[:gran + 1]).rstrip(',;:—-') + '.'
+        elif len(slova_) > 2 * predel:
+            t = ' '.join(slova_[:predel]).rstrip(',;:—-') + '.'
     return t
 
 

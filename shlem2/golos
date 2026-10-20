@@ -108,6 +108,7 @@ VED_POROG_F = os.environ.get('GOLOS_VED_POROG', '/root/.ved-porog')
 VED_POROG = 38
 VED_TISHINA = 1.0
 VED_ZHDAT = 30.0
+VED_PEREBIT = 2                    # замеров подряд (по 0,15 с) громче порога, пока она говорит, — он перебил
 
 
 def log(*a):
@@ -396,8 +397,11 @@ class Sintez:
                     os.replace(tmp, put)
                     return True
             except Exception as e:
-                if type(e).__name__ == 'NoAudioReceived':
-                    log('нечего сказать: edge-tts не вернул звука —', tekst[:60])   # 19.10: какая фраза пропала
+                # 19.10 вечером сервис 30 раз вернул пустоту на обычные фразы («Hi there!», «Я тут, слушаю.») —
+                # это сбой, не «одни знаки»: фраза с буквами пробует ещё (те же паузы), пустая — сразу молчит
+                if type(e).__name__ == 'NoAudioReceived' and (not re.search(r'[^\W\d_]', tekst)
+                                                               or popytka > len(PAUZY_SINTEZA)):
+                    log('нечего сказать: edge-tts не вернул звука —', tekst[:60])
                     self.ubrat(tmp)
                     return None
                 log('синтез не вышел (попытка %d):' % popytka, type(e).__name__, str(e)[:120])
@@ -701,7 +705,10 @@ class Golos:
         self.mik_ot = None         # с какого времени непрерывно есть данные микрофона (None — нет данных)
         self.mik_gromko = 0.0      # когда Александр последний раз был громче порога
         self.ved_zhdu = None       # (uid реплики соведущей, с какого времени ждёт тишины)
-        self.mik_ved = []          # микрофон, пока звучит соведущая: её эхо — чтобы потом обрывать её на его голос
+        self.mik_ved = []          # микрофон, пока звучит соведущая (сводка в журнал)
+        self.mik_podryad = 0       # замеров подряд, где Александр громче порога, пока звучит соведущая
+        self.perebil = 0.0         # когда Александр заговорил поверх соведущей (её обрываем)
+        self.perebil_uchten = 0.0
 
     # --- приём ---
     def chitat_rezhim(self):
@@ -916,6 +923,15 @@ class Golos:
                 self.s_prervannoy(igrok, proshlo)
             self.bystree(pz)
             log('пауза')
+        if self.perebil > self.perebil_uchten:
+            self.perebil_uchten = self.perebil
+            k = getattr(self.igrok, 'kusok', None)
+            if k is not None and k.golos == VOICE_VED:
+                uid = k.uid
+                self.stop_igrok()
+                self.vybrosit(lambda x: x.uid == uid)   # реплику целиком: договаривать её потом — уже не к месту
+                self.zhdu_dosluh = False
+                log('соведущая замолчала: Александр заговорил')
         dl = vremya(DALSHE)
         if dl > self.dl:
             self.dl = dl
@@ -1118,6 +1134,14 @@ class Golos:
                     self.mik_gromko = now
                 if zvuchit_ved:
                     self.mik_ved.append(db)
+                    # 19.10 эфир: пока говорит соведущая, микрофон — 90 (её эха в нём нет), а громче порога — только
+                    # голос Александра. Две подряд (0,3 с) — он заговорил: соведущая замолкает (upravlenie)
+                    self.mik_podryad = self.mik_podryad + 1 if db <= ved_porog() else 0
+                    if self.mik_podryad >= VED_PEREBIT:
+                        self.perebil, self.mik_podryad = now, 0
+                        self.mik_gromko = now
+                else:
+                    self.mik_podryad = 0
             time.sleep(shag)
 
     def ved_mozhno(self, k):
