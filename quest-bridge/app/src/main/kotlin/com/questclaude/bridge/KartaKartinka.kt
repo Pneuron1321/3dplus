@@ -92,8 +92,9 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
 
     private fun primenitBez(sprosit: Boolean): String {
         val d = karta() ?: return status("карты нет (вставлена в хаб?)")
-        if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-            return status("нужно разрешение «Камера» для моста (Android пускает к USB-видео только с ним): открой " +
+        if (listOf(android.Manifest.permission.CAMERA, USB_KAMERA).any {
+                ctx.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED })
+            return status("нужны разрешения «Камера» и «USB-камера» для моста (Quest пускает к USB-видео только с ними): открой " +
                 "Quest Claude Bridge 2 и нажми «Всё сразу» — в окне разрешений «Разрешить»; потом команду ещё раз")
         if (!um.hasPermission(d)) {
             if (android.os.SystemClock.elapsedRealtime() - otkazS < 60_000) { otkazS = 0; zhdu = false
@@ -178,6 +179,8 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
         const val GET_MAX = 0x83
         const val GET_DEF = 0x87
         private const val RAZRESHENIE = "com.questclaude.bridge.KARTA_KARTINKA"
+        /** Разрешение Quest на USB-видео (2.6.6); без него hasPermission — «нет», даже если доступ дан. */
+        const val USB_KAMERA = "horizonos.permission.USB_CAMERA"
         /** Ручки UVC: имя → селектор Processing Unit. */
         val RUCHKI = linkedMapOf("yarkost" to 0x02, "kontrast" to 0x03, "ton" to 0x06, "nasyshchennost" to 0x07)
         val ZNAKOVYE = setOf("yarkost", "ton")

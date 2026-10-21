@@ -13,6 +13,9 @@
     <!-- ручки картинки карты (2.6.4): Android даёт USB-доступ к видеоустройству (UVC) только приложению с «Камерой»;
          без неё requestPermission молчит — ни окна, ни ответа (Александр 21.10: «жду разрешения» без окна) -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 2.6.6: Quest проверяет своё разрешение на USB-видео («USB Camera permission required…» в журнале 21.10);
+         так же его просит HDMI Link (dumpsys package com.meta.quest_hard_link) -->
+    <uses-permission android:name="horizonos.permission.USB_CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- «Запустить Плюса»: Termux RUN_COMMAND (Termux спросит разрешение) -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
@@ -20,6 +23,8 @@
     <!-- Android 11+: без этого приложение «не видит» Termux и не может его позвать -->
     <queries>
         <package android:name="com.termux" />
+        <!-- KartaVhod открывает HDMI Link: без этого Android прячет его от моста (журнал 21.10: AppsFilter BLOCKED) -->
+        <package android:name="com.meta.quest_hard_link" />
     </queries>
 
     <application

@@ -169,7 +169,7 @@ class MainActivity : Activity() {
     }
 
     private fun askPermissions() {
-        val need = listOf(Manifest.permission.RECORD_AUDIO, Shlem.RUN_COMMAND, Manifest.permission.CAMERA)   // камера — карта (2.6.4)
+        val need = listOf(Manifest.permission.RECORD_AUDIO, Shlem.RUN_COMMAND, Manifest.permission.CAMERA, KartaKartinka.USB_KAMERA)   // карта (2.6.4/2.6.6)
             .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (need.isEmpty()) afterPermissions() else requestPermissions(need.toTypedArray(), requestPerms)
     }
