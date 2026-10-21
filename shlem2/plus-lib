@@ -247,7 +247,9 @@ def efir(a):
             return 1, ['Нет ключа Twitch: в Ubuntu Плюса — kluch twitch.'], None
         r = zapros(U, '/efir/key', 5, telo=klyuch)
         del klyuch
-        if r is None or '"key":true' not in r[1]:
+        if r is None:                                    # приложение замолчало (обновляется, выгружено) — ключ ни при чём
+            return 1, [MOLCHIT], None
+        if '"key":true' not in r[1]:
             return 1, ['Приложение не приняло ключ (нужно приложение 2.1; ключ не похож на ключ Twitch?).'], None
         zapros(U, '/efir/start' + ('?size=720&kbps=4500' if c == '720' else ''), 20)
         for _ in range(12):
