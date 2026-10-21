@@ -18,21 +18,41 @@ if "%V%"=="2" (set W=1680& set H=1760& set F=-1& set FD=1) else (set W=2496& set
 
 echo.
 echo Жду шлем... (если в шлеме окно «Разрешить отладку» — нажми «Разрешить», галочка «Всегда»)
-"%ADB%" wait-for-usb-device
-"%ADB%" shell setprop debug.oculus.textureWidth %W%
-"%ADB%" shell setprop debug.oculus.textureHeight %H%
-"%ADB%" shell setprop debug.oculus.foveation.level %F%
-"%ADB%" shell setprop debug.oculus.foveation.dynamic %FD%
-"%ADB%" shell settings put global settings_enable_monitor_phantom_procs false
+rem Шлем может быть виден дважды (кабель и Wi-Fi) — берём кабель, иначе первый по Wi-Fi.
+set N=0
+:zhdu
+set S=
+for /f "skip=1 tokens=1,2" %%a in ('"%ADB%" devices') do (
+  if "%%b"=="device" (
+    echo %%a| find ":" >nul || if not defined S set S=%%a
+  )
+)
+if not defined S for /f "skip=1 tokens=1,2" %%a in ('"%ADB%" devices') do if "%%b"=="device" if not defined S set S=%%a
+if not defined S (
+  set /a N+=1
+  if %N% GEQ 30 (
+    echo Шлем не найден за минуту. Кабель прямо в ноутбук, в шлеме «Разрешить отладку».
+    pause & exit /b 1
+  )
+  timeout /t 2 /nobreak >nul
+  goto zhdu
+)
+echo Шлем: %S%
+set ADB="%ADB%" -s %S%
+%ADB% shell setprop debug.oculus.textureWidth %W%
+%ADB% shell setprop debug.oculus.textureHeight %H%
+%ADB% shell setprop debug.oculus.foveation.level %F%
+%ADB% shell setprop debug.oculus.foveation.dynamic %FD%
+%ADB% shell settings put global settings_enable_monitor_phantom_procs false
 
 echo.
 echo Проверка:
-for /f %%a in ('"%ADB%" shell getprop debug.oculus.textureWidth') do echo   ширина кадра: %%a
-for /f %%a in ('"%ADB%" shell getprop debug.oculus.textureHeight') do echo   высота кадра: %%a
-for /f %%a in ('"%ADB%" shell getprop debug.oculus.foveation.level') do echo   размытие краёв: %%a  (0 — выкл)
-for /f %%a in ('"%ADB%" shell settings get global settings_enable_monitor_phantom_procs') do echo   убийца процессов: %%a  (false — выкл)
+for /f %%a in ('%ADB% shell getprop debug.oculus.textureWidth') do echo   ширина кадра: %%a
+for /f %%a in ('%ADB% shell getprop debug.oculus.textureHeight') do echo   высота кадра: %%a
+for /f %%a in ('%ADB% shell getprop debug.oculus.foveation.level') do echo   размытие краёв: %%a  (0 — выкл)
+for /f %%a in ('%ADB% shell settings get global settings_enable_monitor_phantom_procs') do echo   убийца процессов: %%a  (false — выкл)
 
-"%ADB%" tcpip 5555 >nul
+%ADB% tcpip 5555 >nul
 echo.
 echo Готово. ADB по Wi-Fi открыт до перезагрузки шлема — кабель можно вынуть.
 echo Действует на VR-игры при СЛЕДУЮЩЕМ запуске игры. На окно HDMI Link не влияет
