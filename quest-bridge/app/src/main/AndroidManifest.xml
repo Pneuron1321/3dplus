@@ -10,6 +10,10 @@
     <!-- уши: микрофон в фоне — только через службу переднего плана типа microphone -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- ручки картинки карты (2.6.4): Android даёт USB-доступ к видеоустройству (UVC) только приложению с «Камерой»;
+         без неё requestPermission молчит — ни окна, ни ответа (Александр 21.10: «жду разрешения» без окна) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- «Запустить Плюса»: Termux RUN_COMMAND (Termux спросит разрешение) -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 

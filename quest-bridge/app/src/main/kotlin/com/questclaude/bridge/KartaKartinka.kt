@@ -24,6 +24,7 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
     private val lock = Any()
     @Volatile private var oshibka: String? = null
     @Volatile private var zhdu = false
+    @Volatile private var zhduS = 0L
 
     /** Желаемые значения: имя → число (сырое значение карты). Пусто — как в карте по умолчанию. */
     private val zhelanie = LinkedHashMap<String, Int>()
@@ -83,13 +84,20 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
     /** Открыть карту, прочитать диапазоны, выставить желаемое. sprosit — показать окно разрешения, если нужно. */
     fun primenit(sprosit: Boolean = true): String {
         val d = karta() ?: return status("карты нет (вставлена в хаб?)")
+        if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            return status("нужно разрешение «Камера» для моста (Android пускает к USB-видео только с ним): открой " +
+                "Quest Claude Bridge 2 и нажми «Всё сразу» — в окне разрешений «Разрешить»; потом команду ещё раз")
         if (!um.hasPermission(d)) {
-            if (sprosit && !zhdu) {
+            val zavislo = zhdu && android.os.SystemClock.elapsedRealtime() - zhduS > 15_000
+            if (sprosit && (!zhdu || zavislo)) {                         // окно не пришло за 15 с — спросить заново
                 zhdu = true
+                zhduS = android.os.SystemClock.elapsedRealtime()
                 val fl = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                 um.requestPermission(d, PendingIntent.getBroadcast(ctx, 7, Intent(RAZRESHENIE).setPackage(ctx.packageName), fl))
             }
-            return status("жду разрешения: в шлеме окно «Разрешить доступ к Elgato» — нажми «Разрешить» (без галочки «по умолчанию»)")
+            return status(if (zavislo) "окно доступа к Elgato не пришло за 15 с — спросила заново; если окна снова нет — вынь карту " +
+                    "из хаба на 5 с и вставь, в «Choose an app» выбери HDMI Link, потом команду ещё раз"
+                else "жду разрешения: в шлеме окно «Разрешить доступ к Elgato» — нажми «Разрешить» (без галочки «по умолчанию»)")
         }
         val intf = (0 until d.interfaceCount).map { d.getInterface(it) }
             .firstOrNull { it.interfaceClass == UsbConstants.USB_CLASS_VIDEO && it.interfaceSubclass == 1 }
