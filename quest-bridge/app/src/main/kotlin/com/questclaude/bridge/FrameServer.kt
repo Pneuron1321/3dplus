@@ -57,6 +57,8 @@ import kotlin.concurrent.thread
  *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 120) с видео телефона — MP4 в «Фильмы/Plus»
  *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}
  *   GET /karta/upr?vkl=0|1&g=100 -> звук карты в шлем и эфир вкл/выкл, громкость %
+ *   GET /karta/kartinka[?yarkost=&kontrast=&nasyshchennost=&ton=  (N, +N, -N, =N, def) &preset=sochno|kak_bylo]
+ *                            -> ручки картинки в самой карте (UVC): {"yarkost":{cur,min,max,def,nado},…,"oshibka"}
  *   GET /nalet               -> плашки эфира: {"vsego":"123,45","za_efir":"1,20",…,"lico","pokaz","radar",
  *                              "kompas":"absolute|relative|none","kurs":"247° WSW","datchiki"}
  *   GET /nalet/upr?lico=0|1&pokaz=0|1&radar=0|1&sever=1&koiny=123.45 -> показать/скрыть лицо,
@@ -489,6 +491,11 @@ class FrameServer(
                     val end = g.play(mp3, when (query["mode"]) { "uho" -> "uho"; "efir" -> "efir"; "oba" -> "oba"; else -> "vsluh" })
                     reply(out, 200, "application/json", "{\"end\":\"$end\"}".toByteArray())
                 }
+            }
+            "/karta/kartinka" -> {
+                val k = Hub.kartinka
+                if (k == null) reply(out, 503, "application/json", "{\"oshibka\":\"мост ещё не запущен\"}".toByteArray(Charsets.UTF_8))
+                else reply(out, 200, "application/json; charset=utf-8", k.upr(query).toByteArray(Charsets.UTF_8))
             }
             "/karta", "/karta/upr" -> {
                 val k = karta()

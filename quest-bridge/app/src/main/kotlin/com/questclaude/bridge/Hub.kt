@@ -54,8 +54,12 @@ object Hub {
     /** Звук карты захвата (2.6.0, /karta…): ставит первая служба, как музыку. */
     @Volatile var karta: KartaZvuk? = null
 
+    /** Ручки картинки карты (2.6.2, /karta/kartinka). */
+    @Volatile var kartinka: KartaKartinka? = null
+
     @Synchronized fun kartaZapustit(ctx: android.content.Context, dir: java.io.File) {
         if (karta == null) karta = try { KartaZvuk(ctx.applicationContext, dir).also { it.start() } } catch (e: Exception) { null }
+        if (kartinka == null) kartinka = try { KartaKartinka(ctx.applicationContext, dir).also { it.start() } } catch (e: Exception) { null }
     }
 
     /** Музыка в звук эфира: ставит Efir, пока эфир идёт (Fon кладёт, эфир берёт). */

@@ -413,6 +413,8 @@ def karta(a):
     a = list(a)
     U = os.environ.get('KAMERA_URL') or APP
     c = a[0] if a else ''
+    if c == 'kartinka':
+        return kartinka(U, a[1:])
     if c in ('vkl', 'vykl'):
         put = '/karta/upr?vkl=' + ('1' if c == 'vkl' else '0')
     elif c.rstrip('%').isdigit():
@@ -420,7 +422,8 @@ def karta(a):
     elif c in ('', 'status', 's'):
         put = '/karta'
     else:
-        return 0, ['karta — звук карты захвата; karta vkl|vykl; karta 80 — громкость игры в %.'], None
+        return 0, ['karta — звук карты захвата; karta vkl|vykl; karta 80 — громкость игры в %; '
+                   'karta kartinka — яркость/контраст/насыщенность картинки карты.'], None
     r = zapros(U, put, 5)
     if r is None:
         return 1, [MOLCHIT], None
@@ -450,6 +453,80 @@ def karta(a):
     if d.get('oshibka'):
         out += ' ' + d['oshibka']
     return 0, [out], None
+
+
+RUCHKI = ('yarkost', 'kontrast', 'nasyshchennost', 'ton')
+RUCHKI_RU = {'yarkost': 'яркость', 'kontrast': 'контраст', 'nasyshchennost': 'насыщенность', 'ton': 'оттенок'}
+# Слова → шаг ручек в долях диапазона карты (Плюс переводит «ярче», «сочнее» сюда).
+SLOVA = {'yarche': {'yarkost': 0.1}, 'temnee': {'yarkost': -0.1},
+         'sochnee': {'nasyshchennost': 0.1, 'kontrast': 0.05}, 'blednee': {'nasyshchennost': -0.1, 'kontrast': -0.05},
+         'kontrastnee': {'kontrast': 0.1}, 'myagche': {'kontrast': -0.1}}
+
+
+def kartinka_skazat(d):
+    if d.get('oshibka') and not any(d.get(k) for k in RUCHKI):
+        return 1, ['Картинка карты: ' + d['oshibka']]
+    chasti = []
+    for k in RUCHKI:
+        r = d.get(k)
+        if r:
+            chasti.append('%s %s (%s…%s, обычно %s)' % (RUCHKI_RU[k], r.get('cur'), r.get('min'), r.get('max'), r.get('def')))
+    out = 'Картинка карты: ' + (', '.join(chasti) or 'ручек не видно') + '.'
+    if d.get('oshibka'):
+        out += ' ' + d['oshibka']
+    return 0, [out]
+
+
+def kartinka(U, a):
+    """karta kartinka [yarche|temnee|sochnee|blednee|kontrastnee|myagche [N раз]] [<ручка> N|+N|-N|def]
+    [nabor <имя>|kak_bylo]. Без аргументов — как сейчас."""
+    q = []
+    i = 0
+    while i < len(a):
+        w = a[i]
+        if w in ('kak_bylo', 'kakbylo', 'sbros'):
+            q.append('preset=kak_bylo')
+        elif w in ('nabor', 'preset') and i + 1 < len(a):
+            q.append('preset=' + a[i + 1])
+            i += 1
+        elif w in RUCHKI and i + 1 < len(a) and re.fullmatch(r'[+-]?\d+|=-?\d+|def', a[i + 1]):
+            q.append(w + '=' + a[i + 1])
+            i += 1
+        elif w in SLOVA:
+            raz = 1
+            if i + 1 < len(a) and a[i + 1].isdigit():
+                raz = max(1, min(5, int(a[i + 1])))
+                i += 1
+            q.append(('slovo', w, raz))
+        else:
+            return 1, ['karta kartinka — как сейчас; yarche|temnee|sochnee|blednee|kontrastnee|myagche [2]; '
+                       'yarkost|kontrast|nasyshchennost|ton 140|+10|-10|def; nabor <имя>; kak_bylo.'], None
+        i += 1
+    slova = [x for x in q if isinstance(x, tuple)]
+    pryamo = [x for x in q if not isinstance(x, tuple)]
+    if slova:
+        r = zapros(U, '/karta/kartinka', 8)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if r[0] == 404:
+            return 1, ['Картинка карты: нужно приложение 2.6.2.'], None
+        d = razobrat(r[1]) or {}
+        shag = {}
+        for _, w, raz in slova:
+            for k, dolya in SLOVA[w].items():
+                rd = d.get(k)
+                if rd:
+                    s = round(dolya * raz * (rd['max'] - rd['min'])) or (1 if dolya > 0 else -1)
+                    shag[k] = shag.get(k, 0) + s
+        if not shag:
+            return kartinka_skazat(d) + (None,)
+        pryamo += ['%s=%+d' % (k, v) for k, v in shag.items()]
+    r = zapros(U, '/karta/kartinka' + ('?' + '&'.join(pryamo) if pryamo else ''), 8)
+    if r is None:
+        return 1, [MOLCHIT], None
+    if r[0] == 404:
+        return 1, ['Картинка карты: нужно приложение 2.6.2.'], None
+    return kartinka_skazat(razobrat(r[1]) or {}) + (None,)
 
 
 INSTRUMENTY = {'kadr': kadr, 'efir': efir, 'kamera': kamera, 'karta': karta}
