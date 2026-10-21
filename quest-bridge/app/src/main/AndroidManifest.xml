@@ -37,6 +37,23 @@
             </intent-filter>
         </activity>
 
+        <!-- Карту вставили и в «Choose an app» выбрали мост: Android сам даёт мосту доступ к карте (своё окно
+             «Разрешить» Quest не показывает, 21.10). Мост ставит картинку карты и открывает HDMI Link. -->
+        <activity
+            android:name=".KartaVhod"
+            android:exported="true"
+            android:label="Плюс: картинка карты → HDMI Link"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/karta_usb" />
+        </activity>
+
         <service
             android:name=".CaptureService"
             android:exported="false"

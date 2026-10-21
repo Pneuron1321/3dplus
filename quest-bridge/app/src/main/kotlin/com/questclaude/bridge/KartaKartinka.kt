@@ -25,6 +25,11 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
     @Volatile private var oshibka: String? = null
     @Volatile private var zhdu = false
     @Volatile private var zhduS = 0L
+    /** Когда система сразу ответила «нет» (без окна) — чтобы не прятать отказ за «жду разрешения». */
+    @Volatile private var otkazS = 0L
+    /** Последний раз ставили (KartaVhod) — чтобы приёмник подключения не открывал карту, пока стартует HDMI Link. */
+    @Volatile private var postavlenoS = 0L
+    private val primLock = Any()
 
     /** Желаемые значения: имя → число (сырое значение карты). Пусто — как в карте по умолчанию. */
     private val zhelanie = LinkedHashMap<String, Int>()
@@ -35,8 +40,9 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
                 RAZRESHENIE -> { zhdu = false; if (i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) Thread { primenit() }.start()
-                                 else oshibka = "доступ к карте не дали (окно в шлеме — «Разрешить»)" }
-                UsbManager.ACTION_USB_DEVICE_ATTACHED -> if (zhelanie.isNotEmpty()) Thread { Thread.sleep(300); primenit(sprosit = false) }.start()
+                                 else { otkazS = android.os.SystemClock.elapsedRealtime(); oshibka = "доступ к карте не дали" } }
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> if (zhelanie.isNotEmpty() &&
+                    android.os.SystemClock.elapsedRealtime() - postavlenoS > 5_000) Thread { Thread.sleep(300); primenit(sprosit = false) }.start()
             }
         }
     }
@@ -82,12 +88,17 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
     private val diapazony = HashMap<String, Diapazon>()
 
     /** Открыть карту, прочитать диапазоны, выставить желаемое. sprosit — показать окно разрешения, если нужно. */
-    fun primenit(sprosit: Boolean = true): String {
+    fun primenit(sprosit: Boolean = true): String = synchronized(primLock) { primenitBez(sprosit) }
+
+    private fun primenitBez(sprosit: Boolean): String {
         val d = karta() ?: return status("карты нет (вставлена в хаб?)")
         if (ctx.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             return status("нужно разрешение «Камера» для моста (Android пускает к USB-видео только с ним): открой " +
                 "Quest Claude Bridge 2 и нажми «Всё сразу» — в окне разрешений «Разрешить»; потом команду ещё раз")
         if (!um.hasPermission(d)) {
+            if (android.os.SystemClock.elapsedRealtime() - otkazS < 60_000) { otkazS = 0; zhdu = false
+                return status("система отказала без окна. Путь в обход: вынь карту из хаба на 5 с и вставь; в «Choose an app» " +
+                    "выбери «Плюс: картинка карты → HDMI Link» (можно Always) — мост выставит картинку и сам откроет HDMI Link") }
             val zavislo = zhdu && android.os.SystemClock.elapsedRealtime() - zhduS > 15_000
             if (sprosit && (!zhdu || zavislo)) {                         // окно не пришло за 15 с — спросить заново
                 zhdu = true
@@ -95,8 +106,9 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
                 val fl = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                 um.requestPermission(d, PendingIntent.getBroadcast(ctx, 7, Intent(RAZRESHENIE).setPackage(ctx.packageName), fl))
             }
-            return status(if (zavislo) "окно доступа к Elgato не пришло за 15 с — спросила заново; если окна снова нет — вынь карту " +
-                    "из хаба на 5 с и вставь, в «Choose an app» выбери HDMI Link, потом команду ещё раз"
+            return status(if (zavislo) "окно доступа к Elgato не пришло за 15 с (Quest его, похоже, не показывает). Путь в обход: вынь " +
+                    "карту из хаба на 5 с и вставь; в «Choose an app» выбери «Плюс: картинка карты → HDMI Link» (можно Always) — " +
+                    "мост выставит картинку и сам откроет HDMI Link"
                 else "жду разрешения: в шлеме окно «Разрешить доступ к Elgato» — нажми «Разрешить» (без галочки «по умолчанию»)")
         }
         val intf = (0 until d.interfaceCount).map { d.getInterface(it) }
@@ -129,6 +141,7 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
                     if (n == 2) dz.cur = v else oshibka = "$imya не выставилась"
                 }
                 oshibka = null
+                postavlenoS = android.os.SystemClock.elapsedRealtime()
                 return status(null)
             } finally { try { c.releaseInterface(intf) } catch (e: Exception) { } }
         } catch (e: Exception) {
