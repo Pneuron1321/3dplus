@@ -21,13 +21,14 @@ import kotlin.math.sqrt
  * Карта (Elgato 4K X и т. п.) — для Android обычная USB-звуковая карта (UAC): мост пишет с неё звук игры и
  * сразу играет в шлем (USAGE_GAME, низкая задержка). Захват звука эфира (Efir) берёт всё, что играет шлем, —
  * значит игра сама попадает в эфир и в субтитры игры («igra»), ничего отдельно склеивать не надо.
- * Карту вставили — начинает сам; вынули — молчит. Выключить — /karta/upr?vkl=0 (запоминается).
+ * По умолчанию ВЫКЛЮЧЕН (2.6.3, 21.10: при захвате мост отнимал у HDMI Link звук карты, картинка застывала, а общий
+ * вход шлема уходил на карту — браузер оглох). Звук игры играет сам HDMI Link. Включить — /karta/upr?vkl=1.
  * Картинку по-прежнему показывает HDMI Link (видео в мосте — потом, если понадобится).
  */
 class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.KartaUpr {
     private val am = ctx.getSystemService(AudioManager::class.java)
     private val lock = Any()
-    @Volatile private var vkl = true
+    @Volatile private var vkl = false
     @Volatile private var grom = 1.0f
     @Volatile private var rabotaet = false
     private var potok: Thread? = null
@@ -39,7 +40,7 @@ class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.K
     @Volatile private var dbMaks = -90f                  // громче всего за последние 0,5 с
     @Volatile private var zaglushen = false              // Android сам глушит нашу запись (фон, чужой микрофон)
     @Volatile private var marshrut = ""                  // с какого входа на самом деле пишет
-    private val nastroyki = File(dir, "karta-zvuk")
+    private val nastroyki = File(dir, "karta-zvuk2")       // новое имя: старое «вкл» из 2.6.0 не тянем
 
     private val slushatel = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = proverit()
@@ -204,7 +205,7 @@ class KartaZvuk(private val ctx: Context, private val dir: File) : FrameServer.K
 
     private fun zagruzit() {
         val c = try { nastroyki.readText().trim().split(' ') } catch (e: Exception) { emptyList() }
-        if (c.isNotEmpty()) vkl = c[0] != "0"
+        vkl = c.firstOrNull() == "1"
         c.getOrNull(1)?.toFloatOrNull()?.let { grom = it.coerceIn(0f, 1.5f) }
     }
 

@@ -96,7 +96,7 @@ class KartaKartinka(private val ctx: Context, private val dir: File) {
             ?: return status("у карты нет интерфейса управления видео")
         val c = um.openDevice(d) ?: return status("карта не открылась")
         try {
-            val vzyal = c.claimInterface(intf, true)
+            val vzyal = c.claimInterface(intf, false)          // не отрывать драйвер у HDMI Link
             if (!vzyal) return status("занято: закрой HDMI Link, дай команду ещё раз, потом открой HDMI Link")
             try {
                 val idx = (PU_ID shl 8) or intf.id
