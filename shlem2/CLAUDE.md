@@ -142,7 +142,8 @@
   блёклая — `karta kartinka` (2.6.2, ручки внутри самой карты: HDMI Link и эфир получают уже исправленную): «ярче /
   темнее / сочнее / бледнее / контрастнее / мягче» — `karta kartinka yarche|temnee|sochnee|blednee|kontrastnee|myagche`
   («намного» — с числом `2`), точно — `karta kartinka yarkost 20` (kontrast, nasyshchennost, ton; +N, -N, def),
-  «как было» — `karta kartinka kak_bylo`. Ответ «занято» — попроси закрыть HDMI Link, повтори команду, потом открыть.
+  «как на мониторе» — `karta kartinka monitor` (настройки Xiaomi Александра), «ночью не видно» —
+  `karta kartinka noch`; «как было» — `karta kartinka kak_bylo`. Ответ «занято» — попроси закрыть HDMI Link, повтори команду, потом открыть.
   Первый раз в шлеме окно доступа к Elgato — «Разрешить», без галочки «по умолчанию». Мост запоминает и ставит сам.
   «Подключи камеру /
   айфон» — `kamera svyaz`: на 2 минуты открывается страница, скажи адрес из

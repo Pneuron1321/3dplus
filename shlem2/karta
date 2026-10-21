@@ -5,6 +5,6 @@
 #   karta vkl|vykl   — включить / выключить (мост запоминает)
 #   karta 80         — громкость игры, % (0–150)
 #   karta kartinka   — картинка карты (2.6.2): yarche|temnee|sochnee|blednee|kontrastnee|myagche [2],
-#                      yarkost|kontrast|nasyshchennost|ton N|+N|-N|def, nabor <имя>, kak_bylo
+#                      yarkost|kontrast|nasyshchennost|ton N|+N|-N|def, monitor | noch (наборы), kak_bylo
 L=${0%/*}/plus-lib; [ -f "$L" ] || L=/usr/local/bin/plus-lib
 exec python3 -S "$L" karta "$@"

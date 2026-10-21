@@ -461,6 +461,12 @@ RUCHKI_RU = {'yarkost': 'яркость', 'kontrast': 'контраст', 'nasys
 SLOVA = {'yarche': {'yarkost': 0.1}, 'temnee': {'yarkost': -0.1},
          'sochnee': {'nasyshchennost': 0.1, 'kontrast': 0.05}, 'blednee': {'nasyshchennost': -0.1, 'kontrast': -0.05},
          'kontrastnee': {'kontrast': 0.1}, 'myagche': {'kontrast': -0.1}}
+# Наборы: ('x', k) — «обычно» карты × k; ('+', d) — «обычно» + d диапазона. monitor — Xiaomi Александра 21.10
+# (Стандартный: контраст 60, насыщенность 58, оттенок 50 из 50 «обычно»; яркость 51 — подсветка, не сигнал;
+# «улучшение тёмных сцен» 46 → чуть поднять чёрное; резкости 100 и гаммы 2.4 у карты нет).
+# noch — для ночных сцен в шлеме: тени выше, цвета как у monitor.
+NABORY = {'monitor': {'kontrast': ('x', 1.2), 'nasyshchennost': ('x', 1.16), 'yarkost': ('+', 0.04), 'ton': ('x', 1)},
+          'noch': {'kontrast': ('x', 1.1), 'nasyshchennost': ('x', 1.16), 'yarkost': ('+', 0.1), 'ton': ('x', 1)}}
 
 
 def kartinka_skazat(d):
@@ -487,8 +493,10 @@ def kartinka(U, a):
         if w in ('kak_bylo', 'kakbylo', 'sbros'):
             q.append('preset=kak_bylo')
         elif w in ('nabor', 'preset') and i + 1 < len(a):
-            q.append('preset=' + a[i + 1])
+            q.append(('nabor', a[i + 1]) if a[i + 1] in NABORY else 'preset=' + a[i + 1])
             i += 1
+        elif w in NABORY:
+            q.append(('nabor', w))
         elif w in RUCHKI and i + 1 < len(a) and re.fullmatch(r'[+-]?\d+|=-?\d+|def', a[i + 1]):
             q.append(w + '=' + a[i + 1])
             i += 1
@@ -500,10 +508,13 @@ def kartinka(U, a):
             q.append(('slovo', w, raz))
         else:
             return 1, ['karta kartinka — как сейчас; yarche|temnee|sochnee|blednee|kontrastnee|myagche [2]; '
-                       'yarkost|kontrast|nasyshchennost|ton 140|+10|-10|def; nabor <имя>; kak_bylo.'], None
+                       'yarkost|kontrast|nasyshchennost|ton 140|+10|-10|def; monitor | noch (наборы); kak_bylo.'], None
         i += 1
-    slova = [x for x in q if isinstance(x, tuple)]
+    slova = [x for x in q if isinstance(x, tuple) and x[0] == 'slovo']
+    nabory = [x[1] for x in q if isinstance(x, tuple) and x[0] == 'nabor']
     pryamo = [x for x in q if not isinstance(x, tuple)]
+    if nabory:
+        slova.append(('nabor', nabory[-1], 1))
     if slova:
         r = zapros(U, '/karta/kartinka', 8)
         if r is None:
@@ -512,13 +523,23 @@ def kartinka(U, a):
             return 1, ['Картинка карты: нужно приложение 2.6.2.'], None
         d = razobrat(r[1]) or {}
         shag = {}
-        for _, w, raz in slova:
+        for vid, w, _ in slova:
+            if vid != 'nabor':
+                continue
+            for k, (kak, x) in NABORY[w].items():            # набор — от «обычно» карты, не от текущего
+                rd = d.get(k)
+                if rd:
+                    v = round(rd['def'] * x) if kak == 'x' else rd['def'] + round(x * (rd['max'] - rd['min']))
+                    pryamo.append('%s=%d' % (k, min(rd['max'], max(rd['min'], v))))
+        for vid, w, raz in slova:
+            if vid == 'nabor':
+                continue
             for k, dolya in SLOVA[w].items():
                 rd = d.get(k)
                 if rd:
                     s = round(dolya * raz * (rd['max'] - rd['min'])) or (1 if dolya > 0 else -1)
                     shag[k] = shag.get(k, 0) + s
-        if not shag:
+        if not shag and not nabory:
             return kartinka_skazat(d) + (None,)
         pryamo += ['%s=%+d' % (k, v) for k, v in shag.items()]
     r = zapros(U, '/karta/kartinka' + ('?' + '&'.join(pryamo) if pryamo else ''), 8)
