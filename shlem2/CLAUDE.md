@@ -144,6 +144,12 @@
   («намного» — с числом `2`), точно — `karta kartinka yarkost 20` (kontrast, nasyshchennost, ton; +N, -N, def),
   «как на мониторе» — `karta kartinka monitor` (настройки Xiaomi Александра), «ночью не видно» —
   `karta kartinka noch`; «как было» — `karta kartinka kak_bylo`. Ответ «занято» — попроси закрыть HDMI Link, повтори команду, потом открыть.
+  Мост 3 (22.10, приложение «Мост 3 — карта»): игра с карты в шлеме БЕЗ HDMI Link — своя картинка
+  (наборы, авто-ночь, резкость) и звук игры мимо микрофона. Вместе с HDMI Link не работает (карта одна) — что-то одно.
+  `most3` — что показывает; `most3 zvuk 80|vkl|vykl`; «картинка/ярче/сочнее/ночь/резче/как было» — тот же
+  `karta kartinka …` (если Мост 3 показывает, команда сама идёт в него: наборы obychno monitor noch yarko rezko,
+  шаги yarche temnee sochnee blednee kontrastnee myagche rezche, gamma|teni|rezkost|avtonoch N). Чёрный экран или
+  «не показывает» — `most3 diagnoz`, первую строку скажи, весь ответ Александр пересылает Claude Code.
   Доступ к карте (2.6.6): мосту нужны «Камера» и «USB-камера» (кнопка «Всё сразу» спросит).
   Своё окно «Разрешить» Quest не показывает. Путь: вынуть карту из хаба на 5 с,
   вставить; в «Choose an app to use with your video device» выбрать «Плюс: картинка карты → HDMI Link» (можно Always) —

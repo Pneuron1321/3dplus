@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- пульт Плюса: HTTP на 127.0.0.1:8767 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Quest пускает к USB-видео только с «Камерой» и своим «USB-камера» (журнал шлема 21.10) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="horizonos.permission.USB_CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="true" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Мост 3 — карта"
+        android:supportsRtl="false">
+
+        <!-- Окно игры. Карту вставили и выбрали «Мост 3» в «Choose an app» — Android сам даёт доступ
+             («Always» — так при каждом подключении, без вопросов). -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density"
+            android:resizeableActivity="true"
+            android:theme="@android:style/Theme.Black.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/karta_usb" />
+            <!-- окно Quest: 16:9, крупное по умолчанию -->
+            <layout android:defaultWidth="1600dp" android:defaultHeight="900dp" />
+        </activity>
+    </application>
+</manifest>
