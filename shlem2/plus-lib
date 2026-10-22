@@ -308,6 +308,11 @@ def kamera_skazat(telo):
     p = d.get('perezapuskov') or 0
     if p:
         out.append('Порт камеры открывался заново %d раз (система его закрывала — так и надо).' % p)
+    pr = d.get('propushcheno') or 0                    # 22.10: «картинка камеры рвалась»
+    if pr:
+        pk = d.get('pokazano') or 0
+        out.append('Пропущено кадров камеры: %d%s — декодер шлема не успевал, окно замирало до ключевого кадра '
+                   '(nagruzka sboi покажет, в какие минуты эфира).' % (pr, ' из %d' % (pr + pk) if pk else ''))
     return 0, out
 
 

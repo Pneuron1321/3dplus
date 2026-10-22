@@ -211,6 +211,14 @@ def efir():
         return None
 
 
+def kamera():
+    """Счётчики камеры телефона (22.10: «картинка камеры рвалась» — пропуски декодера до ключевого кадра)."""
+    try:
+        return json.loads(urllib.request.urlopen(URL + '/kamera', timeout=1.5).read().decode())
+    except Exception:
+        return None
+
+
 # ---------- предохранитель (17.10, Александр: «нужно сделать предохранитель… чтобы он кусками это делал») ----------
 # В эфире помощник Плюса качал треки и искал файлы по всей системе — Termux съел 4,5 ядра, игра проседала. Тяжёлую
 # работу не убиваем и не запрещаем: пока идёт эфир, дерево помощника, которое долго ест больше POROG % ядра, получает
@@ -470,7 +478,7 @@ def demon():
         return                                    # чёрный ящик уже пишет
     import signal
     versiya = os.path.getmtime(SKRIPT) if os.path.exists(SKRIPT) else 0
-    imena, t0, e0, m0, posl = {}, tiki(), efir(), time.time(), 0.0
+    imena, t0, e0, m0, posl, k0 = {}, tiki(), efir(), time.time(), 0.0, None
     pov = Povodok()
 
     def proch(*_):                                # выходим — никого не оставляем прижатым
@@ -486,6 +494,7 @@ def demon():
             zamok.close()
             os.execv('/bin/sh', ['sh', SKRIPT, 'demon'])          # обновили — новая версия
         t1, e1, m1 = tiki(), efir(), time.time()
+        k1 = kamera() if e1 is not None and e1.get('state') == 'efir' else None
         dt_ = max(0.5, m1 - m0)
         cpu = dict.fromkeys(GRUPPY + ('drugoe', 'gosti'), 0.0)
         cpu_pid = {}
@@ -526,9 +535,13 @@ def demon():
             # 2.3.9: игра или эфир — кадры экрана, мс загрузок плашек в секунду, кадры глаз (в конце строки:
             # старые строки без них читаются как раньше)
             ek = '\t'.join(str(e1.get(k, '')) for k in ('ekran_fps', 'plashki_ms', 'glaza_fps')) if idet else '\t\t'
-            stroka = '%s\t%s\t%s\t%s\t%s\t%.0f\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
+            # 22.10: пропуски кадров камеры за шаг (декодер не успел — окно камеры замерло до ключевого кадра)
+            kp = ''
+            if k1 is not None and k0 is not None and 'propushcheno' in k1:
+                kp = str(max(0, int(k1.get('propushcheno') or 0) - int(k0.get('propushcheno') or 0)))
+            stroka = '%s\t%s\t%s\t%s\t%s\t%.0f\t%s\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
                                                      '\t'.join('%.0f' % cpu[g] for g in GRUPPY + ('drugoe',)), ','.join(metki), ek,
-                                                     cpu['gosti'])
+                                                     cpu['gosti'], kp)
             try:
                 if os.path.exists(ZHURNAL) and os.path.getsize(ZHURNAL) > 2_000_000:
                     t = open(ZHURNAL).read()
@@ -537,7 +550,7 @@ def demon():
             except OSError:
                 pass
             posl = m1
-        t0, e0, m0 = t1, e1, m1
+        t0, e0, m0, k0 = t1, e1, m1, k1
 
 
 def sboi():
@@ -568,7 +581,8 @@ def sboi():
                 return float(p[i])
             except (IndexError, ValueError):
                 return None
-        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else '', chislo(14), chislo(15), chislo(17)))
+        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else '', chislo(14), chislo(15), chislo(17),
+                    chislo(18)))
     if not zap:
         print('За %g ч эфира в чёрном ящике нет.' % CHASOV)
         return
@@ -598,6 +612,14 @@ def sboi():
             print('Плашки эфира: %.1f мс в секунду в среднем, в сбоях — %.1f мс.' % (
                 sum(z[9] for z in pl) / len(pl),
                 sum(z[9] for z in pe if z[9] is not None) / max(1, sum(1 for z in pe if z[9] is not None))))
+    km = [z for z in zap if z[11] is not None]                # 22.10: пропуски кадров камеры
+    if km:
+        vsego = sum(z[11] for z in km)
+        s_prop = [z for z in km if z[11] > 0]
+        kp = sum(1 for z in s_prop if z in plohie)
+        print('Камера телефона: пропущено %d кадров (декодер не успевал — окно замирало до ключевого кадра) в %d замерах '
+              'из %d; из них в сбоях эфира — %d.' % (vsego, len(s_prop), len(km), kp) if vsego else
+              'Камера телефона: пропусков кадров нет (%d замеров).' % len(km))
     for metka in ('говорит', 'слушает', 'тесно'):
         a = sum(1 for z in plohie if metka in z[7]); b = sum(1 for z in horoshie if metka in z[7])
         if metka == 'тесно' and not a and not b:
@@ -619,9 +641,11 @@ def sboi():
             cl = max(z[6]['claude'] for z in zz)
             go = max(z[6]['golos'] for z in zz)
             met = sorted({m for z in zz for m in z[7].split(',') if m})
-            print('  %s–%s  кадров/с от %.0f, потерь %d, пропусков звука %d · claude до %.0f %%, golos до %.0f %%%s' % (
+            kam = sum(z[11] or 0 for z in zz)
+            print('  %s–%s  кадров/с от %.0f, потерь %d, пропусков звука %d · claude до %.0f %%, golos до %.0f %%%s%s' % (
                 a.strftime('%H:%M:%S'), b.strftime('%H:%M:%S'), min(z[1] for z in zz), sum(z[3] for z in zz),
-                sum(z[4] + z[5] for z in zz), cl, go, (' · ' + ', '.join(met)) if met else ''))
+                sum(z[4] + z[5] for z in zz), cl, go, (' · ' + ', '.join(met)) if met else '',
+                ' · камера: пропущено %d кадров' % kam if kam else ''))
 
 
 demon() if REZHIM == 'nagruzka-demon' else sboi()
