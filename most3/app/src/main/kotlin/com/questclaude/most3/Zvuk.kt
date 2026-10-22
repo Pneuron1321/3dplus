@@ -20,6 +20,8 @@ import java.nio.ByteOrder
  * точку сам. Мы тоже: интерфейс звука забираем у драйвера ядра (USB-вход у Android пропадает, встроенный
  * микрофон остаётся единственным), передачи ставим через usbfs (ioctl SUBMITURB/REAPURB, в Java их нет — JNA),
  * отдаём в AudioTrack USAGE_GAME. Эфир моста 2 ловит его захватом воспроизведения, как любую игру.
+ * Соединение — СВОЁ (второй openDevice): REAPURB забирает любую готовую передачу своего fd, и на общем fd звук
+ * воровал бы передачи видео у UsbRequest, а видео — у звука.
  */
 class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
            private val alt0: UsbInterface, private val alt1: UsbInterface) {
@@ -35,6 +37,8 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
     private var trek: AudioTrack? = null
     private var potok: Thread? = null
     private val urby = ArrayList<Memory>()
+    /** Передач у ядра (поставлено и ещё не забрано): память Memory нельзя отпускать, пока ядро в неё пишет. */
+    private val vPolete = java.util.concurrent.atomic.AtomicInteger()
 
     fun start(): Boolean {
         if (rabotaet) return true
@@ -60,7 +64,8 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
         repeat(URBOV) {
             val m = Memory((Urb.RAZMER + Urb.ISO * PAKETOV + op.paket * PAKETOV).toLong())
             urby += m
-            if (!podat(fd, m)) { stop(); oshibka = "usbfs: передача не встала (errno ${Native.getLastError()})"; return false }
+            if (!podat(fd, m)) { val e = Native.getLastError(); stop(); oshibka = "usbfs: передача не встала (errno $e)"; return false }
+            vPolete.incrementAndGet()
         }
         rabotaet = true; oshibka = null
         potok = Thread({ cikl(fd, t, hz) }, "most3-zvuk").apply { priority = Thread.MAX_PRIORITY; start() }
@@ -87,6 +92,7 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
                 break
             }
             val p = ref.value ?: continue
+            vPolete.decrementAndGet()
             val m = urby.firstOrNull { Pointer.nativeValue(it) == Pointer.nativeValue(p) } ?: continue
             val b = m.getByteBuffer(0, (Urb.RAZMER + Urb.ISO * PAKETOV).toLong()).order(ByteOrder.nativeOrder())
             var n = 0
@@ -98,9 +104,11 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
                 m.read((Urb.RAZMER + Urb.ISO * PAKETOV + i * op.paket).toLong(), vyhod, n, d)
                 n += d
             }
-            if (rabotaet && LibC.I.ioctl(fd, NativeLong(Urb.SUBMITURB), m) != 0) {
+            if (!rabotaet) break
+            if (LibC.I.ioctl(fd, NativeLong(Urb.SUBMITURB), m) != 0) {
                 oshibka = "usbfs: повторная передача не встала (errno ${Native.getLastError()})"; break
             }
+            vPolete.incrementAndGet()
             if (n == 0) continue
             pikOkno = maxOf(pikOkno, Pcm.pik(vyhod, n))
             if (++pikSchet >= 50) { pik = pikOkno; pikOkno = 0; pikSchet = 0 }
@@ -114,21 +122,25 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
         rabotaet = false
     }
 
+    /** Остановить: отменить передачи, дождаться, пока ядро вернёт ВСЕ (иначе оно пишет в отпущенную память). */
     fun stop() {
-        val bylo = rabotaet
         rabotaet = false
         val fd = c.fileDescriptor
         for (m in urby) LibC.I.ioctl(fd, NativeLong(Urb.DISCARDURB), m)
-        if (bylo) {
-            val ref = PointerByReference()
-            repeat(urby.size) { LibC.I.ioctl(fd, NativeLong(Urb.REAPURBNDELAY), ref.pointer) }
+        potok?.join(1000); potok = null
+        val ref = PointerByReference()
+        var popytok = 0
+        while (vPolete.get() > 0 && popytok++ < 200) {
+            if (LibC.I.ioctl(fd, NativeLong(Urb.REAPURBNDELAY), ref.pointer) == 0) vPolete.decrementAndGet()
+            else Thread.sleep(2)
         }
-        potok?.join(500); potok = null
-        urby.clear()
         try { c.setInterface(alt0) } catch (e: Exception) { }
         c.releaseInterface(alt0)
+        // передачи у ядра так и не вернулись — память держим до закрытия fd (закрытие отменит их само)
+        if (vPolete.get() <= 0) urby.clear()
         trek?.let { try { it.stop() } catch (e: Exception) { }; it.release() }
         trek = null
+        try { c.close() } catch (e: Exception) { }
     }
 
     fun status(): String =

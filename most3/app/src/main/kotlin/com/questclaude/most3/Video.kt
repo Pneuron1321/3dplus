@@ -59,7 +59,7 @@ class Video(private val k: Karta, val rezhim: UvcRezhim, private val naKadr: (By
         val razmer = (if (o.maxPaket > 0) o.maxPaket else 512 * 1024).coerceIn(16 * 1024, 16 * 1024 * 1024)
         val s = SborKadra(ozhidaemyj, maxKadr, naKadr); sbor = s
 
-        repeat(ZAPROSOV) {
+        repeat(if (razmer > 4 * 1024 * 1024) 3 else ZAPROSOV) {       // большие payload — меньше в полёте (память)
             val r = UsbRequest()
             if (!r.initialize(c, tochka)) return osh("запрос USB не создался")
             r.clientData = ByteBuffer.allocateDirect(razmer)

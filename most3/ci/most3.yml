@@ -36,9 +36,23 @@ jobs:
           grep -q "const val VERSIYA = \"$V\"" app/src/main/kotlin/com/questclaude/most3/Most.kt ||
             { echo "::error::Most.VERSIYA не совпадает с versionName $V"; exit 1; }
       - name: Тесты (UVC, шейдер, звук, пульт)
-        run: chmod +x gradlew && ./gradlew --no-daemon :app:testDebugUnitTest
+        # Логи сборки снаружи GitHub не прочитать — при падении причина выносится в аннотации (их видно по API).
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest > ../test.log 2>&1 || {
+            tail -60 ../test.log
+            grep -E "^e: |error:|What went wrong|Could not|FAILED" -A2 ../test.log | head -12 |
+              while IFS= read -r l; do echo "::error::$l"; done
+            grep -h -o '<testcase name="[^"]*"\|<failure message="[^"]\{0,200\}' app/build/test-results/testDebugUnitTest/*.xml 2>/dev/null |
+              grep -B1 "<failure" | head -12 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1; }
       - name: Сборка APK
-        run: ./gradlew --no-daemon :app:assembleDebug
+        run: |
+          ./gradlew --no-daemon :app:assembleDebug > ../build.log 2>&1 || {
+            tail -60 ../build.log
+            grep -E "^e: |error:|What went wrong|Could not|AAPT|ERROR" -A2 ../build.log | head -12 |
+              while IFS= read -r l; do echo "::error::$l"; done
+            exit 1; }
       - name: Проверка APK
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk

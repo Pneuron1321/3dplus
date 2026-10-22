@@ -74,14 +74,20 @@ object Most {
         return osh("ни один режим не дал кадров — most3 diagnoz")
     }
 
+    /** Звук — на своём соединении с картой (второй openDevice): у usbfs очередь готовых передач — на fd. */
     private fun vklZvuk() {
         val k = karta ?: return
         val z = k.op.zvuk ?: return
         val a0 = k.interfejs(z.interfejs, 0) ?: return
         val a1 = k.interfejs(z.interfejs, z.alt) ?: return
-        val zz = Zvuk(k.c, z, a0, a1).also { it.gromkost = gromkost }
-        if (zz.start()) zvuk = zz
+        val um = app?.getSystemService(UsbManager::class.java) ?: return
+        val c2 = um.openDevice(k.ustr) ?: run { zvukOshibka = "второе соединение с картой не открылось"; return }
+        val zz = Zvuk(c2, z, a0, a1).also { it.gromkost = gromkost }
+        if (zz.start()) { zvuk = zz; zvukOshibka = null } else { zvukOshibka = zz.oshibka; zz.stop() }   // stop закроет своё соединение
     }
+
+    /** Почему звук не встал (Zvuk после неудачи уже закрыт) — для статуса и самоотчёта. */
+    @Volatile var zvukOshibka: String? = null; private set
 
     @Volatile var gromkost = 1f
         set(v) { field = v.coerceIn(0f, 1.5f); zvuk?.gromkost = field; sohranit() }
@@ -121,7 +127,7 @@ object Most {
             k == null -> "ИТОГ: карта не открыта — ${oshibka ?: "нет"}"
             else -> "ИТОГ: карта открыта, кадров нет — ${oshibka ?: v?.oshibka ?: "?"}"
         })
-        append(if (z?.rabotaet == true) "; звук идёт (${Pcm.db(z.pik)} дБ)\n" else "; звука нет (${z?.oshibka ?: if (zvukVkl) "не включился" else "выключен"})\n")
+        append(if (z?.rabotaet == true) "; звук идёт (${Pcm.db(z.pik)} дБ)\n" else "; звука нет (${z?.oshibka ?: zvukOshibka ?: if (zvukVkl) "не включился" else "выключен"})\n")
         append("Мост 3 $VERSIYA. Разрешения: камера ${razr(ctx, android.Manifest.permission.CAMERA)}, " +
             "USB-камера ${razr(ctx, "horizonos.permission.USB_CAMERA")}\n")
         if (k != null) {
@@ -161,7 +167,7 @@ object Most {
     fun status(): String {
         val k = karta
         return "{\"versiya\":\"$VERSIYA\",\"karta\":${k?.let { Json.str(it.ustr.productName.orEmpty()) } ?: "null"}," +
-            "\"video\":${video?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: "null"},\"zvuk_vkl\":$zvukVkl," +
+            "\"video\":${video?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: zvukOshibka?.let { "{\"idyot\":false,\"oshibka\":${Json.str(it)}}" } ?: "null"},\"zvuk_vkl\":$zvukVkl," +
             "\"pokaz_fps\":${"%.1f".format(polka.pokazFps)},\"srednyaya\":${"%.3f".format(polka.srednyaya)}," +
             "\"avto_teni\":${"%.3f".format(polka.avtoTeni)},\"kartinka\":${nastrojkiJson()}," +
             "\"oshibka_pokaza\":${oshibkaPokaza?.let { Json.str(it) } ?: "null"}," +
