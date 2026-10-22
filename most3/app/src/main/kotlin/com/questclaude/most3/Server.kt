@@ -16,6 +16,7 @@ import java.net.URLDecoder
  *   GET /karta/ruchki?yarkost=N&…     — ручки внутри карты (UVC): yarkost kontrast ton nasyshchennost
  *   GET /rezhimy                      — что умеет карта (текст)
  *   GET /klip?sek=60                  — последние N секунд игры в MP4 (галерея, Movies/Plus); ?vkl=0|1 — запись в круг
+ *   GET /rezhim?profil=maks|n=3       — профиль (efir plavno maks 4k hdr) или режим по номеру из /rezhimy; переподключение
  *   GET /diagnoz                      — самоотчёт первого запуска (текст; первая строка — итог)
  */
 class Server(private val port: Int) {
@@ -61,6 +62,12 @@ class Server(private val port: Int) {
             q["vkl"]?.let { Most.klip(it == "1" || it == "vkl") }
             if (q.containsKey("sek") || q.isEmpty()) 200 to Most.sohranitKlip(q["sek"]?.toIntOrNull() ?: 120)
             else 200 to (Most.klip?.status() ?: "{\"idyot\":false,\"vkl\":${Most.klipVkl}}")
+        }
+        "/rezhim" -> {
+            q["profil"]?.let { p -> val pr = Profil.po(p) ?: return 400 to "{\"oshibka\":\"нет профиля $p: efir plavno maks 4k hdr\"}"
+                Most.smenitProfil(pr); return 200 to "{\"otvet\":${Json.str("профиль: ${pr.nadpis}; переподключаю")}}" }
+            q["n"]?.toIntOrNull()?.let { return 200 to "{\"otvet\":${Json.str(Most.vybratRezhim(it))}}" }
+            200 to "{\"profil\":\"${Most.profil.imya}\",\"nadpis\":${Json.str(Most.profil.nadpis)}}"
         }
         "/diagnoz" -> 200 to (Most.app?.let { Most.diagnoz(it) } ?: "мост не запущен")
         "/rezhimy" -> 200 to (Most.karta?.let { Most.opisanieKarty(it) }

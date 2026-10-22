@@ -65,3 +65,56 @@ class ProverkaTest {
         assertEquals(1, z(0).paketovVMs)
     }
 }
+
+/** Профили режимов (заход 2): режим по задаче; карта как на USB 5 Гбит/с — высокое только MJPEG. */
+class ProfilTest {
+    private fun r(f: Int, k: Int, vid: UvcVid, w: Int, h: Int, vararg fps: Int) =
+        UvcRezhim(f, k, vid, w, h, fps.map { 10_000_000 / it }, razmerKadra(vid, w, h))
+
+    private val op = UvcOpisanie(0x100, 0, 1, 0x82, true, 2, 0xf, listOf(
+        r(1, 1, UvcVid.NV12, 1920, 1080, 60, 30), r(2, 1, UvcVid.YUY2, 1920, 1080, 60),
+        r(3, 1, UvcVid.MJPEG, 1920, 1080, 120, 60), r(3, 2, UvcVid.MJPEG, 2560, 1440, 60, 30),
+        r(1, 2, UvcVid.NV12, 2560, 1440, 30), r(3, 3, UvcVid.MJPEG, 3840, 2160, 60, 30),
+        r(4, 1, UvcVid.P010, 1920, 1080, 60)), null)
+
+    private fun opis(l: List<Shag>) = l.map { "${it.rezhim.vid} ${it.rezhim.vysota}" }
+
+    @Test fun efir() = assertEquals("NV12 1080", opis(op.lestnica(Profil.EFIR)).first())
+
+    @Test fun plavno() {
+        val l = op.lestnica(Profil.PLAVNO)
+        assertEquals("MJPEG 1080", opis(l).first())
+        assertEquals(120.0, l[0].rezhim.fps(l[0].rezhim.luchshijInterval(l[0].maxFps)), 0.5)
+        assertEquals("NV12 1080", opis(l)[1])                              // запасная — «Эфир»
+    }
+
+    @Test fun maks() {
+        val l = opis(op.lestnica(Profil.MAKS))
+        assertEquals(listOf("MJPEG 1440", "NV12 1440", "NV12 1080"), l.take(3))   // плавный MJPEG раньше несжатого 30
+    }
+
+    @Test fun k4() {
+        val l = op.lestnica(Profil.K4)
+        assertEquals("MJPEG 2160", opis(l).first())
+        assertEquals(30.0, l[0].rezhim.fps(l[0].rezhim.luchshijInterval(l[0].maxFps)), 0.5)   // 4К — 30 к/с, разжатие успевает
+        assertEquals("MJPEG 1440", opis(l)[1])                             // нет 4К — хотя бы 1440p
+    }
+
+    @Test fun hdr() = assertEquals("P010 1080", opis(op.lestnica(Profil.HDR)).first())
+
+    @Test fun zapomnennyjPervym() {
+        val z = op.rezhimy[4]                                              // NV12 1440p30
+        assertEquals("NV12 1440", opis(op.lestnica(Profil.MAKS, z)).first())
+        assertEquals("NV12 1440", opis(op.lestnica(Profil.EFIR, z)).first())
+        val chuzhoj = r(9, 9, UvcVid.NV12, 640, 480, 30)                   // не из этой карты — не мешает
+        assertEquals("MJPEG 1440", opis(op.lestnica(Profil.MAKS, chuzhoj)).first())
+    }
+
+    @Test fun bezPovtorov() {
+        for (p in Profil.values()) {
+            val l = op.lestnica(p).map { Triple(it.rezhim.vid, it.rezhim.shirina, it.rezhim.vysota) }
+            assertEquals(l.toSet().size, l.size)
+        }
+        assertEquals(Profil.MAKS, Profil.po("maks")); assertEquals(null, Profil.po("nety"))
+    }
+}

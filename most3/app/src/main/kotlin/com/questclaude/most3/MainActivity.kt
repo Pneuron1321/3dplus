@@ -134,12 +134,16 @@ class MainActivity : Activity() {
 
     private fun sobratPanel() = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setBackgroundColor(0x99000000.toInt())
-        for ((imya, nadpis) in listOf("obychno" to "Обычно", "monitor" to "Монитор", "noch" to "Ночь", "yarko" to "Ярко", "rezko" to "Резко"))
+        for ((imya, nadpis) in listOf("obychno" to "Обычно", "monitor" to "Монитор", "noch" to "Ночь", "yarko" to "Ярко", "rezko" to "Резко", "hdr" to "HDR", "kino" to "Кино"))
             addView(knopka(nadpis) { NABORY[imya]?.let { Most.postavit(it); obnovitPolzunki() } })
         addView(knopka("Звук −") { Most.gromkost = Most.gromkost - 0.1f })
         addView(knopka("Звук +") { Most.gromkost = Most.gromkost + 0.1f })
         addView(knopka("Звук вкл/выкл") { val v = !Most.zvukVkl; Most.vFone { Most.zvuk(v) } })
         addView(knopka("Клип 2 мин") { stroka.text = "Сохраняю клип игры…"; Most.vFone { val o = Most.sohranitKlip(120); ui.post { stroka.text = o } } })
+        addView(knopka("Режим ▸") {
+            val vse = Profil.values(); val sl = vse[(Most.profil.ordinal + 1) % vse.size]
+            stroka.text = "Режим: ${sl.nadpis} — переподключаю…"; Most.smenitProfil(sl)
+        })
         addView(knopka("Ручки") { polzunki.visibility = if (polzunki.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
     }
 

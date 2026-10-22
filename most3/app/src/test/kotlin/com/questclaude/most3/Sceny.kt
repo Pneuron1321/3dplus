@@ -1,7 +1,9 @@
 package com.questclaude.most3
 
 import kotlin.math.exp
+import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 // Синтетические сцены для тестов и примеров: rgb w*h*3, 0..1 (уже гамма-кодированные, как с карты).
@@ -133,4 +135,72 @@ object Sceny {
     // Авто-ночь целиком: замер сырого кадра -> avtoTeni -> обработка.
     fun sAvtoNochyu(rgb: FloatArray, w: Int, h: Int, n: Nastrojki): FloatArray =
         KartinkaCpu.obrabotatKadr(rgb, w, h, n, avtoTeni(srednyayaYarkost(snimok(rgb, w, h), 32, 18), n.avtoNoch))
+
+    // --- HDR (PS5) ---
+    // Сцена в нитах, линейный BT.709 (w*h*3): сверху полоса — серый PQ-градиент (код 0..1 слева направо),
+    // небо 400→150 нит, солнце 4000 нит с ореолом, дома 20-60 нит с окнами 250 нит, тёмный переулок 0.3-2 нит
+    // (фигура 1.5 нит на фоне 0.6), красная неоновая вывеска (чистый красный BT.709, R = 800 нит), земля 30 нит.
+    val HDR_PEREULOK = floatArrayOf(0.38f, 0.5f, 0.52f, 0.8f)
+    val HDR_FIGURA = floatArrayOf(0.44f, 0.6f, 0.47f, 0.78f)
+
+    fun hdrNity(w: Int, h: Int): FloatArray {
+        val a = FloatArray(w * h * 3)
+        val asp = w.toFloat() / h
+        for (y in 0 until h) for (x in 0 until w) {
+            val u = (x + 0.5f) / w; val vv = (y + 0.5f) / h
+            var c: FloatArray
+            if (vv < 0.08f) { val l = KartinkaCpu.pqVNity(u); c = floatArrayOf(l, l, l) }
+            else {
+                val l = 400f - 250f * min(1f, (vv - 0.08f) / 0.42f)
+                c = floatArrayOf(l * 0.75f, l * 0.92f, l * 1.25f)
+                val dx = (u - 0.75f) * asp; val dy = vv - 0.22f
+                val d2 = dx * dx + dy * dy
+                val sv = if (d2 < 0.0016f) 4000f else 1500f * exp(-d2 / 0.004f)
+                c[0] += sv; c[1] += sv * 0.95f; c[2] += sv * 0.8f
+                if (vv > 0.3f && (u < 0.33f || u > 0.57f)) {
+                    c = floatArrayOf(40f, 36f, 30f)
+                    val ou = (u * 30f) % 1f; val ov = (vv * 14f) % 1f
+                    if (ou in 0.3f..0.7f && ov in 0.3f..0.7f) {
+                        val r = shum((u * 30f).toInt(), (vv * 14f).toInt(), 11)
+                        c = if (r > 0.6f) floatArrayOf(300f, 240f, 160f) else floatArrayOf(18f, 18f, 22f)
+                    }
+                }
+                if (vv > 0.3f && u in 0.33f..0.57f) c = floatArrayOf(2f, 2f, 2.3f)                 // стены переулка
+                if (v(HDR_PEREULOK[0], HDR_PEREULOK[1], HDR_PEREULOK[2], HDR_PEREULOK[3], u, vv)) c = floatArrayOf(0.6f, 0.6f, 0.7f)
+                if (v(HDR_FIGURA[0], HDR_FIGURA[1], HDR_FIGURA[2], HDR_FIGURA[3], u, vv)) c = floatArrayOf(1.5f, 1.4f, 1.3f)
+                if (u in 0.39f..0.51f && vv in 0.4f..0.44f) c = floatArrayOf(800f, 0f, 0f)   // неон: R = 800 нит
+                if (vv > 0.85f) c = floatArrayOf(30f, 29f, 27f)
+            }
+            for (i in 0..2) a[(y * w + x) * 3 + i] = max(0f, c[i])
+        }
+        return a
+    }
+
+    // Нит BT.709 -> P010 (BT.2020, PQ, ограниченный 10-битный, цвет 4:2:0 средним 2×2) — как отдаёт PS5.
+    fun vP010(nit: FloatArray, w: Int, h: Int): P010Kadr {
+        val yy = IntArray(w * h); val cb = FloatArray(w * h); val cr = FloatArray(w * h)
+        val m = KartinkaCpu.M709_2020
+        for (i in 0 until w * h) {
+            val r0 = nit[i * 3]; val g0 = nit[i * 3 + 1]; val b0 = nit[i * 3 + 2]
+            val r = KartinkaCpu.nityVPq(m[0] * r0 + m[1] * g0 + m[2] * b0)
+            val g = KartinkaCpu.nityVPq(m[3] * r0 + m[4] * g0 + m[5] * b0)
+            val b = KartinkaCpu.nityVPq(m[6] * r0 + m[7] * g0 + m[8] * b0)
+            val y = 0.2627f * r + 0.678f * g + 0.0593f * b
+            yy[i] = Math.round(64f + 876f * y).coerceIn(0, 1023)
+            cb[i] = (b - y) / 1.8814f; cr[i] = (r - y) / 1.4746f
+        }
+        val cw = w / 2; val ch = h / 2
+        val u = IntArray(cw * ch); val vv = IntArray(cw * ch)
+        for (y in 0 until ch) for (x in 0 until cw) {
+            var su = 0f; var sv = 0f
+            for (dy in 0..1) for (dx in 0..1) { val i = (2 * y + dy) * w + 2 * x + dx; su += cb[i]; sv += cr[i] }
+            u[y * cw + x] = Math.round(512f + 896f * su / 4f).coerceIn(0, 1023)
+            vv[y * cw + x] = Math.round(512f + 896f * sv / 4f).coerceIn(0, 1023)
+        }
+        return P010Kadr(w, h, yy, u, vv)
+    }
+
+    // «В лоб»: нит/белый, обрезка на 1, гамма 2.2 — для сравнения с тон-маппингом.
+    fun hdrObrezka(nit: FloatArray, belyj: Float = KartinkaCpu.BELYJ_NIT): FloatArray =
+        FloatArray(nit.size) { (nit[it] / belyj).coerceIn(0f, 1f).pow(1f / 2.2f) }
 }

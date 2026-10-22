@@ -20,11 +20,16 @@
     <!-- «Запустить Плюса»: Termux RUN_COMMAND (Termux спросит разрешение) -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
+    <!-- Струны (2.6.7): Мост 3 рисует кадр игры в эфир. Только приложения с той же подписью (Мост 3). -->
+    <permission android:name="com.questclaude.STRUNY" android:protectionLevel="signature" />
+    <uses-permission android:name="com.questclaude.STRUNY" />
+
     <!-- Android 11+: без этого приложение «не видит» Termux и не может его позвать -->
     <queries>
         <package android:name="com.termux" />
         <!-- KartaVhod открывает HDMI Link: без этого Android прячет его от моста (журнал 21.10: AppsFilter BLOCKED) -->
         <package android:name="com.meta.quest_hard_link" />
+        <package android:name="com.questclaude.most3" />
     </queries>
 
     <application
@@ -68,6 +73,12 @@
             android:name=".EarService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Струны: дверь для Моста 3 (поверхность кадра игры в развилку эфира) -->
+        <service
+            android:name=".StrunySluzhba"
+            android:exported="true"
+            android:permission="com.questclaude.STRUNY" />
 
         <!-- ответ Termux на «Запустить Плюса» (через PendingIntent) -->
         <receiver

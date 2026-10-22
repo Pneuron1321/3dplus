@@ -43,6 +43,10 @@ import java.util.concurrent.TimeUnit
  * поверх — плашка "lg" (рамка, имя, свечение, когда говорит), справа — "lb" (пузыри субтитров).
  * Нижние субтитры "nc" — по центру между розой и окном камеры. Картинка эфира гостям — ещё один
  * выход (маленький кодировщик Prevyu) со всеми слоями.
+ *
+ * 2.6.7 (Струны, этап 1): основа кадра эфира — игра с карты из Моста 3 ([igra]: он рисует в эту поверхность
+ * 1080p, уже с картинкой и суперсэмплингом), а не вид шлема. Только для выходов со слоями (эфир, превью гостям);
+ * глаза Плюса по-прежнему смотрят захват экрана. Игра молчит дольше секунды — эфир сам снова на виде шлема.
  */
 class Razvilka(private val w: Int, private val h: Int) {
     private val thread = HandlerThread("razvilka").apply { start() }
@@ -85,6 +89,15 @@ class Razvilka(private val w: Int, private val h: Int) {
     @Volatile private var kw = 0
     @Volatile private var kh = 0
     private var lastScreenNs = 0L
+    // Струны: кадр игры от Моста 3 — основа эфира, пока идёт
+    private var itex = 0
+    private var ist: SurfaceTexture? = null
+    private var isurf: Surface? = null
+    private val imtx = FloatArray(16)
+    @Volatile private var igraNs = 0L
+    /** Кадров игры от Моста 3 — для статуса. */
+    @Volatile var igraKadrov = 0L
+        private set
     private var program2 = 0
     private var aPos2 = 0
     private var aTex2 = 0
@@ -175,6 +188,44 @@ class Razvilka(private val w: Int, private val h: Int) {
         }
     }
 
+    /** Поверхность для Моста 3 (Струны): кадр игры 1920×1080 — основа эфира. Повторный вызов — та же. */
+    fun igra(): Surface = sync {
+        check(!released) { "эфир кончился" }
+        isurf ?: run {
+            EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
+            itex = oesTexture()
+            val k = SurfaceTexture(itex)
+            k.setDefaultBufferSize(w, h)
+            k.setOnFrameAvailableListener({ kadrIgry() }, handler)
+            ist = k
+            Surface(k).also { isurf = it }
+        }
+    }
+
+    /** Игра в основе эфира сейчас (кадры не старше секунды). */
+    fun igraIdyot() = ist != null && System.nanoTime() - igraNs < 1_000_000_000L
+
+    /** Мост 3 больше не нужен (основа — снова вид шлема): поверхность прочь. */
+    fun igraUbrat() = sync {
+        if (released) return@sync
+        igraNs = 0
+        osvoboditIgru()
+    }
+
+    private fun osvoboditIgru() {
+        ist?.setOnFrameAvailableListener(null)
+        isurf?.release()
+        ist?.release()
+        if (itex != 0) {
+            EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
+            GLES20.glDeleteTextures(1, intArrayOf(itex), 0)
+        }
+        itex = 0; ist = null; isurf = null
+    }
+
+    /** Когда основа эфира рисовала в последний раз: игра, если идёт, иначе захват экрана. */
+    private fun osnovaNs() = if (igraIdyot()) igraNs else lastScreenNs
+
     /** Размер кадра камеры (от декодера) — для пропорций окна. */
     fun kameraRazmer(w: Int, h: Int) {
         if (w > 0 && h > 0) { kw = w; kh = h }
@@ -214,11 +265,11 @@ class Razvilka(private val w: Int, private val h: Int) {
             }
         }
         // экран стоит — без кадров захвата новая плашка не попала бы в эфир: развилка заберёт сама
-        if (System.nanoTime() - lastScreenNs > 50_000_000L && !zhdetRisovaniya) {
+        if (System.nanoTime() - osnovaNs() > 50_000_000L && !zhdetRisovaniya) {
             zhdetRisovaniya = true
             handler.post {
                 zhdetRisovaniya = false
-                if (!released && System.nanoTime() - lastScreenNs > 50_000_000L) {
+                if (!released && System.nanoTime() - osnovaNs() > 50_000_000L) {
                     EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
                     var n = 0
                     while (n < 8 && zabrat()) n++                    // экран стоит — забрать всё сразу
@@ -302,6 +353,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             ksurf?.release()
             kst?.release()
             if (ktex != 0) GLES20.glDeleteTextures(1, intArrayOf(ktex), 0)
+            osvoboditIgru()
             for (g in gosti.values) gostOsvobodit(g)
             gosti.clear()
             for (sl in sloi.values) GLES20.glDeleteTextures(1, intArrayOf(sl.tex), 0)
@@ -386,7 +438,20 @@ class Razvilka(private val w: Int, private val h: Int) {
         lastScreenNs = System.nanoTime()
         zabrat()                                     // не больше одной плашки за кадр экрана
         schet(lastScreenNs)
-        risovat(ts, tolkoSloi = false)
+        risovat(ts, tolkoSloi = false, bezSloev = igraIdyot())     // эфир рисует кадр игры, не экран
+    }
+
+    /** Кадр игры от Моста 3: рисуем выходы эфира (со слоями) — у них теперь своя основа. */
+    private fun kadrIgry() {
+        val k = ist ?: return
+        if (released) return
+        EGL14.eglMakeCurrent(display, pbuf, pbuf, context)
+        try { k.updateTexImage() } catch (e: Exception) { return }
+        k.getTransformMatrix(imtx)
+        val ts = k.timestamp.takeIf { it > 0 } ?: System.nanoTime()
+        igraNs = System.nanoTime()
+        igraKadrov++
+        risovat(ts, tolkoSloi = true)
     }
 
     /** Новый кадр камеры. Экран стоит (захват молчит) — рисуем выход эфира сами, иначе окно застыло бы. */
@@ -397,16 +462,18 @@ class Razvilka(private val w: Int, private val h: Int) {
         k.updateTexImage()
         k.getTransformMatrix(kmtx)
         kameraNs = System.nanoTime()
-        if (kameraNs - lastScreenNs > 50_000_000L) {
+        if (kameraNs - osnovaNs() > 50_000_000L) {
             zabrat()                                 // экран стоит — плашки забирает кадр камеры
             schet(kameraNs)
             risovat(kameraNs, tolkoSloi = true)
         }
     }
 
-    private fun risovat(ts0: Long, tolkoSloi: Boolean) {
+    private fun risovat(ts0: Long, tolkoSloi: Boolean, bezSloev: Boolean = false) {
+        val igra = igraIdyot()
         for (o in outs) {
             if (tolkoSloi && !o.sloi) continue
+            if (bezSloev && o.sloi) continue
             if (ts0 < o.next) continue
             // ровно fps в среднем: следующий слот — через gap; отстали больше чем на слот — с этого кадра
             o.next = if (ts0 - o.next > o.gapNs) ts0 + o.gapNs else o.next + o.gapNs
@@ -417,7 +484,8 @@ class Razvilka(private val w: Int, private val h: Int) {
             if (o.sloi && vid.rezhim == "krupno" && kameraVidna()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f)
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            } else kvadrat(tex, mtx)
+            } else if (o.sloi && igra) kvadrat(itex, imtx)
+            else kvadrat(tex, mtx)
             if (o.sloi) {
                 okno(o)
                 plitkiNa(o)
@@ -559,7 +627,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             g.kw = b.width; g.kh = b.height
             g.kadrNs = System.nanoTime()
             b.recycle()
-            if (g.kadrNs - lastScreenNs > 50_000_000L) { zabrat(); schet(g.kadrNs); risovat(g.kadrNs, tolkoSloi = true) }
+            if (g.kadrNs - osnovaNs() > 50_000_000L) { zabrat(); schet(g.kadrNs); risovat(g.kadrNs, tolkoSloi = true) }
         }
     }
 
@@ -595,7 +663,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         t.getTransformMatrix(g.mtx)
         g.kadrNs = System.nanoTime()
         g.kw = 0                                                     // видео сильнее картинки
-        if (g.kadrNs - lastScreenNs > 50_000_000L && g.kadrNs - kameraNs > 50_000_000L) {
+        if (g.kadrNs - osnovaNs() > 50_000_000L && g.kadrNs - kameraNs > 50_000_000L) {
             zabrat(); schet(g.kadrNs); risovat(g.kadrNs, tolkoSloi = true)
         }
     }

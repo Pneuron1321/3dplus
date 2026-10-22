@@ -258,8 +258,27 @@ def efir(a):
             if r and ('"state":"efir"' in r[1] or '"state":"off"' in r[1]):
                 break
         k, out = efir_skazat(U)
+    elif c in ('igra', 'shlem', 'osnova'):              # Струны (2.6.7): основа эфира — игра с Моста 3 или вид шлема
+        r = zapros(U, '/efir/osnova' + ('' if c == 'osnova' else '?v=' + c), 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        d = razobrat(r[1]) or {}
+        if r[0] != 200 or 'osnova' not in d:
+            return 1, ['Основа эфира: нужен мост 2.6.7 (обнови приложение).'], None
+        if d['osnova'] == 'igra':
+            if d.get('igra_idyot'):
+                st = 'игра идёт с Моста 3 (кадров %s).' % d.get('igra_kadrov')
+            elif d.get('efir'):
+                st = 'Мост 3 пока не рисует — эфир на виде шлема, пока не пойдут кадры (Мост 3 открыт и показывает?).'
+            else:
+                st = 'включится с началом эфира, если Мост 3 показывает карту.'
+            out = ['Основа эфира — игра с карты (Мост 3, 1080 из 1440p/4K): ' + st]
+        else:
+            out = ['Основа эфира — вид шлема (как раньше).']
+        return 0, out, None
     else:
-        return 0, ['efir — начать эфир, efir 720 — полегче, efir stop — закончить, efir status — как идёт.'], None
+        return 0, ['efir — начать эфир, efir 720 — полегче, efir stop — закончить, efir status — как идёт; '
+                   'efir igra — в эфир игру с карты (Мост 3), efir shlem — вид шлема.'], None
     return k, out, None
 
 
@@ -563,15 +582,17 @@ def kartinka(U, a):
 
 MOST3 = 'http://localhost:8767'
 MOST3_MOLCHIT = 'Мост 3 не отвечает: открой «Мост 3 — карта» в шлеме.'
-NABORY3 = ('obychno', 'monitor', 'noch', 'yarko', 'rezko')
-NABORY3_RU = {'obychno': 'обычно', 'monitor': 'как на мониторе', 'noch': 'ночь', 'yarko': 'ярко', 'rezko': 'резко'}
+NABORY3 = ('obychno', 'monitor', 'noch', 'yarko', 'rezko', 'hdr', 'kino')
+PROFILI3 = ('efir', 'plavno', 'maks', '4k', 'hdr')
+NABORY3_RU = {'obychno': 'обычно', 'monitor': 'как на мониторе', 'noch': 'ночь', 'yarko': 'ярко', 'rezko': 'резко',
+              'hdr': 'HDR', 'kino': 'кино (без обработки)'}
 # Слова → шаги шейдера Моста 3 (гамма светлит середину, не выжигая белое)
 SLOVA3 = {'yarche': {'gamma': 0.1}, 'temnee': {'gamma': -0.1},
           'sochnee': {'nasyshch': 0.1, 'kontrast': 0.05}, 'blednee': {'nasyshch': -0.1, 'kontrast': -0.05},
           'kontrastnee': {'kontrast': 0.1}, 'myagche': {'kontrast': -0.1}, 'rezche': {'rezkost': 0.5}}
-SHEJDER3 = ('gamma', 'teni', 'rezkost', 'avtonoch')
+SHEJDER3 = ('gamma', 'teni', 'rezkost', 'avtonoch', 'lokalno')
 SHEJDER3_RU = {'kontrast': 'контраст', 'nasyshch': 'насыщенность', 'gamma': 'гамма', 'teni': 'тени',
-               'rezkost': 'резкость', 'avtonoch': 'авто-ночь', 'yarkost': 'яркость'}
+               'rezkost': 'резкость', 'avtonoch': 'авто-ночь', 'yarkost': 'яркость', 'lokalno': 'местная ночь'}
 
 
 def most3_url():
@@ -587,6 +608,8 @@ def most3_pokazyvaet():
 def kartinka3_skazat(k, avto=None):
     chasti = ['%s %s' % (SHEJDER3_RU[i], round(k[i], 2)) for i in ('kontrast', 'nasyshch', 'gamma', 'teni', 'rezkost')
               if i in k]
+    if k.get('lokalno'):
+        chasti.append('местная ночь %s' % round(k['lokalno'], 2))
     if k.get('yarkost'):
         chasti.insert(0, 'яркость %+.2f' % k['yarkost'])
     out = 'Мост 3, картинка: ' + ', '.join(chasti)
@@ -623,7 +646,7 @@ def kartinka3(a):
             i += 1
         else:
             return 1, ['karta kartinka (Мост 3) — как сейчас; yarche|temnee|sochnee|blednee|kontrastnee|myagche|rezche [2]; '
-                       'obychno|monitor|noch|yarko|rezko; gamma|teni|rezkost|avtonoch 1.2|+0.1|def; kak_bylo.'], None
+                       'obychno|monitor|noch|yarko|rezko|hdr|kino; gamma|teni|rezkost|avtonoch|lokalno 1.2|+0.1|def; kak_bylo.'], None
         i += 1
     if ruchki:
         r = zapros(U, '/karta/ruchki?' + '&'.join(ruchki), 5)
@@ -720,7 +743,26 @@ def most3(a):
         if r is None:
             return 1, [MOST3_MOLCHIT], None
         return 0, r[1].strip().split('\n'), None
-    return 0, ['most3 — что показывает; most3 zvuk 80|vkl|vykl; most3 podklyuchit; most3 rezhimy; most3 diagnoz; most3 klip [60] — клип игры. '
+    if c == 'rezhim':
+        a2 = a[1] if len(a) > 1 else ''
+        if a2 in PROFILI3:
+            put = '/rezhim?profil=' + a2
+        elif a2.isdigit():
+            put = '/rezhim?n=' + a2
+        elif not a2:
+            put = '/rezhim'
+        else:
+            return 1, ['most3 rezhim efir|plavno|maks|4k|hdr — профиль; most3 rezhim 3 — режим №3 из most3 rezhimy.'], None
+        r = zapros(U, put, 5)
+        if r is None:
+            return 1, [MOST3_MOLCHIT], None
+        d = razobrat(r[1]) or {}
+        if r[0] != 200:
+            return 1, ['Мост 3: ' + str(d.get('oshibka') or 'не понял')], None
+        if 'otvet' in d:
+            return 0, ['Мост 3: %s.' % d['otvet']], None
+        return 0, ['Мост 3, профиль: %s.' % d.get('nadpis')], None
+    return 0, ['most3 — что показывает; most3 zvuk 80|vkl|vykl; most3 podklyuchit; most3 rezhimy; most3 rezhim maks|plavno|efir|4k|hdr|N; most3 diagnoz; most3 klip [60] — клип игры. '
                'Картинка — karta kartinka (сама идёт в Мост 3, если он открыт).'], None
 
 

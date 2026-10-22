@@ -246,6 +246,60 @@ fun UvcOpisanie.lestnica(maks: Int = 5): List<UvcRezhim> {
     return out
 }
 
+/**
+ * Профили режимов (заход 2, Трезубец, зуб I): режим выбирается по задаче, а не по числу. На USB 5 Гбит/с у Elgato
+ * 4K X несжатое — только до 1080p60 и 1440p30–50; выше — MJPEG (разжатие пулом потоков в Pokaz).
+ * maxFps — потолок частоты для luchshijInterval.
+ */
+enum class Profil(val imya: String, val nadpis: String, val maxFps: Int) {
+    EFIR("efir", "Эфир: 1080p60, легко шлему", 60),
+    PLAVNO("plavno", "Плавность: 1080p 120 к/с", 120),
+    MAKS("maks", "Максимум: 1440p60", 60),
+    K4("4k", "4К: 2160p30 — для глаз вблизи", 30),
+    HDR("hdr", "HDR: P010 для PS5", 60);
+
+    companion object {
+        fun po(imya: String?): Profil? = values().firstOrNull { it.imya == imya }
+    }
+}
+
+/** Шаг лестницы профиля: режим и потолок частоты для него. */
+data class Shag(val rezhim: UvcRezhim, val maxFps: Int)
+
+/**
+ * Лестница профиля: сначала режимы, подходящие задаче профиля (лучшие вперёд), потом — запасная лестница «Эфир»,
+ * без повторов «формат+размер». zapomnennyj (режим, который уже срабатывал в этом профиле) — первым.
+ */
+fun UvcOpisanie.lestnica(profil: Profil, zapomnennyj: UvcRezhim? = null, maks: Int = 6): List<Shag> {
+    fun fpsPri(r: UvcRezhim, cap: Int) = r.fps(r.luchshijInterval(cap))
+    fun prioritet(v: UvcVid) = when (v) { UvcVid.NV12 -> 3; UvcVid.YUY2 -> 2; UvcVid.I420 -> 1; else -> 0 }
+    val cap = profil.maxFps
+    val podhodyat: List<UvcRezhim> = when (profil) {
+        Profil.EFIR -> emptyList()
+        Profil.PLAVNO -> rezhimy.filter { it.shirina == 1920 && it.vysota == 1080 && fpsPri(it, 120) >= 99 &&
+            (it.nesjatyj || it.vid == UvcVid.MJPEG) }
+            .sortedWith(compareByDescending<UvcRezhim> { it.nesjatyj }.thenByDescending { fpsPri(it, 120) })
+        Profil.MAKS -> rezhimy.filter { it.vysota == 1440 && (it.nesjatyj || it.vid == UvcVid.MJPEG) && fpsPri(it, 60) >= 29.9 }
+            .sortedWith(compareByDescending<UvcRezhim> { fpsPri(it, 60) >= 49.9 }      // плавные — вперёд
+                .thenByDescending { it.nesjatyj }.thenByDescending { prioritet(it.vid) }.thenByDescending { fpsPri(it, 60) })
+        Profil.K4 -> rezhimy.filter { it.vysota == 2160 && (it.nesjatyj || it.vid == UvcVid.MJPEG) && fpsPri(it, 30) >= 23.9 }
+            .sortedWith(compareByDescending<UvcRezhim> { it.nesjatyj }.thenByDescending { fpsPri(it, 30) })
+        Profil.HDR -> rezhimy.filter { it.vid == UvcVid.P010 && fpsPri(it, 60) >= 23.9 }
+            .sortedWith(compareByDescending<UvcRezhim> { it.shirina.toLong() * it.vysota * minOf(fpsPri(it, 60), 60.0) })
+    }
+    val out = ArrayList<Shag>()
+    fun dobavit(r: UvcRezhim, c: Int) {
+        if (out.size < maks && out.none { it.rezhim.vid == r.vid && it.rezhim.shirina == r.shirina && it.rezhim.vysota == r.vysota })
+            out += Shag(r, c)
+    }
+    zapomnennyj?.let { z -> rezhimy.firstOrNull { it == z }?.let { dobavit(it, cap) } }
+    podhodyat.forEach { dobavit(it, cap) }
+    if (profil == Profil.K4) rezhimy.filter { it.vysota == 1440 && (it.nesjatyj || it.vid == UvcVid.MJPEG) }   // 4К нет — хотя бы 1440p
+        .sortedByDescending { fpsPri(it, 60) }.forEach { dobavit(it, 60) }
+    lestnica(maks).forEach { dobavit(it, 60) }
+    return out
+}
+
 data class ProbeOtvet(
     val formatIndex: Int,
     val frameIndex: Int,

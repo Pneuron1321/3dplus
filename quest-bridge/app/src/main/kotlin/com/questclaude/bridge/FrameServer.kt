@@ -363,6 +363,8 @@ class FrameServer(
                     reply(out, 200, "application/json", e.dosluh.status().toByteArray())
                 }
             }
+            "/efir/osnova" ->                      // Струны: основа эфира — igra (Мост 3) или shlem
+                reply(out, 200, "application/json; charset=utf-8", Struny.ustanovit(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir", "/efir/start", "/efir/stop", "/efir/mic" -> {
                 val e = efir()
                 if (e == null) reply(out, 503, "application/json", "{\"state\":\"off\",\"oshibka\":\"захват не идёт\"}".toByteArray())

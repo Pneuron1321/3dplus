@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * (UsbRequest, несколько в полёте — иначе 250 МБ/с YUY2 не успеть), каждый вернувшийся запрос = один payload UVC,
  * SborKadra складывает их в кадры. Кадр отдаётся naKadr (поток чтения; показ берёт последний).
  */
-class Video(private val k: Karta, zhelaemyj: UvcRezhim, private val naKadr: (ByteArray, Int) -> Unit) {
+class Video(private val k: Karta, zhelaemyj: UvcRezhim, private val potolokFps: Int = 60, private val naKadr: (ByteArray, Int) -> Unit) {
     /** Режим, который карта на самом деле приняла (COMMIT может поправить формат/кадр). */
     @Volatile var rezhim: UvcRezhim = zhelaemyj; private set
     @Volatile var rabotaet = false; private set
@@ -40,7 +40,7 @@ class Video(private val k: Karta, zhelaemyj: UvcRezhim, private val naKadr: (Byt
         if (!c.claimInterface(vs, true)) return osh("видео карты занято (открыт HDMI Link?) — закрой его")
 
         val dlina = UvcProbe.dlina(k.op.bcdUvc)
-        val interval = rezhim.luchshijInterval(60)
+        val interval = rezhim.luchshijInterval(potolokFps)
         // «Вежливо»: сначала спросить, что у карты сейчас (GET_CUR), и поменять только своё; не вышло — нулями, как libuvc
         val tek = ByteArray(dlina)
         val estTek = c.controlTransfer(0xA1, 0x81, 0x0100, vs.id, tek, dlina, 1000) == dlina
@@ -138,7 +138,7 @@ class Video(private val k: Karta, zhelaemyj: UvcRezhim, private val naKadr: (Byt
 
     fun status(): String {
         val s = sbor
-        return "{\"idyot\":$rabotaet,\"rezhim\":${Json.str(rezhim.opisanie())},\"fps\":${"%.1f".format(fps)}," +
+        return "{\"idyot\":$rabotaet,\"rezhim\":${Json.str(rezhim.opisanie())},\"fps\":${Json.num(fps)}," +
             "\"kadrov\":${s?.kadrov ?: 0},\"broshenyh\":${s?.broshenyh ?: 0},\"oshibok\":${s?.oshibok ?: 0}," +
             "\"paket\":${otvet?.maxPaket ?: 0},\"oshibka\":${oshibka?.let { Json.str(it) } ?: "null"}}"
     }

@@ -193,6 +193,13 @@ class KartinkaTest {
         assertEquals(1f, Nastrojki(gamma = 2f).izmenit("Gamma", " def ")!!.gamma, 1e-6f)
         assertEquals(1f, n.izmenit("avtonoch", "1")!!.avtoNoch, 1e-6f)
         assertTrue(n.izmenit("polnyj", "1")!!.polnyjDiapazon)
+        assertEquals(0.4f, n.izmenit("lokalno", "0.4")!!.lokalno, 1e-6f)
+        assertEquals(1f, n.izmenit("lokalno", "+3")!!.lokalno, 1e-6f)                 // зажим 0..1
+        assertEquals(4000f, n.izmenit("HdrPik", "4000")!!.hdrPik, 1e-3f)
+        assertEquals(1500f, n.izmenit("hdrpik", "+500")!!.hdrPik, 1e-3f)
+        assertEquals(100f, n.izmenit("hdrpik", "5")!!.hdrPik, 1e-3f)
+        assertEquals(10000f, n.izmenit("hdrpik", "99999")!!.hdrPik, 1e-3f)
+        assertEquals(1000f, Nastrojki(hdrPik = 300f).izmenit("hdrpik", "def")!!.hdrPik, 0f)
         for (plohoe in listOf("", "abc", "1.2.3", "+", "--1", "NaN", "Infinity", "1e5", "0x10", "1f"))
             assertNull("'$plohoe'", n.izmenit("kontrast", plohoe))
         assertNull(n.izmenit("chto", "1"))
@@ -205,7 +212,7 @@ class KartinkaTest {
     }
 
     @Test fun stroka() {
-        for (n in NABORY.values + Nastrojki(yarkost = -0.123f, polnyjDiapazon = true, rezkost = 1.5f))
+        for (n in NABORY.values + Nastrojki(yarkost = -0.123f, polnyjDiapazon = true, rezkost = 1.5f, lokalno = 0.37f, hdrPik = 4321f))
             assertEquals(n, Nastrojki.izStroki(n.vStroku()))
         val m = Nastrojki.izStroki("мусор\n=1\nkontrast=1.4\nteni=abc\nnasyshch = 1.5 \nchto=3\ngamma=99\n\u0000")
         assertEquals(Nastrojki(kontrast = 1.4f, nasyshch = 1.5f, gamma = 2.5f), m)
@@ -213,17 +220,22 @@ class KartinkaTest {
     }
 
     @Test fun nabory() {
-        for (k in listOf("obychno", "monitor", "noch", "yarko", "rezko")) assertNotNull(NABORY[k])
+        for (k in listOf("obychno", "monitor", "noch", "yarko", "rezko", "hdr", "kino")) assertNotNull(NABORY[k])
         NABORY.values.forEach { assertEquals(it, it.ogranichit()) }
         assertEquals(Nastrojki(), NABORY["obychno"])
         assertEquals(1f, NABORY["rezko"]!!.rezkost, 0f)
         assertEquals(1f, NABORY["noch"]!!.avtoNoch, 0f)
+        assertEquals(0.6f, NABORY["noch"]!!.lokalno, 0f)
+        assertEquals(0.2f, NABORY["monitor"]!!.lokalno, 0f)
+        assertEquals(0.3f, NABORY["hdr"]!!.lokalno, 0f); assertEquals(1f, NABORY["hdr"]!!.kontrast, 0f)
+        assertEquals(Nastrojki(), NABORY["kino"])
     }
 
     // --- шейдеры ---
     @Test fun shejdery() {
         val varianty = mapOf(Shader.FRAG_YUY2 to Shader.SAMPLERY_YUY2, Shader.FRAG_NV12 to Shader.SAMPLERY_NV12,
-            Shader.FRAG_RGBA to Shader.SAMPLERY_RGBA)
+            Shader.FRAG_RGBA to Shader.SAMPLERY_RGBA, Shader.FRAG_P010 to Shader.SAMPLERY_P010)
+        val tolkoP010 = setOf("uHdr", "uPik", "uBelyj")
         for ((src, samplery) in varianty + (Shader.VERSHINNYJ to emptyList())) {
             assertTrue(src.startsWith("#version 300 es\n"))
             assertEquals(src.count { it == '{' }, src.count { it == '}' })
@@ -234,9 +246,11 @@ class KartinkaTest {
         for ((src, _) in varianty) {
             for (u in Shader.UNIFORMY) {
                 assertTrue(u, Regex("""uniform\s+float\s+$u\s*;""").containsMatchIn(src))
-                if (src !== Shader.FRAG_RGBA || u != "uPolnyj")                 // в RGBA uPolnyj не нужен
-                    assertTrue(u, Regex("""\b$u\b""").findAll(src).count() >= 2)   // объявлен и используется
+                val nuzhen = !(src === Shader.FRAG_RGBA && u == "uPolnyj") && (src === Shader.FRAG_P010 || u !in tolkoP010)
+                if (nuzhen) assertTrue(u, Regex("""\b$u\b""").findAll(src).count() >= 2)   // объявлен и используется
             }
+            val k = Shader.SAMPLER_KARTA
+            assertTrue(Regex("""uniform\s+sampler2D\s+$k\s*;""").containsMatchIn(src) && Regex("""\b$k\b""").findAll(src).count() >= 2)
             assertTrue(src.contains("void main()") && src.contains("fragColor"))
         }
         // константы шейдера = константы CPU

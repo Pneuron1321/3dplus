@@ -183,6 +183,7 @@ class CaptureService : Service() {
         Hub.efir = upr
         val wifi = applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
         val gruppa = wifi?.createMulticastLock("plus-kamera")?.apply { setReferenceCounted(false) }
+        Struny.zagruzit(filesDir)                       // основа эфира: игра (Мост 3) или вид шлема
         kamera = Kamera(filesDir, { on -> if (on) gruppa?.acquire() else if (gruppa?.isHeld == true) gruppa.release() },
             File(cacheDir, "klip"))
             .also { k ->
@@ -444,6 +445,7 @@ class CaptureService : Service() {
         }
         efir = e
         kamera?.podklyuchit(rz)
+        Struny.podklyuchit(rz)
         gosti?.podklyuchit(rz)
         Hub.rechi.efir = true
         val k = kompas ?: Kompas(this).also { kompas = it }
@@ -459,6 +461,7 @@ class CaptureService : Service() {
         nalozhenie = null
         Hub.rechi.efir = false
         kamera?.otklyuchit()
+        Struny.otklyuchit()
         gosti?.otklyuchit()
         efir?.stop()
         efir = null

@@ -9,6 +9,8 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.nio.ByteBuffer
 import java.security.SecureRandom
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -50,6 +52,11 @@ class Kamera(
     private var surface: Surface? = null
     private var dec: MediaCodec? = null
     private var vyvod: Thread? = null
+    private var podacha: Thread? = null
+    /** Запас кадров перед декодером (2.6.7): заминка декодера — подождать, а не прыгать к ключевому кадру. */
+    private class Kusok(val a: ByteArray, val pts: Long, val key: Boolean)
+    private val zapas = LinkedBlockingQueue<Kusok>()
+    @Volatile private var slomalsya: String? = null
     @Volatile private var dekodiruet = false
     private var sps: ByteArray? = null
     private var pps: ByteArray? = null
@@ -104,23 +111,17 @@ class Kamera(
 
     override fun kadr(annexB: ByteArray, ptsUs: Long, key: Boolean) = synchronized(lock) {
         klip.video(annexB, ptsUs, key)                   // круг клипа — и без эфира
-        val d = dec ?: return@synchronized
-        try {
-            val i = d.dequeueInputBuffer(10_000)
-            if (i < 0) { propushcheno++; priyom.zhdatKlyuchevoy(); return@synchronized }   // декодер не успевает
-            val b = d.getInputBuffer(i)
-            if (b == null || annexB.size > b.capacity()) {
-                d.queueInputBuffer(i, 0, 0, ptsUs, 0)
-                propushcheno++; priyom.zhdatKlyuchevoy(); return@synchronized
-            }
-            b.clear()
-            b.put(annexB)
-            d.queueInputBuffer(i, 0, annexB.size, ptsUs, if (key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
-        } catch (e: Exception) {
-            oshibka = "декодер: ${e.message ?: e.javaClass.simpleName}"
-            ostanovit()
-            zapustit()
+        slomalsya?.let {                                 // поток подачи упал — новый декодер, с ключевого кадра
+            oshibka = it; slomalsya = null
+            ostanovit(); zapustit()
+            return@synchronized
         }
+        if (dec == null) return@synchronized
+        if (zapas.size >= ZAPAS) {                       // декодер отстал на полсекунды — дальше копить задержку
+            propushcheno += zapas.size; zapas.clear()
+            if (!key) { propushcheno++; priyom.zhdatKlyuchevoy(); return@synchronized }
+        }
+        zapas.offer(Kusok(annexB, ptsUs, key))
     }
 
     override fun zvukNachalo(asc: ByteArray) = klip.zvukGolova(asc)
@@ -163,8 +164,34 @@ class Kamera(
         if (!ok) { d.release(); oshibka = "декодер не принял видео камеры"; return }
         d.start()
         dec = d
+        zapas.clear()
         dekodiruet = true
         priyom.zhdatKlyuchevoy()
+        podacha = thread(name = "kamera-podacha", isDaemon = true) {
+            var k: Kusok? = null
+            while (dekodiruet) {
+                val t = k ?: zapas.poll(20, TimeUnit.MILLISECONDS) ?: continue
+                k = t
+                val i = try { d.dequeueInputBuffer(20_000) } catch (e: Exception) {
+                    slomalsya = "декодер: ${e.message ?: e.javaClass.simpleName}"; break
+                }
+                if (i < 0) continue                      // занят — тот же кадр ещё раз; остальные ждут в запасе
+                k = null
+                try {
+                    val b = d.getInputBuffer(i)
+                    if (b == null || t.a.size > b.capacity()) {
+                        d.queueInputBuffer(i, 0, 0, t.pts, 0)
+                        propushcheno++; zapas.clear(); priyom.zhdatKlyuchevoy()
+                        continue
+                    }
+                    b.clear()
+                    b.put(t.a)
+                    d.queueInputBuffer(i, 0, t.a.size, t.pts, if (t.key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+                } catch (e: Exception) {
+                    slomalsya = "декодер: ${e.message ?: e.javaClass.simpleName}"; break
+                }
+            }
+        }
         vyvod = thread(name = "kamera-dekoder", isDaemon = true) {
             val info = MediaCodec.BufferInfo()
             while (dekodiruet) {
@@ -187,10 +214,13 @@ class Kamera(
         val d = dec ?: return
         dekodiruet = false
         vyvod?.join(500)
+        podacha?.join(500)
         try { d.stop() } catch (e: Exception) { }
         try { d.release() } catch (e: Exception) { }
         dec = null
         vyvod = null
+        podacha = null
+        zapas.clear()
     }
 
     // ---------- управление ----------
@@ -276,6 +306,8 @@ class Kamera(
         private const val KLYUCH = "kamera-klyuch"
         private const val VID = "kamera-vid"
         private const val MAKS_KADR = 1_000_000
+        /** Запас перед декодером: ~0,3–0,7 с при 60/30 к/с — заминку переждать, задержку не копить. */
+        private const val ZAPAS = 20
         private const val BUKVY = "abcdefghijkmnpqrstuvwxyz23456789"     // без 0/o, 1/l — легко вписать
 
         fun sozdatKlyuch(): String {

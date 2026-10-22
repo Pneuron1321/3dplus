@@ -13,6 +13,9 @@ object Json {
         }
         return b.append('"').toString()
     }
+
+    /** Число для JSON всегда с точкой: на Quest с немецким/французским языком "%.1f" дал бы запятую. */
+    fun num(v: Float, znakov: Int = 1): String = String.format(java.util.Locale.ROOT, "%.${znakov}f", v)
 }
 
 /** Байты в hex для самоотчёта. */

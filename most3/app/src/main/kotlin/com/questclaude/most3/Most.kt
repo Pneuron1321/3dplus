@@ -33,6 +33,7 @@ object Most {
             dir = ctx.filesDir
             zagruzit()
             server = Server(PORT).also { it.start() }
+            Struny.start(ctx.applicationContext)          // эфир моста 2 может брать игру отсюда (efir igra)
         }
     }
 
@@ -58,11 +59,11 @@ object Most {
         val k = Karta.otkryt(um, d) ?: return osh("карта не открылась")
         karta = k
         try { File(dir, "karta-rezhimy.txt").writeText(opisanieKarty(k)) } catch (e: Exception) { }
-        val lestnica = k.op.lestnica()
+        val lestnica = k.op.lestnica(profil, zapomnennyj(k, profil))
         if (lestnica.isEmpty()) return osh("карта не назвала ни одного режима видео")
-        for (r in lestnica) {
+        for ((r, potolok) in lestnica) {
             polka.rezhim = r
-            val v = Video(k, r) { b, n -> polka.polozhit(b, n) }
+            val v = Video(k, r, potolok) { b, n -> polka.polozhit(b, n) }
             video = v
             val zapushchen = try { v.start() } catch (e: Exception) { v.oshibkaIzvne("сбой: ${e.message ?: e.javaClass.simpleName}"); false }
             polka.rezhim = v.rezhim
@@ -73,17 +74,48 @@ object Most {
             if ((s?.kadrov ?: 0) > 0) {
                 polka.rezhim = v.rezhim                            // карта могла поправить режим при COMMIT
                 popytki += "${v.rezhim.opisanie()}: кадры идут"
+                zapomnit(profil, v.rezhim)
                 if (klipVkl) vklKlip(k, v.rezhim)
                 if (zvukVkl) vklZvuk()
                 app?.let { Sluzhba.vkl(it) }
                 oshibka = null
-                return "показываю: ${r.opisanie()}" + if (popytki.size > 1) " (после ${popytki.size - 1} откат.)" else ""
+                return "показываю (${profil.nadpis.substringBefore(':')}): ${v.rezhim.opisanie(v.rezhim.fps(v.rezhim.luchshijInterval(potolok)))}" + if (popytki.size > 1) " (после ${popytki.size - 1} откат.)" else ""
             }
             popytki += "${r.opisanie()}: за 2,5 с ни одного целого кадра (пакетов ${v.paketov}, байт ${v.bajt}, " +
                 "брошено ${s?.broshenyh ?: 0}, ошибок ${s?.oshibok ?: 0}, последний ${s?.poslednijRazmer ?: 0} Б)"
             v.stop(); video = null
         }
         return osh("ни один режим не дал кадров — most3 diagnoz")
+    }
+
+    /** Профиль режимов (заход 2): efir / plavno / maks / 4k / hdr. Смена — переподключение. */
+    @Volatile var profil = Profil.EFIR; private set
+
+    /** Сменить профиль и переподключить карту (в фоне — окно и пульт не ждут). */
+    fun smenitProfil(p: Profil) {
+        profil = p; sohranit()
+        val c = app ?: return
+        vFone { ostanovit(); podklyuchit(c) }
+    }
+
+    /** Режим вручную по номеру из списка (most3 rezhimy): запомнить для текущего профиля и переподключить. */
+    fun vybratRezhim(n: Int): String {
+        val r = karta?.op?.rezhimy?.getOrNull(n - 1) ?: return "нет режима №$n (карта открыта? most3 rezhimy)"
+        zapomnit(profil, r)
+        val c = app ?: return "мост не запущен"
+        vFone { ostanovit(); podklyuchit(c) }
+        return "пробую: ${r.opisanie()}"
+    }
+
+    /** Режим, который уже срабатывал в профиле (файл rezhim-<профиль>: формат кадр Ш В вид) — первым в лестнице. */
+    private fun zapomnennyj(k: Karta, p: Profil): UvcRezhim? = try {
+        val z = File(dir, "rezhim-${p.imya}").readText().trim().split(' ')
+        k.op.rezhimy.firstOrNull { it.formatIndex == z[0].toInt() && it.frameIndex == z[1].toInt() &&
+            it.shirina == z[2].toInt() && it.vysota == z[3].toInt() && it.vid.name == z[4] }
+    } catch (e: Exception) { null }
+
+    private fun zapomnit(p: Profil, r: UvcRezhim) {
+        try { File(dir, "rezhim-${p.imya}").writeText("${r.formatIndex} ${r.frameIndex} ${r.shirina} ${r.vysota} ${r.vid.name}") } catch (e: Exception) { }
     }
 
     /** Звук — на своём соединении с картой (второй openDevice): у usbfs очередь готовых передач — на fd. */
@@ -149,7 +181,8 @@ object Most {
         append("Видео: интерфейс ${k.op.vsInterfejs}, точка 0x${k.op.tochka.toString(16)} ${if (k.op.bulk) "bulk" else "iso"}\n")
         append("Ручки: блок ${k.op.puId}, биты ${Integer.toBinaryString(k.op.puUpravlenie)}\n")
         k.op.zvuk?.let { append("Звук: интерфейс ${it.interfejs} alt ${it.alt}, точка 0x${it.tochka.toString(16)}, ${it.kanaly} к., ${it.bajt * 8} бит, ${it.chastoty} Гц, пакет ${it.paket}\n") }
-        append("Режимы:\n"); for (r in k.op.rezhimy) append("  ${r.opisanie()} (формат ${r.formatIndex}, кадр ${r.frameIndex})\n")
+        append("Режимы:\n"); k.op.rezhimy.forEachIndexed { i, r -> append("  ${i + 1}. ${r.opisanie()} (формат ${r.formatIndex}, кадр ${r.frameIndex})\n") }
+        append("Профиль: ${profil.nadpis}\n")
         append("Выбран: ${k.op.vybrat()?.opisanie()}\n")
     }
 
@@ -180,9 +213,11 @@ object Most {
         }
         z?.let { append("Звук: ${it.status()}\n") }
         klip?.let { append("Запись игры: ${it.status()}\n") }
-        append("Показ: ${"%.0f".format(polka.pokazFps)} к/с, средняя яркость ${"%.3f".format(polka.srednyaya)}" +
+        append("Показ: ${"%.0f".format(polka.pokazFps)} к/с, средняя яркость ${Json.num(polka.srednyaya, 3)}" +
+            (if (polka.mjpegMs > 0) ", MJPEG ${Json.num(polka.mjpegMs)} мс/кадр в ${Pokaz.POTOKOV} потоках, не дождались ${polka.mjpegPropuskov}" else "") +
             (oshibkaPokaza?.let { ", ошибка: $it" } ?: "") + "\n")
         zametkaSluzhby?.let { append("$it\n") }
+        append("Эфир (Струны): ${Struny.sostoyanie}, отдано кадров ${Struny.kadrov}\n")
         append("Внешние камеры Android (запасной путь): ${vneshnieKamery(ctx)}\n")
         k?.c?.rawDescriptors?.let { append("Дескрипторы (${it.size} Б): ${Hex.str(it)}\n") }
     }
@@ -207,15 +242,15 @@ object Most {
         val k = karta
         return "{\"versiya\":\"$VERSIYA\",\"karta\":${k?.let { Json.str(it.ustr.productName.orEmpty()) } ?: "null"}," +
             "\"video\":${video?.status() ?: "null"},\"klip\":${klip?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: zvukOshibka?.let { "{\"idyot\":false,\"oshibka\":${Json.str(it)}}" } ?: "null"},\"zvuk_vkl\":$zvukVkl," +
-            "\"pokaz_fps\":${"%.1f".format(polka.pokazFps)},\"srednyaya\":${"%.3f".format(polka.srednyaya)}," +
-            "\"avto_teni\":${"%.3f".format(polka.avtoTeni)},\"kartinka\":${nastrojkiJson()}," +
+            "\"profil\":\"${profil.imya}\",\"pokaz_fps\":${Json.num(polka.pokazFps)},\"srednyaya\":${Json.num(polka.srednyaya, 3)}," +
+            "\"avto_teni\":${Json.num(polka.avtoTeni, 3)},\"mjpeg_ms\":${Json.num(polka.mjpegMs)},\"mjpeg_propuskov\":${polka.mjpegPropuskov},\"efir\":${Json.str(Struny.sostoyanie)},\"efir_kadrov\":${Struny.kadrov},\"kartinka\":${nastrojkiJson()}," +
             "\"oshibka_pokaza\":${oshibkaPokaza?.let { Json.str(it) } ?: "null"}," +
             "\"oshibka\":${oshibka?.let { Json.str(it) } ?: "null"}}"
     }
 
     fun nastrojkiJson(): String = nastrojki.let {
         "{\"yarkost\":${it.yarkost},\"kontrast\":${it.kontrast},\"nasyshch\":${it.nasyshch},\"gamma\":${it.gamma}," +
-            "\"teni\":${it.teni},\"rezkost\":${it.rezkost},\"avtonoch\":${it.avtoNoch}}"
+            "\"teni\":${it.teni},\"rezkost\":${it.rezkost},\"avtonoch\":${it.avtoNoch},\"lokalno\":${it.lokalno},\"hdrpik\":${it.hdrPik}}"
     }
 
     private fun zagruzit() {
@@ -225,6 +260,7 @@ object Most {
             val z = File(d, "zvuk").readText().trim().split(' ')
             zvukVkl = z.getOrNull(0) != "0"
             klipVkl = z.getOrNull(2) != "0"                       // до громкости: её сеттер сохраняет файл
+            Profil.po(z.getOrNull(3))?.let { profil = it }
             z.getOrNull(1)?.toFloatOrNull()?.let { gromkost = it }
         } catch (e: Exception) { }
     }
@@ -232,12 +268,12 @@ object Most {
     private fun sohranit() {
         val d = dir ?: return
         try { File(d, "kartinka").writeText(nastrojki.vStroku()) } catch (e: Exception) { }
-        try { File(d, "zvuk").writeText("${if (zvukVkl) 1 else 0} $gromkost ${if (klipVkl) 1 else 0}") } catch (e: Exception) { }
+        try { File(d, "zvuk").writeText("${if (zvukVkl) 1 else 0} $gromkost ${if (klipVkl) 1 else 0} ${profil.imya}") } catch (e: Exception) { }
     }
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.0.0"
+    const val VERSIYA = "3.1.0"
 }
 
 /**
@@ -251,6 +287,9 @@ class Polka {
     @Volatile var pokazFps = 0f
     @Volatile var srednyaya = 0f
     @Volatile var avtoTeni = 0f
+    /** MJPEG: среднее время разжатия кадра (мс) и сколько кадров не дождались свободного потока. */
+    @Volatile var mjpegMs = 0f
+    @Volatile var mjpegPropuskov = 0L
     private var n = 0L
 
     fun polozhit(b: ByteArray, dlina: Int) { kadr = Kadr(b, dlina, ++n) }

@@ -56,4 +56,52 @@ class PrimeryTest {
         g.dispose()
         ImageIO.write(sv, "png", File(papka, "svodka.png"))
     }
+
+    // Местная ночь и HDR: noch_noch_globalno / noch_noch_lokalno, hdr_bez / hdr_obrezka / hdr_tonmap / hdr_tonmap_hdr,
+    // и сводка svodka2.png (3×3, 1280 px).
+    private fun varianty2(w: Int, h: Int): List<List<Pair<String, FloatArray>>> {
+        val noch = Sceny.noch(w, h); val den = Sceny.den(w, h)
+        val nN = NABORY["noch"]!!
+        val nit = Sceny.hdrNity(w - w % 2, h - h % 2)
+        val p010 = Sceny.vP010(nit, w - w % 2, h - h % 2)
+        val tm = KartinkaCpu.p010VKadr(p010, NABORY["hdr"]!!, hdr = true)
+        return listOf(
+            listOf("noch: original" to noch, "noch: noch globalno" to Sceny.sAvtoNochyu(noch, w, h, nN.copy(lokalno = 0f)),
+                "noch: noch + lokalno ${nN.lokalno}" to Sceny.sAvtoNochyu(noch, w, h, nN)),
+            listOf("den: original" to den, "den: monitor" to Sceny.sAvtoNochyu(den, w, h, NABORY["monitor"]!!),
+                "den: noch + lokalno" to Sceny.sAvtoNochyu(den, w, h, nN)),
+            listOf("hdr: obrezka (klip)" to Sceny.hdrObrezka(nit), "hdr: P010 -> ton-mapping" to tm,
+                "hdr: ton-mapping + nabor hdr" to Sceny.sAvtoNochyu(tm, w, h, NABORY["hdr"]!!)),
+        )
+    }
+
+    @Test fun narisovat2() {
+        assumeTrue(System.getProperty("primery") == "1" || System.getenv("PRIMERY") == "1")
+        val papka = File(System.getProperty("primery.papka")
+            ?: "/tmp/claude-0/-home-user-3dplus/59c37c23-b121-5ad5-951f-36f554a1e480/scratchpad/most3-primery")
+        papka.mkdirs()
+        val w = 640; val h = 360
+        val v = varianty2(w, h)
+        ImageIO.write(vKartinku(v[0][1].second, w, h), "png", File(papka, "noch_noch_globalno.png"))
+        ImageIO.write(vKartinku(v[0][2].second, w, h), "png", File(papka, "noch_noch_lokalno.png"))
+        ImageIO.write(vKartinku(v[2][0].second, w, h), "png", File(papka, "hdr_obrezka.png"))
+        ImageIO.write(vKartinku(v[2][1].second, w, h), "png", File(papka, "hdr_tonmap.png"))
+        ImageIO.write(vKartinku(v[2][2].second, w, h), "png", File(papka, "hdr_tonmap_hdr.png"))
+        // без поддержки HDR: PQ-сигнал показан как SDR BT.709 — блёкло
+        val bez = KartinkaCpu.p010VKadr(Sceny.vP010(Sceny.hdrNity(w, h), w, h), Nastrojki(), hdr = false)
+        ImageIO.write(vKartinku(bez, w, h), "png", File(papka, "hdr_bez.png"))
+        val tw = 416; val th = 234; val zazor = 8; val podp = 22
+        val sv = BufferedImage(3 * tw + 4 * zazor, 3 * (th + podp) + 4 * zazor, BufferedImage.TYPE_INT_RGB)
+        val g = sv.createGraphics()
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        g.color = Color(40, 40, 40); g.fillRect(0, 0, sv.width, sv.height)
+        g.font = Font(Font.SANS_SERIF, Font.PLAIN, 15); g.color = Color.WHITE
+        for ((r, ryad) in varianty2(tw, th).withIndex()) for ((c, p) in ryad.withIndex()) {
+            val x = zazor + c * (tw + zazor); val y = zazor + r * (th + podp + zazor)
+            g.drawString(p.first, x, y + 15)
+            g.drawImage(vKartinku(p.second, tw, th), x, y + podp, null)
+        }
+        g.dispose()
+        ImageIO.write(sv, "png", File(papka, "svodka2.png"))
+    }
 }
