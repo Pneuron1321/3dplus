@@ -86,6 +86,9 @@ class KlipZapis(
 
     fun zvukGolova(asc: ByteArray) = synchronized(lock) { this.asc = asc }
 
+    /** Есть ли заголовок звука (для повтора клипа без звука). */
+    val estZvuk: Boolean get() = synchronized(lock) { asc != null }
+
     fun video(annexB: ByteArray, ptsUs: Long, key: Boolean) = synchronized(lock) {
         if (golova == null) return@synchronized
         val tek = kuski.lastOrNull()

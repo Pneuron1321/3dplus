@@ -28,14 +28,15 @@ class SborKadra(val ozhidaemyj: Int, val maxKadr: Int, val naKadr: (ByteArray, I
     /** Начать с чистого листа (после перезапуска потока). Счётчики не сбрасываются. */
     fun sbros() { dlina = 0; vKadre = false; fid = -1; plohoj = false; oshibka = false }
 
-    fun podat(buf: ByteArray, off: Int, len: Int) {
-        if (len == 0) return // пустая передача законна
-        if (off < 0 || len < 2 || off + len > buf.size) { plohihZagolovkov++; return }
+    /** false — заголовок негоден (payload проигнорирован). */
+    fun podat(buf: ByteArray, off: Int, len: Int): Boolean {
+        if (len == 0) return true // пустая передача законна
+        if (off < 0 || len < 2 || off + len > buf.size) { plohihZagolovkov++; return false }
         val hl = buf[off].toInt() and 0xFF
         val info = buf[off + 1].toInt() and 0xFF
         // bHeaderLength: 2..len и не меньше, чем требуют PTS(4)/SCR(6)
         val minHl = 2 + (if (info and 0x04 != 0) 4 else 0) + (if (info and 0x08 != 0) 6 else 0)
-        if (hl < minHl || hl > len) { plohihZagolovkov++; return }
+        if (hl < minHl || hl > len) { plohihZagolovkov++; return false }
 
         val f = info and 0x01
         if (vKadre && f != fid) zavershit() // FID сменился без EOF — прошлый кадр окончен
@@ -49,7 +50,21 @@ class SborKadra(val ozhidaemyj: Int, val maxKadr: Int, val naKadr: (ByteArray, I
             else { System.arraycopy(buf, off + hl, bufy[tek], dlina, n); dlina += n }
         }
         if (info and 0x02 != 0) zavershit()
+        return true
     }
+
+    /**
+     * Хвост payload без заголовка: прошлая передача заполнила буфер целиком, а карта занизила
+     * dwMaxPayloadTransferSize. Дописать в текущий кадр как есть.
+     */
+    fun prodolzhit(buf: ByteArray, off: Int, len: Int) {
+        if (!vKadre || len <= 0 || oshibka || plohoj) return
+        if (dlina + len > maxKadr) { plohoj = true; return }
+        System.arraycopy(buf, off, bufy[tek], dlina, len); dlina += len
+        prodolzhenij++
+    }
+
+    var prodolzhenij = 0L; private set
 
     private fun zavershit() {
         val b = bufy[tek]

@@ -31,6 +31,7 @@ import android.widget.TextView
  */
 class MainActivity : Activity() {
     private lateinit var gl: GLSurfaceView
+    private val pokaz = Pokaz(Most.polka)
     private lateinit var stroka: TextView
     private lateinit var panel: LinearLayout
     private lateinit var polzunki: LinearLayout
@@ -43,7 +44,14 @@ class MainActivity : Activity() {
     private val usb = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> { Most.ostanovit(); stroka.text = "Карта отключена" }
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    val d = if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(UsbManager.EXTRA_DEVICE, android.hardware.usb.UsbDevice::class.java)
+                        else @Suppress("DEPRECATION") i.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    val nasha = Most.karta?.ustr
+                    if (nasha == null || d?.deviceName == nasha.deviceName) {   // другой USB в хабе — не наше дело
+                        Most.vFone { Most.ostanovit() }; stroka.text = "Карта отключена"
+                    }
+                }
                 RAZRESHENIE -> if (i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) podklyuchit()
             }
         }
@@ -55,7 +63,8 @@ class MainActivity : Activity() {
         gl = GLSurfaceView(this).apply {
             setEGLContextClientVersion(3)
             setEGLConfigChooser(Konfig)                        // «записываемая» поверхность — для записи игры
-            setRenderer(Pokaz(Most.polka))
+            preserveEGLContextOnPause = true                   // окно спрятали и вернули — текстуры и запись живы
+            setRenderer(pokaz)
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
             setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) pokazatPanel(); false }
         }
@@ -92,8 +101,8 @@ class MainActivity : Activity() {
 
     private fun podklyuchit() {
         stroka.text = "Подключаю карту…"
-        Thread {
-            val otvet = Most.podklyuchit(this)
+        Most.vFone {
+            val otvet = try { Most.podklyuchit(this) } catch (e: Exception) { "сбой: ${e.message ?: e.javaClass.simpleName}" }
             // Нет доступа — попросить (Quest может не показать окно: тогда путь через «Choose an app»)
             if (Most.video?.rabotaet != true) {
                 val um = getSystemService(UsbManager::class.java)
@@ -103,7 +112,7 @@ class MainActivity : Activity() {
                 }
             }
             ui.post { stroka.text = otvet }
-        }.start()
+        }
     }
 
     private fun strokaSostoyaniya(): String {
@@ -129,8 +138,8 @@ class MainActivity : Activity() {
             addView(knopka(nadpis) { NABORY[imya]?.let { Most.postavit(it); obnovitPolzunki() } })
         addView(knopka("Звук −") { Most.gromkost = Most.gromkost - 0.1f })
         addView(knopka("Звук +") { Most.gromkost = Most.gromkost + 0.1f })
-        addView(knopka("Звук вкл/выкл") { Most.zvuk(!Most.zvukVkl) })
-        addView(knopka("Клип 2 мин") { Thread { val o = Most.sohranitKlip(120); ui.post { stroka.text = o } }.start() })
+        addView(knopka("Звук вкл/выкл") { val v = !Most.zvukVkl; Most.vFone { Most.zvuk(v) } })
+        addView(knopka("Клип 2 мин") { stroka.text = "Сохраняю клип игры…"; Most.vFone { val o = Most.sohranitKlip(120); ui.post { stroka.text = o } } })
         addView(knopka("Ручки") { polzunki.visibility = if (polzunki.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
     }
 
@@ -184,7 +193,8 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         try { unregisterReceiver(usb) } catch (e: Exception) { }
-        if (isFinishing) Most.ostanovit()
+        pokaz.zakryt()
+        if (isFinishing) Most.vFone { Most.ostanovit() }
     }
 
     /** RGBA8, OpenGL ES 3, EGL_RECORDABLE_ANDROID (кодировщик берёт ту же конфигурацию); нет такой — без «записываемой». */

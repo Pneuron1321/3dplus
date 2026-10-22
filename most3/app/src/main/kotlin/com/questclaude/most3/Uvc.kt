@@ -67,7 +67,12 @@ data class UacOpisanie(
     val kanaly: Int,
     val bajt: Int,
     val chastoty: List<Int>,
-)
+    /** bInterval точки (high/super speed: период 2^(n-1) по 125 мкс; 4 = 1 мс). */
+    val interval: Int = 4,
+) {
+    /** Пакетов точки за 1 мс (1 при bInterval 4, 8 при bInterval 1). */
+    val paketovVMs: Int get() = if (interval in 1..4) 1 shl (4 - interval) else 1
+}
 
 data class UvcOpisanie(
     val bcdUvc: Int,
@@ -174,7 +179,7 @@ object UvcRazbor {
                         if (atr == 1 && paket > isoP) { isoT = adr; isoP = paket }
                     }
                     if (vhod && atr == 1 && ifKl == 1 && ifPod == 2 && aEst && zvuk == null)
-                        zvuk = UacOpisanie(ifNom, ifAlt, adr, paket, aKan, aBajt, aChast)
+                        zvuk = UacOpisanie(ifNom, ifAlt, adr, paket, aKan, aBajt, aChast, raw.u8(p + 6))
                 }
             }
             i += dl

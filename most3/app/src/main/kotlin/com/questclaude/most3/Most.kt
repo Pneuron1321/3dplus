@@ -36,6 +36,10 @@ object Most {
         }
     }
 
+    /** Одна очередь для всего, что ждёт карту (окно и приёмник USB не ждут на главном потоке). */
+    private val ochered = java.util.concurrent.Executors.newSingleThreadExecutor()
+    fun vFone(f: () -> Unit) { ochered.execute { try { f() } catch (e: Exception) { oshibka = "сбой: ${e.message ?: e.javaClass.simpleName}" } } }
+
     /** Попытки лестницы режимов при последнем подключении — для самоотчёта. */
     val popytki = java.util.concurrent.CopyOnWriteArrayList<String>()
 
@@ -60,14 +64,18 @@ object Most {
             polka.rezhim = r
             val v = Video(k, r) { b, n -> polka.polozhit(b, n) }
             video = v
-            if (!v.start()) { popytki += "${r.opisanie()}: ${v.oshibka}"; v.stop(); video = null; continue }
+            val zapushchen = try { v.start() } catch (e: Exception) { v.oshibkaIzvne("сбой: ${e.message ?: e.javaClass.simpleName}"); false }
+            polka.rezhim = v.rezhim
+            if (!zapushchen) { popytki += "${r.opisanie()}: ${v.oshibka}"; v.stop(); video = null; continue }
             val t0 = System.currentTimeMillis()
             while (System.currentTimeMillis() - t0 < 2500 && (v.sbor?.kadrov ?: 0) == 0L && v.rabotaet) Thread.sleep(50)
             val s = v.sbor
             if ((s?.kadrov ?: 0) > 0) {
-                popytki += "${r.opisanie()}: кадры идут"
-                if (klipVkl) vklKlip(k, r)
+                polka.rezhim = v.rezhim                            // карта могла поправить режим при COMMIT
+                popytki += "${v.rezhim.opisanie()}: кадры идут"
+                if (klipVkl) vklKlip(k, v.rezhim)
                 if (zvukVkl) vklZvuk()
+                app?.let { Sluzhba.vkl(it) }
                 oshibka = null
                 return "показываю: ${r.opisanie()}" + if (popytki.size > 1) " (после ${popytki.size - 1} откат.)" else ""
             }
@@ -86,9 +94,13 @@ object Most {
         val a1 = k.interfejs(z.interfejs, z.alt) ?: return
         val um = app?.getSystemService(UsbManager::class.java) ?: return
         val c2 = um.openDevice(k.ustr) ?: run { zvukOshibka = "второе соединение с картой не открылось"; return }
+        if (z.bajt != 2 || z.kanaly !in 1..2) { c2.close(); zvukOshibka = "звук карты ${z.bajt * 8} бит, ${z.kanaly} к. — пока не умею"; return }
         val zz = Zvuk(c2, z, a0, a1).also { it.gromkost = gromkost; it.naPcm = { b, n, t -> klip?.pcm(b, n, t) } }
         if (zz.start()) { zvuk = zz; zvukOshibka = null } else { zvukOshibka = zz.oshibka; zz.stop() }   // stop закроет своё соединение
     }
+
+    /** Служба переднего плана (Sluzhba): почему не встала — для самоотчёта. */
+    @Volatile var zametkaSluzhby: String? = null
 
     /** Почему звук не встал (Zvuk после неудачи уже закрыт) — для статуса и самоотчёта. */
     @Volatile var zvukOshibka: String? = null; private set
@@ -102,7 +114,7 @@ object Most {
         klip = Klip3(c.cacheDir, r.shirina, r.vysota).also { it.start(z?.chastoty?.firstOrNull { h -> h == 48000 } ?: z?.chastoty?.firstOrNull(), z?.kanaly ?: 2) }
     }
 
-    fun klip(vkl: Boolean) {
+    @Synchronized fun klip(vkl: Boolean) {
         klipVkl = vkl; sohranit()
         if (!vkl) { klip?.stop(); klip = null }
         else if (klip == null) { val k = karta; val r = video?.rezhim; if (k != null && r != null && video?.rabotaet == true) vklKlip(k, r) }
@@ -115,12 +127,13 @@ object Most {
         return KlipMp4.sohranit(c, k.zapis, sek)
     }
 
-    fun zvuk(vkl: Boolean) {
+    @Synchronized fun zvuk(vkl: Boolean) {
         zvukVkl = vkl; sohranit()
         if (!vkl) { zvuk?.stop(); zvuk = null } else if (zvuk == null && video?.rabotaet == true) vklZvuk()
     }
 
     @Synchronized fun ostanovit() {
+        app?.let { Sluzhba.vykl(it) }
         zvuk?.stop(); zvuk = null
         klip?.stop(); klip = null
         video?.stop(); video = null
@@ -169,6 +182,7 @@ object Most {
         klip?.let { append("Запись игры: ${it.status()}\n") }
         append("Показ: ${"%.0f".format(polka.pokazFps)} к/с, средняя яркость ${"%.3f".format(polka.srednyaya)}" +
             (oshibkaPokaza?.let { ", ошибка: $it" } ?: "") + "\n")
+        zametkaSluzhby?.let { append("$it\n") }
         append("Внешние камеры Android (запасной путь): ${vneshnieKamery(ctx)}\n")
         k?.c?.rawDescriptors?.let { append("Дескрипторы (${it.size} Б): ${Hex.str(it)}\n") }
     }
@@ -209,8 +223,9 @@ object Most {
         try { nastrojki = Nastrojki.izStroki(File(d, "kartinka").readText()) } catch (e: Exception) { }
         try {
             val z = File(d, "zvuk").readText().trim().split(' ')
-            zvukVkl = z.getOrNull(0) != "0"; z.getOrNull(1)?.toFloatOrNull()?.let { gromkost = it }
-            klipVkl = z.getOrNull(2) != "0"
+            zvukVkl = z.getOrNull(0) != "0"
+            klipVkl = z.getOrNull(2) != "0"                       // до громкости: её сеттер сохраняет файл
+            z.getOrNull(1)?.toFloatOrNull()?.let { gromkost = it }
         } catch (e: Exception) { }
     }
 

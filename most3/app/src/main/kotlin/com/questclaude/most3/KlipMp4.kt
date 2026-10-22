@@ -24,6 +24,14 @@ object KlipMp4 {
     fun sohranit(ctx: Context, z: KlipZapis, sek: Int): String {
         if (!zanyat.compareAndSet(false, true)) return "{\"oshibka\":\"клип уже сохраняется\"}"
         try {
+            // MP4 не принимает пустую дорожку: звук был включён и пропал — второй раз без звука
+            val o = odinRaz(ctx, z, sek, sZvukom = true)
+            return if (o.startsWith("{\"oshibka\":") && z.estZvuk) odinRaz(ctx, z, sek, sZvukom = false) else o
+        } finally { zanyat.set(false) }
+    }
+
+    private fun odinRaz(ctx: Context, z: KlipZapis, sek: Int, sZvukom: Boolean): String {
+        run {
             val s = z.snimok(sek.coerceIn(5, 125)) ?: return "{\"oshibka\":\"игра ещё не записана — клипа нет (карта показывает? запись включена?)\"}"
             val imya = "most3-igra-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".mp4"
             val r = ctx.contentResolver
@@ -37,7 +45,7 @@ object KlipMp4 {
             try {
                 r.openFileDescriptor(uri, "rw")!!.use { fd ->
                     val m = MediaMuxer(fd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                    try { bait = sobrat(m, s) } finally { try { m.release() } catch (e: Exception) { } }
+                    try { bait = sobrat(m, s, sZvukom) } finally { try { m.release() } catch (e: Exception) { } }
                 }
                 r.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             } catch (e: Exception) {
@@ -46,18 +54,18 @@ object KlipMp4 {
                 return "{\"oshibka\":${Json.str("клип не собрался: ${e.message ?: e.javaClass.simpleName}")}}"
             }
             return "{\"ok\":true,\"put\":${Json.str("$PAPKA/$imya")},\"sek\":${s.sek},\"mb\":${bait shr 20}," +
-                "\"zvuk\":${s.asc != null}}"
-        } finally { zanyat.set(false) }
+                "\"zvuk\":${sZvukom && s.asc != null}}"
+        }
     }
 
-    private fun sobrat(m: MediaMuxer, s: KlipZapis.Snimok): Long {
+    private fun sobrat(m: MediaMuxer, s: KlipZapis.Snimok, sZvukom: Boolean): Long {
         val g = s.golova
         val vf = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, if (g.w > 0) g.w else 1920, if (g.h > 0) g.h else 1080).apply {
             setByteBuffer("csd-0", ByteBuffer.wrap(Nal.sRazdelitelem(g.sps)))
             setByteBuffer("csd-1", ByteBuffer.wrap(Nal.sRazdelitelem(g.pps)))
         }
         val vt = m.addTrack(vf)
-        val at = s.asc?.let { asc ->
+        val at = s.asc?.takeIf { sZvukom }?.let { asc ->
             val (hz, kan) = KlipZapis.aac(asc)
             m.addTrack(MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, hz, kan).apply {
                 setByteBuffer("csd-0", ByteBuffer.wrap(asc))

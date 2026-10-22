@@ -38,3 +38,30 @@ class LestnicaTest {
         assertEquals("00 ff", Hex.str(byteArrayOf(0, -1, 16), 2))
     }
 }
+
+/** Находки проверки 22.10: хвост payload без заголовка и пакеты звука по bInterval. */
+class ProverkaTest {
+    private fun pay(fid: Int, eof: Boolean, n: Int) =
+        byteArrayOf(2, ((fid and 1) or (if (eof) 2 else 0) or 0x80).toByte()) + ByteArray(n) { 7 }
+
+    @Test fun hvostBezZagolovka() {
+        val kadry = ArrayList<Int>()
+        val s = SborKadra(10, 64) { _, n -> kadry += n }
+        val a = pay(0, false, 6)
+        assertEquals(true, s.podat(a, 0, a.size))
+        val hvost = byteArrayOf(99, 98, 97, 96)                 // «заголовок» негоден: 99 > длины
+        assertEquals(false, s.podat(hvost, 0, hvost.size))
+        s.prodolzhit(hvost, 0, hvost.size)
+        val konec = pay(0, true, 0)
+        s.podat(konec, 0, konec.size)
+        assertEquals(listOf(10), kadry)
+        assertEquals(1L, s.prodolzhenij)
+    }
+
+    @Test fun paketyZvuka() {
+        fun z(i: Int) = UacOpisanie(3, 1, 0x83, 208, 2, 2, listOf(48000), i)
+        assertEquals(1, z(4).paketovVMs)
+        assertEquals(8, z(1).paketovVMs)
+        assertEquals(1, z(0).paketovVMs)
+    }
+}

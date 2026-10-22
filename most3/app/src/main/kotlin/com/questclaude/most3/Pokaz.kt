@@ -64,6 +64,7 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
         glPixelStorei(GL_PACK_ALIGNMENT, 1)
         tekVid = null; poslednij = -1
+        razmery.clear()                                      // новый контекст — у текстур нет хранилища
         eglD = EGL14.eglGetCurrentDisplay(); eglK = EGL14.eglGetCurrentContext()
         val id = IntArray(1)
         EGL14.eglQueryContext(eglD, eglK, EGL14.EGL_CONFIG_ID, id, 0)
@@ -163,9 +164,12 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
             }
             UvcVid.NV12, UvcVid.I420 -> {
                 if (k.dlina < w * h * 3 / 2) return false
-                val src = if (r.vid == UvcVid.I420) perelozhit(k.buf, w, h) else k.buf
+                // карта может дополнять высоту (1088 вместо 1080): плоскость цвета — после ВСЕХ строк яркости
+                val hp = if (k.dlina > w * h * 3 / 2) (k.dlina * 2 / 3 / w).coerceAtLeast(h) else h
+                val src = if (r.vid == UvcVid.I420) perelozhit(k.buf, w, h, hp) else k.buf
+                val uv = if (r.vid == UvcVid.I420) w * h else w * hp
                 tekstura(tek[0], GL_R8, GL_RED, w, h, ByteBuffer.wrap(src, 0, w * h), r.vid, w, h)
-                tekstura(tek[1], GL_RG8, GL_RG, w / 2, h / 2, ByteBuffer.wrap(src, w * h, w * h / 2).slice(), r.vid, w, h, novoe = false)
+                tekstura(tek[1], GL_RG8, GL_RG, w / 2, h / 2, ByteBuffer.wrap(src, uv, w * h / 2).slice(), r.vid, w, h, novoe = false)
             }
             UvcVid.MJPEG -> { mjpeg.podat(k.buf, k.dlina); return false }
             else -> return false
@@ -194,14 +198,18 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         mjpeg.vernut(bmp)
     }
 
-    /** I420 (Y, U, V плоскостями) → NV12 (Y, затем UV через один). */
-    private fun perelozhit(src: ByteArray, w: Int, h: Int): ByteArray {
+    /** I420 (Y, U, V плоскостями; hp — высота с дополнением) → NV12 (Y, затем UV через один) без дополнения. */
+    private fun perelozhit(src: ByteArray, w: Int, h: Int, hp: Int): ByteArray {
         val n = w * h; val q = n / 4
+        val u0 = w * hp; val v0 = u0 + (w / 2) * (hp / 2)
         val d = nv12?.takeIf { it.size >= n * 3 / 2 } ?: ByteArray(n * 3 / 2).also { nv12 = it }
         System.arraycopy(src, 0, d, 0, n)
-        for (i in 0 until q) { d[n + 2 * i] = src[n + i]; d[n + 2 * i + 1] = src[n + q + i] }
+        for (i in 0 until q) { d[n + 2 * i] = src[u0 + i]; d[n + 2 * i + 1] = src[v0 + i] }
         return d
     }
+
+    /** Окно закрывается: остановить поток MJPEG. */
+    fun zakryt() = mjpeg.zakryt()
 
     private fun programma(frag: String): Int {
         fun shader(tip: Int, kod: String): Int {
@@ -225,7 +233,9 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         private var vhod: ByteArray? = null; private var vhodN = 0
         @Volatile private var gotovo: Bitmap? = null
         private var zapas: Bitmap? = null
-        private val potok = Thread({ cikl() }, "most3-mjpeg").apply { isDaemon = true; start() }
+        private val potok = Thread({ try { cikl() } catch (e: InterruptedException) { } }, "most3-mjpeg").apply { isDaemon = true; start() }
+
+        fun zakryt() = potok.interrupt()
 
         fun podat(b: ByteArray, n: Int) = synchronized(zamok) {
             val c = vhod?.takeIf { it.size >= n } ?: ByteArray(n)

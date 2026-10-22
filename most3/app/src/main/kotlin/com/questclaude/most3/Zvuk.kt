@@ -41,6 +41,8 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
     private val urby = ArrayList<Memory>()
     /** Передач у ядра (поставлено и ещё не забрано): память Memory нельзя отпускать, пока ядро в неё пишет. */
     private val vPolete = java.util.concurrent.atomic.AtomicInteger()
+    /** Пакетов в передаче: ~8 мс звука при любом bInterval точки (1 мс → 8, 125 мкс → 64). */
+    private val pakety = (8 * op.paketovVMs).coerceIn(8, 64)
 
     fun start(): Boolean {
         if (rabotaet) return true
@@ -52,19 +54,23 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
 
         val kanaly = if (op.kanaly == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
         val min = AudioTrack.getMinBufferSize(hz, kanaly, AudioFormat.ENCODING_PCM_16BIT)
-        val t = AudioTrack.Builder()
+        val t = try { AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(hz).setChannelMask(kanaly)
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
             .setBufferSizeInBytes(maxOf(min * 2, hz * op.kanaly * 2 / 10))       // ≥ 100 мс
             .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-            .build()
+            .build() } catch (e: Exception) {
+            oshibka = "AudioTrack не создался ($hz Гц): ${e.message ?: e.javaClass.simpleName}"
+            try { c.setInterface(alt0) } catch (x: Exception) { }
+            c.releaseInterface(alt0); return false
+        }
         t.setVolume(gromkost.coerceAtMost(1f)); t.play(); trek = t
 
         val fd = c.fileDescriptor
         repeat(URBOV) {
-            val m = Memory((Urb.RAZMER + Urb.ISO * PAKETOV + op.paket * PAKETOV).toLong())
+            val m = Memory((Urb.RAZMER + Urb.ISO * pakety + op.paket * pakety).toLong())
             urby += m
             if (!podat(fd, m)) { val e = Native.getLastError(); stop(); oshibka = "usbfs: передача не встала (errno $e)"; return false }
             vPolete.incrementAndGet()
@@ -74,17 +80,17 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
         return true
     }
 
-    /** Заполнить и поставить одну изохронную передачу: PAKETOV пакетов по op.paket байт. */
+    /** Заполнить и поставить одну изохронную передачу: pakety пакетов по op.paket байт. */
     private fun podat(fd: Int, m: Memory): Boolean {
-        val bufer = m.share((Urb.RAZMER + Urb.ISO * PAKETOV).toLong())
-        val b = m.getByteBuffer(0, (Urb.RAZMER + Urb.ISO * PAKETOV).toLong()).order(ByteOrder.nativeOrder())
-        Urb.zapolnit(b, op.tochka, Pointer.nativeValue(bufer), PAKETOV, op.paket, Pointer.nativeValue(m))
+        val bufer = m.share((Urb.RAZMER + Urb.ISO * pakety).toLong())
+        val b = m.getByteBuffer(0, (Urb.RAZMER + Urb.ISO * pakety).toLong()).order(ByteOrder.nativeOrder())
+        Urb.zapolnit(b, op.tochka, Pointer.nativeValue(bufer), pakety, op.paket, Pointer.nativeValue(m))
         return LibC.I.ioctl(fd, NativeLong(Urb.SUBMITURB), m) == 0
     }
 
     private fun cikl(fd: Int, t: AudioTrack, hz: Int) {
         val kadrBajt = op.kanaly * 2
-        val vyhod = ByteArray(op.paket * PAKETOV)
+        val vyhod = ByteArray(op.paket * pakety)
         val ref = PointerByReference()
         var napisano = 0L                                  // кадров отдано в AudioTrack
         var pikOkno = 0; var pikSchet = 0
@@ -96,14 +102,14 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
             val p = ref.value ?: continue
             vPolete.decrementAndGet()
             val m = urby.firstOrNull { Pointer.nativeValue(it) == Pointer.nativeValue(p) } ?: continue
-            val b = m.getByteBuffer(0, (Urb.RAZMER + Urb.ISO * PAKETOV).toLong()).order(ByteOrder.nativeOrder())
+            val b = m.getByteBuffer(0, (Urb.RAZMER + Urb.ISO * pakety).toLong()).order(ByteOrder.nativeOrder())
             var n = 0
-            for (i in 0 until PAKETOV) {
+            for (i in 0 until pakety) {
                 val (dlina, status) = Urb.paket(b, i)
                 paketov++
                 if (status != 0 || dlina <= 0) { if (status != 0) plohih++; continue }
                 val d = dlina - dlina % kadrBajt
-                m.read((Urb.RAZMER + Urb.ISO * PAKETOV + i * op.paket).toLong(), vyhod, n, d)
+                m.read((Urb.RAZMER + Urb.ISO * pakety + i * op.paket).toLong(), vyhod, n, d)
                 n += d
             }
             if (!rabotaet) break
@@ -151,14 +157,11 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
         "\"plohih\":$plohih,\"sbrosheno\":$sbrosheno,\"pik_db\":${Pcm.db(pik)},\"gromkost\":$gromkost," +
         "\"oshibka\":${oshibka?.let { Json.str(it) } ?: "null"}}"
 
-    private interface LibC : Library {
-        fun ioctl(fd: Int, zapros: NativeLong, arg: Pointer): Int
-        companion object { val I: LibC = Native.load("c", LibC::class.java) }
-    }
+    private object LibC { val I get() = Usbfs.c }
 
     companion object {
         const val URBOV = 8          // передач в полёте
-        const val PAKETOV = 8        // пакетов (по 1 мс) в передаче: 8 × 8 = 64 мс запаса у карты
+        // пакетов в передаче — pakety (по bInterval): 8 передач × ~8 мс = ~64 мс запаса у карты
     }
 }
 
