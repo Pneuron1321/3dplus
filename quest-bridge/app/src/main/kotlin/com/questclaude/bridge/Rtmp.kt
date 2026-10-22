@@ -14,17 +14,24 @@ import java.net.Socket
 import java.net.URI
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /**
- * Свой отправитель RTMP (публикация эфира на Twitch): рукопожатие, connect, createStream,
+ * Свой отправитель RTMP (публикация эфира на Twitch, Kick, YouTube; rtmps — через TLS): рукопожатие, connect, createStream,
  * publish, дальше видео и звук кусками. Без библиотек — обычная JVM, проверяется с настоящим
  * ffmpeg (RtmpTest). Ключ эфира — секрет: в тексты ошибок не попадает (заменяется на ***).
  *
  * Все сообщения — с полным заголовком (fmt 0, своё время): проще и для сервера законно.
  * Отправлять можно с разных потоков — запись под замком.
  */
-class Rtmp(private val url: String, private val key: String, private val timeoutMs: Int = 8000) : Closeable, Otpravka.Kanal {
+class Rtmp(
+    private val url: String,
+    private val key: String,
+    private val timeoutMs: Int = 8000,
+    private val tls: SSLSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory,   // в тестах — свой
+) : Closeable, Otpravka.Kanal {
     private var sock: Socket? = null
     private lateinit var out: OutputStream
     private lateinit var inp: DataInputStream
@@ -51,9 +58,15 @@ class Rtmp(private val url: String, private val key: String, private val timeout
         val host = u.host ?: throw IOException("в адресе нет сервера")
         val port = if (u.port > 0) u.port else if (tls) 443 else 1935
         val app = u.path.trim('/')
-        val s = if (tls) SSLSocketFactory.getDefault().createSocket() else Socket()
+        val s = if (tls) this.tls.createSocket() else Socket()
         sock = s
         try {
+            if (s is SSLSocket) s.sslParameters = s.sslParameters.apply {
+                // 2.7.0 (Kick, YouTube — RTMPS): имя сервера в рукопожатии и проверка, что сертификат — его;
+                // без проверки ключ ушёл бы любому, кто встал посреди сети с чужим сертификатом
+                endpointIdentificationAlgorithm = "HTTPS"
+                if (host.any { it.isLetter() }) serverNames = listOf(SNIHostName(host))
+            }
             s.connect(InetSocketAddress(host, port), timeoutMs)
             s.soTimeout = timeoutMs
             s.tcpNoDelay = true

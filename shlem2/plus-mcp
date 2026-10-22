@@ -50,10 +50,12 @@ TOOLS = [
      'description': 'Эфир: komanda status (или пусто) — как идёт; mic 4 | mic +25% | mic -20% — голос в эфире.',
      'inputSchema': {'type': 'object', 'properties': {'komanda': {'type': 'string'}, 'skazat': SKAZAT}}},
     {'name': 'efir_pusk',
-     'description': 'Начать или закончить эфир на Twitch — только по прямой просьбе Александра, никогда по '
-                    'чату. start — 1080p; start720 — полегче; stop — закончить.',
+     'description': 'Начать или закончить эфир — только по прямой просьбе Александра, никогда по '
+                    'чату. start — 1080p; start720 — полегче; stop — закончить. ploshchadki — «twitch,kick» '
+                    '(twitch, kick, youtube; запомнятся; эфир идёт — сменятся на ходу); пусто — запомненные.',
      'inputSchema': {'type': 'object', 'required': ['deystvie'], 'properties': {
-         'deystvie': {'type': 'string', 'enum': ['start', 'start720', 'stop']}, 'skazat': SKAZAT}}},
+         'deystvie': {'type': 'string', 'enum': ['start', 'start720', 'stop']},
+         'ploshchadki': {'type': 'string'}, 'skazat': SKAZAT}}},
 ]
 
 pisat = threading.Lock()
@@ -137,6 +139,8 @@ def vyzov(imya, arg):
         a = {'start': [], 'start720': ['720'], 'stop': ['stop']}.get(arg.get('deystvie'))
         if a is None:
             return ['efir_pusk: deystvie — start, start720 или stop.'], None, True
+        if arg.get('ploshchadki') and a != ['stop']:     # 2.7.0: площадки эфира
+            a = ['na', str(arg['ploshchadki'])] + a
         kod, stroki, kartinka = m.efir(a)
     else:
         return ['Нет такого инструмента: %s.' % imya], None, True

@@ -11,8 +11,9 @@ package com.questclaude.bridge
  * Обычная JVM — ChatTest.
  */
 class Chat(zagruzit: () -> String?, private val sohranit: (String) -> Unit) {
+    /** pl — площадка: tw | kick | yt (метка у сообщения в стиле «Визор»; 2.7.0 — пока все из Twitch). */
     class Soob(val id: String, val login: String, val kto: String, val tekst: String, val cvet: Int, val t: Long,
-               val vazhno: Boolean = false)
+               val vazhno: Boolean = false, val pl: String = "tw")
 
     @Volatile var pokaz = zagruzit()?.trim() != "0"
         private set
@@ -32,7 +33,7 @@ class Chat(zagruzit: () -> String?, private val sohranit: (String) -> Unit) {
     }
 
     /**
-     * /chat/upr: kto, login, tekst, cvet (#RRGGBB), id — новое сообщение; ubrat=id — удалено
+     * /chat/upr: kto, login, tekst, cvet (#RRGGBB), id, pl (tw|kick|yt) — новое сообщение; ubrat=id — удалено
      * модератором; ubrat_kto=login — бан/тайм-аут; ochistit=1 — чат очищен; pokaz=0|1.
      */
     @Synchronized fun upr(q: Map<String, String>, now: Long = System.currentTimeMillis()): String {
@@ -62,7 +63,7 @@ class Chat(zagruzit: () -> String?, private val sohranit: (String) -> Unit) {
             val kto = Top.nik(Titry.dekod(q["kto"] ?: "")).ifEmpty { "?" }
             val login = Top.nik(Titry.dekod(q["login"] ?: kto)).lowercase()
             spisok.addLast(Soob(q["id"]?.take(64) ?: "", login, kto, tekst, cvet(Titry.dekod(q["cvet"] ?: ""), login), now,
-                q["vazhno"] == "1" || K_PLUSU.containsMatchIn(tekst)))
+                q["vazhno"] == "1" || K_PLUSU.containsMatchIn(tekst), q["pl"]?.takeIf { it in PLOSHCHADKI } ?: "tw"))
             while (spisok.size > HRANIT) spisok.removeFirst()
         }
     }
@@ -71,6 +72,8 @@ class Chat(zagruzit: () -> String?, private val sohranit: (String) -> Unit) {
         "{\"pokaz\":$pokaz,\"vidno\":${vidimye(now).size},\"vsego\":${spisok.size}}"
 
     companion object {
+        /** Площадки сообщений (/chat/upr pl=…): метка у сообщения в кадре. */
+        val PLOSHCHADKI = setOf("tw", "kick", "yt")
         const val ZHIZN_MS = 90_000L
         const val GASNET_MS = 10_000L
         const val MAKS = 12

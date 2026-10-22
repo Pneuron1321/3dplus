@@ -40,6 +40,10 @@ class FrameServerTest {
         override fun stop(): String { state = "off"; return status() }
         override fun status() = "{\"state\":\"$state\"}"
         override fun key(k: String): Boolean { key = k; return true }
+        val kluchi = java.util.concurrent.ConcurrentHashMap<String, String>()
+        override fun key(pl: String, k: String): Boolean { kluchi[pl] = k; return if (pl == "twitch") key(k) else true }
+        @Volatile var adresQ: Pair<String, String>? = null
+        override fun adres(pl: String, url: String): String { adresQ = pl to url; return "{\"adres\":true}" }
         @Volatile var micG = 0f
         override fun mic(g: Float): String { micG = g; return status() }
     }
@@ -213,6 +217,27 @@ class FrameServerTest {
         assertEquals("{\"state\":\"off\"}", String(get("/efir/stop").body))
         get("/efir/mic?g=4.5")
         assertEquals(4.5f, efir.micG)
+    }
+
+    /** 2.7.0: ключ на площадку (?pl=), без pl — twitch; ключ не возвращается; адрес Kick — отдельно. */
+    @Test fun efirKluchiPloshchadok() {
+        val k = "sk_us-west-2_test-key-123"
+        val r = post("/efir/key?pl=kick", k.toByteArray())
+        assertEquals(200, r.code)
+        assertEquals("{\"key\":true}", String(r.body))
+        assertEquals(k, efir.kluchi["kick"])
+        assertEquals(null, efir.key)                                    // ключ Kick — не в ключ Twitch
+        assertEquals(200, post("/efir/key?pl=youtube", "abcd-efgh-ijkl-mnop-qrst".toByteArray()).code)
+        assertEquals("abcd-efgh-ijkl-mnop-qrst", efir.kluchi["youtube"])
+        assertEquals(400, post("/efir/key?pl=tiktok", "test-key-123".toByteArray()).code)
+        assertEquals(200, post("/efir/key", "live_123456789_AbCdEfGh".toByteArray()).code)
+        assertEquals("live_123456789_AbCdEfGh", efir.kluchi["twitch"])
+        assertEquals("live_123456789_AbCdEfGh", efir.key)
+        assertEquals("{\"adres\":true}",
+            String(get("/efir/adres?pl=kick&url=rtmps%3A%2F%2Fab12.global-contribute.live-video.net%2Fapp").body))
+        assertEquals("kick" to "rtmps://ab12.global-contribute.live-video.net/app", efir.adresQ)
+        get("/efir/start?pl=twitch%2Ckick")
+        assertEquals("twitch%2Ckick", efir.startQ!!["pl"])               // разбирает приложение (URLDecoder)
     }
 
     /** Субтитры, цель доната, итоги: текст в процентах (UTF-8) доходит целым; без захвата — 503. */

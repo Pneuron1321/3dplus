@@ -24,6 +24,8 @@ public class Paint {
     private Cap cap = Cap.BUTT;
     private Xfermode xfermode;
     private Shader shader;
+    private MaskFilter maskFilter;
+    private float letterSpacing = 0f;
     final boolean aa;
 
     public Paint() { aa = false; }
@@ -52,6 +54,11 @@ public class Paint {
     public Shader getShader() { return shader; }
     public Shader setShader(Shader s) { shader = s; return s; }
 
+    public MaskFilter getMaskFilter() { return maskFilter; }
+    public MaskFilter setMaskFilter(MaskFilter m) { maskFilter = m; return m; }
+    public float getLetterSpacing() { return letterSpacing; }
+    public void setLetterSpacing(float ls) { letterSpacing = ls; }
+
     Font font() {
         Font f = new Font(typeface.sk, textSize);
         f.setEdging(FontEdging.ANTI_ALIAS);
@@ -59,7 +66,10 @@ public class Paint {
         return f;
     }
 
-    public float measureText(String s) { return font().measureTextWidth(s); }
+    public float measureText(String s) {
+        float w = font().measureTextWidth(s);
+        return letterSpacing == 0f ? w : w + letterSpacing * textSize * s.length();
+    }
     public float measureText(String s, int a, int b) { return measureText(s.substring(a, b)); }
     public float measureText(CharSequence s, int a, int b) { return measureText(s.toString().substring(a, b)); }
 
@@ -74,6 +84,7 @@ public class Paint {
         if (xfermode instanceof PorterDuffXfermode) p.setBlendMode(BlendMode.valueOf(((PorterDuffXfermode) xfermode).mode.name()
             .replace("ADD", "PLUS")));
         if (shader != null) p.setShader(shader.sk());
+        if (maskFilter != null) p.setMaskFilter(maskFilter.sk());
         return p;
     }
 }

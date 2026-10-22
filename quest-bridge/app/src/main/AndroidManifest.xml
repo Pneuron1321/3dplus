@@ -17,6 +17,10 @@
          так же его просит HDMI Link (dumpsys package com.meta.quest_hard_link) -->
     <uses-permission android:name="horizonos.permission.USB_CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- страница клипов (2.7.0): клипы Моста 3 в «Фильмы/Plus» — чужие файлы; Android 13+ даёт их видеть
+         только с «Видео» (только чтение видео, не всё хранилище); свои клипы камеры видны и без него -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <!-- «Запустить Плюса»: Termux RUN_COMMAND (Termux спросит разрешение) -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 

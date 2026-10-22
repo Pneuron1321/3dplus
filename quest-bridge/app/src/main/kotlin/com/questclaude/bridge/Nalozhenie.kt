@@ -61,6 +61,13 @@ import kotlin.math.sin
  * Музыка (2.5.6, задания Плюса п. 2): пока играет фоновая музыка и Плюс просил полоску — справа над окном
  * камеры слой "mz", как свёрнутый Winamp: «▶», трек и автор зелёными буквами (бегут, если не влезают),
  * эквалайзер от самой музыки; 10 раз в секунду (тесно игре — 5).
+ *
+ * Стиль «Визор» (2.7.0, docs/OFORMLENIE.md; `vid stil viz|staryj`, по умолчанию viz): те же слои и то же «только
+ * при изменениях», но рисует VizorPlashki по раскладке Vizor — скобы по углам и золотая линия (слои "vv", "vn"),
+ * карточки графит 80 % с золотым кантом, шрифты Unbounded и Manrope, цель доната — в карточке топа слева, лицо
+ * Плюса — с прямыми щеками и плоским широким подбородком (plus-lico-pryamoe.png, как модель 3dplus после правки
+ * 22.10), крупнее. Сцены во весь кадр поверх всего (слой "sc", Oformlenie): «скоро начнём» (таймер раз в секунду),
+ * «отошёл», «конец эфира» (итоги в стиле визора). Старый стиль — как был.
  */
 class Nalozhenie(
     ctx: Context,
@@ -114,6 +121,16 @@ class Nalozhenie(
     private val svet = kartinka(ctx, "plus-lico-svet.png")       // пришелец светится
     private val plechiImg = kartinka(ctx, "plus-plechi.png")     // плечи модели, тот же масштаб
     private val nachalo = System.currentTimeMillis()                  // время розы
+    // стиль «Визор» (2.7.0): свои картинки слоёв — только когда стиль включён (старый стиль их не трогает)
+    private val viz by lazy { VizorPlashki(ctx, VizorKist(ctx), cel, top, igra, chat, nalet, itogi) { imyaGolosa(it) } }
+    private val licoPryamoe = kartinka(ctx, "plus-lico-pryamoe.png") ?: lico   // щёки прямые, подбородок плоский
+    private val pvV by lazy { Bitmap.createBitmap(Vizor.PV_W, Vizor.PV_H, Bitmap.Config.ARGB_8888) }
+    private val cV by lazy { Canvas(pvV) }
+    private val lvV by lazy { Bitmap.createBitmap(Vizor.LV_W, Vizor.LV_H, Bitmap.Config.ARGB_8888) }
+    private val chatV by lazy { Bitmap.createBitmap(Vizor.CW, Vizor.CH, Bitmap.Config.ARGB_8888) }
+    private val titrV by lazy { Bitmap.createBitmap(Vizor.TW, Vizor.TH, Bitmap.Config.ARGB_8888) }
+    private val mzV by lazy { Bitmap.createBitmap(Vizor.MZW, Vizor.MZH, Bitmap.Config.ARGB_8888) }
+    private var scenaBmp: Bitmap? = null                         // 1920×1080 — только пока сцена на экране
     private val dvizhenie = Roza3D.Dvizhenie()                        // как крутится роза в этом эфире
     @Volatile private var rabotaet = false
     private var potok: Thread? = null
@@ -181,8 +198,26 @@ class Nalozhenie(
             var puzyriBylo = ""
             var muzBylo = ""
             var muzMs = 0L
+            var stilBylo = ""
+            var scenaBylo = ""
             while (rabotaet) {
                 val now = System.currentTimeMillis()
+                val v = Oformlenie.viz
+                shag("визор") {                                       // стиль сменился — все плашки заново
+                    val st = if (v) "viz" else "staryj"
+                    if (st != stilBylo) {
+                        stilBylo = st                                 // и споткнувшись — не пробовать каждые 70 мс
+                        bylo = ""; radarBylo = ""; titrBylo = ""; igraBylo = ""; chatBylo = ""; muzBylo = ""; itogiBylo = ""
+                        puzyriBylo = ""; gostiBylo = ""
+                        if (v) {
+                            val vv = Bitmap.createBitmap(Vizor.W, Vizor.RAMKA_H, Bitmap.Config.ARGB_8888)
+                            val vn = Bitmap.createBitmap(Vizor.W, Vizor.RAMKA_H, Bitmap.Config.ARGB_8888)
+                            viz.ramka(vv, vn)
+                            razvilka.sloy("vv", vv); razvilka.sloy("vn", vn)      // развилка взяла копии
+                            vv.recycle(); vn.recycle()
+                        } else { razvilka.sloy("vv", null); razvilka.sloy("vn", null) }
+                    }
+                }
                 val sost = sostoyanie(now)
                 val razgovor = sost == "govorit" || sost == "slushaet" || sost == "dumaet"
                 val tesnoIgre = Hub.dispetcher.igre                   // тесно игре — бридж сбрасывает своё
@@ -202,7 +237,7 @@ class Nalozhenie(
                 val klyuch = "${p.lico} ${p.nalet} ${nalet.vsegoSek} ${nalet.efirSek} ${nalet.sotnyaVidna(now)} ${cel.status()}"
                 // каждая плашка — сама по себе: споткнулась одна (лицо, роза) — чат, субтитры и остальные живут
                 shag("лицо") {
-                    if (!p.lico && !p.nalet && !cel.vidna) { if (bylo != "net") razvilka.plashka(null); bylo = "net" }
+                    if (!p.lico && !p.nalet && (v || !cel.vidna)) { if (bylo != "net") razvilka.plashka(null); bylo = "net" }
                     else {
                         val mim = "$morgaet $ulybka"
                         val shagMs = when {
@@ -212,8 +247,8 @@ class Nalozhenie(
                             else -> 200L
                         }
                         if (klyuch != bylo || sost != sostBylo || mim != mimikaBylo || (anim && now - liceMs >= shagMs)) {
-                            risovat(p, sost, now)
-                            razvilka.plashka(bmp)
+                            if (v) { risovatViz(p, sost, now); razvilka.plashka(pvV) }
+                            else { risovat(p, sost, now); razvilka.plashka(bmp) }
                             bylo = klyuch; sostBylo = sost; mimikaBylo = mim; liceMs = now
                         }
                     }
@@ -234,7 +269,9 @@ class Nalozhenie(
                     val ts = vse.filter { !Titry.gost(it.kto) || plitki == null || it.kto !in plitki }
                     val tKlyuch = ts.joinToString("|") { it.kto + it.doMs + it.tekst }
                     if (tKlyuch != titrBylo) {
-                        if (ts.isEmpty()) razvilka.sloy("nc", null) else { titryRisovat(ts); razvilka.sloy("nc", titrBmp) }
+                        if (ts.isEmpty()) razvilka.sloy("nc", null)
+                        else if (v) { viz.titry(titrV, ts); razvilka.sloy("nc", titrV) }
+                        else { titryRisovat(ts); razvilka.sloy("nc", titrBmp) }
                         titrBylo = tKlyuch
                     }
                     val pz = if (plitki == null) emptyList() else vse.filter { Titry.gost(it.kto) && it.kto in plitki }
@@ -258,14 +295,18 @@ class Nalozhenie(
                     val f = Hub.fon
                     if (f == null || !f.plashkaVidna(now)) { if (muzBylo != "net") razvilka.sloy("mz", null); muzBylo = "net" }
                     else if (muzBylo == "net" || now - muzMs >= (if (tesnoIgre) 200L else 100L)) {
-                        muzykaRisovat(f, now); razvilka.sloy("mz", mzBmp); muzBylo = "da"; muzMs = now
+                        if (v) { viz.muzyka(mzV, f, now, nachalo); razvilka.sloy("mz", mzV) }
+                        else { muzykaRisovat(f, now); razvilka.sloy("mz", mzBmp) }
+                        muzBylo = "da"; muzMs = now
                     }
                 }
                 shag("табло") {
-                    val lv = igra.vidna || top.vidna                   // слева вверху: топ-донатор, под ним табло
-                    val gKlyuch = if (lv) "${top.status()} ${igra.status()}" else "net"
+                    val lv = if (v) viz.levyVidno() else igra.vidna || top.vidna   // слева вверху: топ-донатор, под ним табло
+                    val gKlyuch = if (!lv) "net" else if (v) viz.levyKlyuch() else "${top.status()} ${igra.status()}"
                     if (gKlyuch != igraBylo) {
-                        if (!lv) razvilka.sloy("lv", null) else { levyVerh(); razvilka.sloy("lv", igraBmp) }
+                        if (!lv) razvilka.sloy("lv", null)
+                        else if (v) { viz.levyVerh(lvV); razvilka.sloy("lv", lvV) }       // визор: топ, цель, табло
+                        else { levyVerh(); razvilka.sloy("lv", igraBmp) }
                         igraBylo = gKlyuch
                     }
                 }
@@ -277,6 +318,7 @@ class Nalozhenie(
                     // не чаще 4 раз в секунду: в шквал плашка не перерисовывается на каждое сообщение
                     if (chKlyuch != chatBylo && (cs.isEmpty() || now - chatMs >= CHAT_MS)) {
                         if (cs.isEmpty()) { razvilka.sloy("pc", null); chatNaEkrane = 0 }
+                        else if (v) { chatNaEkrane = viz.chat(chatV, cs, now, bystro, razvilka.chatMesto); razvilka.sloy("pc", chatV) }
                         else { chatRisovat(cs, now, bystro); razvilka.sloy("pc", chatBmp) }
                         chatBylo = chKlyuch; chatMs = now
                     }
@@ -288,12 +330,38 @@ class Nalozhenie(
                         if (!itogi.vidny) {
                             razvilka.sloy("vse", null)
                             itogiBmp?.recycle(); itogiBmp = null
+                            if (v && Oformlenie.scena.isEmpty()) viz.osvobodit()      // Плюс в полный рост — прочь
                         } else {
                             val b = itogiBmp ?: Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888).also { itogiBmp = it }
-                            itogiRisovat(b, if (e != null && e.nachaloMs > 0) now - e.nachaloMs else 0L)
+                            val efirMs = if (e != null && e.nachaloMs > 0) now - e.nachaloMs else 0L
+                            if (v) viz.itogi(b, efirMs) { c, r -> plyusKrupno(c, r) } else itogiRisovat(b, efirMs)
                             razvilka.sloy("vse", b)
                         }
                         itogiBylo = iKlyuch
+                    }
+                }
+                shag("сцена") {                                       // сцены во весь кадр — поверх всего; таймер — раз в секунду
+                    val sc = Oformlenie.scena
+                    val ost = Oformlenie.ostalosMs(now)
+                    val tajmer = Oformlenie.doMs != 0L
+                    val sKlyuch = when {
+                        sc.isEmpty() -> "net"
+                        sc == "konec" -> "${Oformlenie.versiya} $sc ${itogi.versiya} ${now / 1000}"
+                        else -> "${Oformlenie.versiya} $sc ${if (tajmer) (ost + 999) / 1000 else 0}"
+                    }
+                    if (sKlyuch != scenaBylo) {
+                        if (sc.isEmpty()) {
+                            razvilka.sloy("sc", null)
+                            scenaBmp?.recycle(); scenaBmp = null
+                            if (scenaBylo.isNotEmpty() && !itogi.vidny) viz.osvobodit()
+                        } else {
+                            val b = scenaBmp ?: Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888).also { scenaBmp = it }
+                            val e = efir()
+                            viz.scena(b, sc, ost, tajmer, Oformlenie.fraza, if (e != null && e.nachaloMs > 0) now - e.nachaloMs else 0L) { c, r ->
+                                plyusKrupno(c, r) }
+                            razvilka.sloy("sc", b)
+                        }
+                        scenaBylo = sKlyuch
                     }
                 }
                 Thread.sleep(if (anim || p.radar || Hub.fon?.plashkaVidna(now) == true) 70 else 200)                // шаг 70 мс; что перерисовать — решают плашки
@@ -319,8 +387,10 @@ class Nalozhenie(
         rabotaet = false
         potok?.join(1000)
         kompas.stop()
-        try { for (u in listOf("pv", "ln", "lv", "nc", "pc", "vse", "lg", "lb", "mz")) razvilka.sloy(u, null) } catch (e: Exception) { }
+        try { for (u in listOf("pv", "ln", "lv", "nc", "pc", "vse", "lg", "lb", "mz", "vv", "vn", "sc")) razvilka.sloy(u, null) } catch (e: Exception) { }
         itogiBmp?.recycle(); itogiBmp = null
+        scenaBmp?.recycle(); scenaBmp = null
+        Oformlenie.sbros()                                            // следующий эфир — без прошлой заставки
         itogi.konecEfira()
         nalet.zapisat()
     }
@@ -346,6 +416,32 @@ class Nalozhenie(
         if (p.lico) lico?.let { golova(it, sost, now) }
         if (p.nalet) poloska(now)
         if (cel.vidna) celPodPlechami()
+    }
+
+    /** Визор: налёт пилюлей слева от головы, бюст Плюса (крупнее, прямые щёки), плашка «PLUS co-host». */
+    private fun risovatViz(p: Pokaz, sost: String, now: Long) {
+        val c = cV
+        c.drawColor(0, PorterDuff.Mode.CLEAR)
+        val dx = Vizor.PV.l
+        val dy = Vizor.PV.t
+        if (p.nalet) viz.nalet(c, dx, dy, now)
+        if (p.lico) licoPryamoe?.let {
+            golova(it, sost, now, c, Vizor.D_LICA, Vizor.LICO_X - dx, Vizor.LICO_Y - dy, Vizor.PV_W.toFloat(), Vizor.PV_H.toFloat())
+            viz.plashkaPlyusa(c, dx, dy, Vizor.LICO_X + Vizor.D_LICA / 2f)
+        }
+    }
+
+    /** Плюс крупно (итоги и сцены визора): тёплое пятно, лицо с прямыми щеками в квадрат [r] и плечи под ним. */
+    private fun plyusKrupno(k: Canvas, r: RectF) {
+        val d = r.width()
+        val m = d / 256f
+        pod.color = Color.argb(40, 242, 194, 48)
+        k.drawCircle(r.centerX(), r.top + d * 0.6f, d * 0.62f, pod)
+        licoPryamoe?.let { k.drawBitmap(it, null, RectF(r.left, r.top, r.left + d, r.top + d), kist) }
+        plechiImg?.let {
+            k.drawBitmap(it, null, RectF(r.left - PLECHI_VBOK * m, r.top + 218.2f * m, r.left + (319 - PLECHI_VBOK) * m,
+                r.top + (218.2f + 80) * m), kist)
+        }
     }
 
     /**
@@ -434,17 +530,20 @@ class Nalozhenie(
         ulybka = !govorit && now in ulybkaS..ulybkaDo
     }
 
-    private fun golova(f: Bitmap, sost: String, now: Long) {
+    /** cv, d, left0, top0, pravo, niz — холст, сторона лица и место (визор); по умолчанию — старая плашка. */
+    private fun golova(f: Bitmap, sost: String, now: Long, cv: Canvas = c, d: Float = D.toFloat(), left0: Float? = null,
+                       top0: Float? = null, pravo: Float = W.toFloat(), niz: Float = H.toFloat()) {
+        val c = cv
         val govorit = sost == "govorit"
 
-        val k = D / 256f
-        val left = W - D - PLECHI_VBOK * k - 4                       // плечи шире головы — не обрезать справа
-        val top = SH + 8f - 26 * k                                     // под строкой налёта: «…» думает — сразу под ней
-        val cx = left + D / 2f
+        val k = d / 256f
+        val left = left0 ?: (W - D - PLECHI_VBOK * k - 4)              // плечи шире головы — не обрезать справа
+        val top = top0 ?: (SH + 8f - 26 * k)                           // под строкой налёта: «…» думает — сразу под ней
+        val cx = left + d / 2f
         val podborodok = top + 221 * k
 
         val levo = left - PLECHI_VBOK * k - 6
-        val sloy = c.saveLayer(levo, 0f, W.toFloat(), H.toFloat(), null)
+        val sloy = c.saveLayer(levo, 0f, pravo, niz, null)
         c.translate(sin(now / 2600.0).toFloat() * 3f, sin(now / 1400.0).toFloat() * 3f)   // покачивание и дыхание
         plechiImg?.let {                                               // плечи модели — под головой, не кивают
             c.drawBitmap(it, null, RectF(left - PLECHI_VBOK * k, top + 218.2f * k,
@@ -455,7 +554,7 @@ class Nalozhenie(
         if (govorit) naklon += sin(now / 150.0).toFloat() * 2.5f      // кивок в речи
         if (sost == "dumaet") naklon += 4f                             // голова чуть набок
         c.rotate(naklon, cx, podborodok)
-        val dst = RectF(left, top, left + D, top + D)
+        val dst = RectF(left, top, left + d, top + d)
         kist.alpha = if (sost == "spit") 110 else 255
         c.drawBitmap(f, null, dst, kist)
         if (sost == "slushaet") svet?.let {
@@ -489,10 +588,10 @@ class Nalozhenie(
         c.restore()
         // строчная развёртка: 2 точки линия, 2 — нет; только на пикселях головы и плеч
         var y = 0f
-        while (y < H) { c.drawRect(levo, y, W.toFloat(), y + 2f, razvyortka); y += 4f }
+        while (y < niz) { c.drawRect(levo, y, pravo, y + 2f, razvyortka); y += 4f }
         c.restoreToCount(sloy)
         if (sost == "dumaet") for (i in 0..2) {                       // «…» над головой, по очереди
-            val m = D / 190f
+            val m = d / 190f
             tochki.alpha = if ((now / 300) % 3 == i.toLong()) 255 else 110
             c.drawCircle(cx + (i - 1) * 22f * m, top + 26 * k, 6f * m, tochki)
         }

@@ -59,7 +59,11 @@ class CaptureService : Service() {
         // во время эфира глазам — столько кадров в секунду (в JPEG — MAX_FPS); 2.3.9: было 4 — лишние два
         // кадра 1920×1080 в секунду видеокарта рисовала впустую; в разговоре — 1 (Nalozhenie)
         const val EYE_FPS = 2
-        private const val KLYUCH = "efir-klyuch"   // ключ эфира — в закрытой папке приложения
+        private const val KLYUCH = "efir-klyuch"   // ключ эфира Twitch — в закрытой папке приложения
+        private const val KLYUCH_KICK = "efir-klyuch-kick"         // 2.7.0: ключи Kick и YouTube — там же, свои файлы
+        private const val KLYUCH_YOUTUBE = "efir-klyuch-youtube"
+        private const val ADRES_KICK = "efir-adres-kick"           // адрес приёма Kick (свой у аккаунта, без ключа)
+        private const val PLOSHCHADKI = "efir-ploshchadki"         // площадки эфира — запомненные: «twitch,kick»
         private const val MIC = "efir-mic"         // громкость голоса в эфире — запомненная
         private const val NASTROYKI = "efir-nastroyki"   // частота и поток эфира — запомненные (2.6.9): «fps kbps»
         private const val NALET = "nalet-sek"      // налёт: всего секунд в эфире
@@ -185,6 +189,7 @@ class CaptureService : Service() {
         val wifi = applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
         val gruppa = wifi?.createMulticastLock("plus-kamera")?.apply { setReferenceCounted(false) }
         Struny.zagruzit(filesDir)                       // основа эфира: игра (Мост 3) или вид шлема
+        Oformlenie.zagruzit(filesDir)                   // стиль плашек эфира: viz | staryj (2.7.0)
         kamera = Kamera(filesDir, { on -> if (on) gruppa?.acquire() else if (gruppa?.isHeld == true) gruppa.release() },
             File(cacheDir, "klip"))
             .also { k ->
@@ -345,10 +350,18 @@ class CaptureService : Service() {
     private val upr = object : FrameServer.EfirUpr {
         override fun start(q: Map<String, String>) = try { naPotoke { efirStart(q) } } catch (e: Exception) { oshibka(e.message ?: "?") }
         override fun stop() = try { naPotoke { efirStop() } } catch (e: Exception) { oshibka(e.message ?: "?") }
-        override fun status() = efir?.status() ?:
+        override fun status() = efir?.status(kluchiJson()) ?:
             "{\"state\":\"off\",\"klyuch\":${File(filesDir, KLYUCH).exists()},\"mic\":${micZapomnen()},\"teplo\":${Hub.teplo}," +
-                "\"fps_vybor\":${nastroykiZapomneny().first},\"tsel_kbps\":${nastroykiZapomneny().second}}"
-        override fun key(k: String) = try { File(filesDir, KLYUCH).writeText(k); true } catch (e: Exception) { false }
+                "\"fps_vybor\":${nastroykiZapomneny().first},\"tsel_kbps\":${nastroykiZapomneny().second}," +
+                "\"kluchi\":${kluchiJson()},\"adres_kick\":${adresKick() != null}," +
+                "\"vybor\":[${ploshchadkiZapomneny().joinToString(",") { "\"$it\"" }}]}"
+        override fun key(k: String) = key("twitch", k)
+        override fun key(pl: String, k: String) = try { klyuchFile(pl).writeText(k); true } catch (e: Exception) { false }
+        override fun adres(pl: String, url: String): String {
+            val a = if (pl == "kick") Ploshchadki.adresKick(url) else null
+            if (a != null) try { File(filesDir, ADRES_KICK).writeText(a) } catch (e: Exception) { return "{\"adres\":false}" }
+            return "{\"adres\":${a != null}}"                   // адрес обратно не повторяем — мало ли что в него вклеили
+        }
         override fun mic(g: Float): String {
             val v = Efir.Opts.glush(g)
             try { File(filesDir, MIC).writeText(v.toString()) } catch (e: Exception) { }
@@ -413,6 +426,23 @@ class CaptureService : Service() {
         (Efir.Opts.fps(z[0].toIntOrNull()) ?: Efir.Opts.FPS) to (Efir.Opts.kbps(z[1].toIntOrNull()) ?: Efir.Opts.KBPS)
     } catch (e: Exception) { Efir.Opts.FPS to Efir.Opts.KBPS }
 
+    /** Файл ключа площадки (twitch — прежний файл, как до 2.7.0). */
+    private fun klyuchFile(pl: String) = File(filesDir, when (pl) { "kick" -> KLYUCH_KICK; "youtube" -> KLYUCH_YOUTUBE; else -> KLYUCH })
+
+    private fun klyuch(pl: String): String? =
+        try { klyuchFile(pl).takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotEmpty() } } catch (e: Exception) { null }
+
+    private fun kluchiJson() = Ploshchadki.kluchiJson { klyuch(it) != null }
+
+    private fun adresKick(): String? = try { Ploshchadki.adresKick(File(filesDir, ADRES_KICK).readText()) } catch (e: Exception) { null }
+
+    /** Запомненный набор площадок (нет файла — Twitch, как было). */
+    private fun ploshchadkiZapomneny(): List<String> =
+        try { Ploshchadki.razobrat(File(filesDir, PLOSHCHADKI).readText().trim()) } catch (e: Exception) { null } ?: listOf("twitch")
+
+    private fun nastroykiPloshchadok(vybor: List<String>, twitchUrl: String) =
+        vybor.map { Ploshchadki.Nastroyka(it, Ploshchadki.adresa(it, twitchUrl, adresKick()), klyuch(it)) }
+
     private fun micZapomnen() = try { File(filesDir, MIC).readText().trim().toFloat() } catch (e: Exception) { Efir.Opts.MIC }
 
     private fun oshibka(msg: String) = "{\"state\":\"off\",\"oshibka\":${FrameServer.json(msg)}}"
@@ -429,11 +459,28 @@ class CaptureService : Service() {
     }
 
     private fun efirStart(q: Map<String, String>): String {
-        efir?.let { return it.status() }
-        val key = File(filesDir, KLYUCH).takeIf { it.exists() }?.readText()?.trim().orEmpty()
-        if (key.isEmpty()) return oshibka("нет ключа эфира: в Termux `kluch twitch`, потом `efir`")
+        // 2.7.0: площадки — из запроса (запомнить) или запомненные
+        val plQ = q["pl"]?.let { try { java.net.URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it } }
+        val plZ = plQ?.let {
+            Ploshchadki.razobrat(it) ?: return efir?.status(kluchiJson())
+                ?: oshibka("площадки: twitch, kick, youtube — не больше ${Ploshchadki.MAKS} сразу")
+        }
+        if (plZ != null) try { File(filesDir, PLOSHCHADKI).writeText(plZ.joinToString(",")) } catch (e: Exception) { }
+        val vybor = plZ ?: ploshchadkiZapomneny()
+        efir?.let { e ->
+            if (plZ != null) {
+                val n = nastroykiPloshchadok(vybor, e.twitchUrl)
+                if (n.any { it.key != null && it.adresa.isNotEmpty() }) {   // ни одного ключа — набор не трогаем
+                    e.ploshchadki(n)                           // эфир идёт — сменить набор на ходу
+                    notifyEfir(vybor, null)
+                }
+            }
+            return e.status(kluchiJson())
+        }
         val (fps0, kbps0) = nastroykiZapomneny()
         val opts = try { Efir.Opts.iz(q, micZapomnen(), fps0, kbps0) } catch (e: Exception) { return oshibka(e.message ?: "настройки эфира") }
+        val nastroyki = nastroykiPloshchadok(vybor, opts.url)
+        if (nastroyki.none { it.key != null && it.adresa.isNotEmpty() }) return oshibka(netKlyucha(vybor))
         val p = projection ?: return oshibka("захват не идёт")
         val d = display ?: return oshibka("захват не идёт")
         val h = handler ?: return oshibka("захват не идёт")
@@ -452,7 +499,7 @@ class CaptureService : Service() {
         reader = r
         razvilka = rz
         Hub.dispetcher = Dispetcher()                    // «тесно» — заново на каждый эфир
-        val e = Efir(p, rz, opts, key)
+        val e = Efir(p, rz, opts, nastroyki)
         try {
             e.start()
         } catch (ex: Exception) {
@@ -469,8 +516,22 @@ class CaptureService : Service() {
         nalozhenie = Nalozhenie(this, nalet, k, rz, { efir }, { pokaz }, titry, cel, itogi, igra, top, chat,
             glaza = { f -> reader?.surface?.let { s -> razvilka?.fps(s, f) } }, gosti = gosti).also { it.start() }
         if (k.tip == "absolute") k.popravka = try { File(filesDir, SEVER).readText().trim().toFloat() } catch (e: Exception) { 0f }
-        getSystemService(NotificationManager::class.java).notify(1, notification("ЭФИР · Twitch · ${opts.w}×${opts.h} · глаза Плюса работают"))
-        return e.status()
+        notifyEfir(vybor, opts)
+        return e.status(kluchiJson())
+    }
+
+    /** Нет ни одного ключа (или адреса Kick) у выбранных площадок — что сделать. */
+    private fun netKlyucha(vybor: List<String>): String =
+        if (vybor == listOf("twitch")) "нет ключа эфира: в Termux `kluch twitch`, потом `efir`"
+        else "нет ключа эфира для " + vybor.joinToString(", ") + ": в Termux `kluch " + vybor.first() + "`" +
+            (if ("kick" in vybor && adresKick() == null) " (для Kick — и адрес: kluch kick с адресом в буфере)" else "") + ", потом `efir`"
+
+    private var efirRazmer = ""
+
+    private fun notifyEfir(vybor: List<String>, opts: Efir.Opts?) {
+        if (opts != null) efirRazmer = "${opts.w}×${opts.h}"
+        val pl = vybor.joinToString(" + ") { Ploshchadki.NAZVANIE[it] ?: it }
+        getSystemService(NotificationManager::class.java).notify(1, notification("ЭФИР · $pl · $efirRazmer · глаза Плюса работают"))
     }
 
     private fun efirStop(): String {

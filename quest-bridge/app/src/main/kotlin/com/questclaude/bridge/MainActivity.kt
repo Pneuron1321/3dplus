@@ -26,6 +26,7 @@ class MainActivity : Activity() {
 
     private val requestCapture = 1
     private val requestPerms = 2
+    private val requestKlipy = 3
     private var allInOne = false
     private var noEyes = false        // «без захвата»: идёт стрим, свой захват оборвал бы BeamXR
     private var sleepStatus = ""
@@ -33,6 +34,8 @@ class MainActivity : Activity() {
     @Volatile private var efirStatus = ""
     @Volatile private var kameraStatus = ""
     private var kameraDo = 0L                  // адрес с ключом на экране — до этого времени
+    @Volatile private var klipyStatus = ""
+    private var klipyPokazDo = 0L              // клипы во время эфира: адрес с ключом показан до этого времени
     private lateinit var efirBtn: Button
     private lateinit var efir720: CheckBox
     private lateinit var status: TextView
@@ -41,7 +44,7 @@ class MainActivity : Activity() {
         override fun run() {
             // ключ камеры — только без эфира: экран приложения попадает в кадр
             if (kameraStatus.startsWith("КАМЕРА ТЕЛЕФОНА") && System.currentTimeMillis() > kameraDo) kameraStatus = ""
-            status.text = listOf(kameraStatus, efirStatus, Hub.karta?.kratko().orEmpty(), CaptureService.status, EarService.status, sleepStatus, plusStatus, Shlem.termuxReply)
+            status.text = listOf(klipyEkran(), kameraStatus, efirStatus, Hub.karta?.kratko().orEmpty(), CaptureService.status, EarService.status, sleepStatus, plusStatus, Shlem.termuxReply)
                 .filter { it.isNotEmpty() }.joinToString("\n\n")
             efirBtn.text = if (efirIdyot()) "ЭФИР: закончить" else "ЭФИР: начать (Twitch)"
             ui.postDelayed(this, 1000)
@@ -72,6 +75,9 @@ class MainActivity : Activity() {
                 setOnLongClickListener { kameraNovyKlyuch(); true }
             })
             addView(button("КЛИП КАМЕРЫ: сохранить последние 2 минуты") { klipKnopka() })
+            addView(button("КЛИПЫ: открыть на айфоне (15 минут)") { klipyKnopka() }.apply {
+                setOnLongClickListener { Hub.klipy?.zakrytVse(); klipyStatus = "Клипы: страница закрыта, ключ больше не работает."; true }
+            })
             addView(button("Уши и Плюс, без захвата (идёт стрим)") { allInOne = true; noEyes = true; askPermissions() })
             addView(button("Начать захват") { askCapture() })
             addView(button("Остановить захват") { stopService(Intent(this@MainActivity, CaptureService::class.java)) })
@@ -153,6 +159,45 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Клипы (2.7.0): страница со списком клипов «Фильмы/Plus» на 15 минут — то же, что `klipy` у Плюса.
+     * Адрес с одноразовым ключом — только здесь; во время эфира экран в кадре — адрес скрыт, кнопка ещё раз
+     * показывает его на 20 секунд. Долгое нажатие — закрыть. Чтобы видеть и клипы игры (Мост 3), нужно «Видео».
+     */
+    private fun klipyKnopka() {
+        val k = Hub.klipy
+        if (k == null) { klipyStatus = "Клипы: сначала «ВСЁ СРАЗУ» (или уши)."; return }
+        if (k.otkryta && efirIdyot()) { klipyPokazDo = System.currentTimeMillis() + 20_000; return }
+        if (checkSelfPermission(KlipyGalereya.RAZRESHENIE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(KlipyGalereya.RAZRESHENIE), requestKlipy)   // ответ — клипы откроются всё равно
+            return
+        }
+        klipyOtkryt(k)
+    }
+
+    private fun klipyOtkryt(k: KlipyStranica) {
+        klipyStatus = "Клипы: открываю…"
+        thread(isDaemon = true) {
+            val j = k.otkryt()
+            klipyStatus = Regex("\"oshibka\":\"([^\"]+)").find(j)?.let { "Клипы: ${it.groupValues[1]}" } ?: ""
+        }
+    }
+
+    /** Строка клипов для экрана: адрес с ключом — только без эфира (или 20 с по кнопке). */
+    private fun klipyEkran(): String {
+        val k = Hub.klipy
+        if (k == null || !k.otkryta) return klipyStatus
+        val s = k.ostalos
+        val vremya = "ещё %d:%02d".format(s / 60, s % 60)
+        val skryt = efirIdyot() && System.currentTimeMillis() > klipyPokazDo
+        val a = (if (skryt) k.adresSkryt() else k.adres())?.removePrefix("http://") ?: return "Клипы: шлем не в Wi-Fi."
+        val igra = if (!k.igraVidna) "\nКлипы игры не видны — нажми «КЛИПЫ» и «Разрешить» (доступ к видео)." else ""
+        return if (skryt) "КЛИПЫ открыты ($vremya), но идёт эфир — экран в кадре, ключ скрыт:\n$a\n" +
+            "Показать на 20 секунд — нажми «КЛИПЫ» ещё раз (убедись, что зрители не видят)."
+        else "КЛИПЫ — на айфоне в Safari открой:\n$a\n($vremya; адрес с ключом — не показывай и не пересылай. " +
+            "Закрыть — долгое нажатие «КЛИПЫ».)$igra"
+    }
+
     private fun kameraNovyKlyuch() {
         val k = CaptureService.kamera ?: return
         k.novyKlyuch()
@@ -177,6 +222,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == requestPerms) afterPermissions()
+        if (requestCode == requestKlipy) Hub.klipy?.let { klipyOtkryt(it) }
     }
 
     private fun afterPermissions() {

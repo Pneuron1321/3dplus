@@ -44,6 +44,9 @@ import java.util.concurrent.TimeUnit
  * Нижние субтитры "nc" — по центру между розой и окном камеры. Картинка эфира гостям — ещё один
  * выход (маленький кодировщик Prevyu) со всеми слоями.
  *
+ * 2.7.0 (оформление «Визор», Oformlenie.viz): места слоёв — по раскладке Vizor; скобы и линия ("vv", "vn") — под
+ * всеми, сцена ("sc") — поверх всего; окно камеры — в золотых скобах вместо белой рамки (четыре угла заливкой).
+ *
  * 2.6.7 (Струны, этап 1): основа кадра эфира — игра с карты из Моста 3 ([igra]: он рисует в эту поверхность
  * 1080p, уже с картинкой и суперсэмплингом), а не вид шлема. Только для выходов со слоями (эфир, превью гостям);
  * глаза Плюса по-прежнему смотрят захват экрана. Игра молчит дольше секунды — эфир сам снова на виде шлема.
@@ -105,7 +108,7 @@ class Razvilka(private val w: Int, private val h: Int) {
     /**
      * Плашки поверх эфира: "pv" — правый верх (лицо и налёт), "ln" — левый низ (роза ветров),
      * "lv" — левый верх (топ-донатор и табло соведущего), "nc" — низ по центру (субтитры), "pc" — чат справа,
-     * "vse" — весь кадр (итоги).
+     * "vse" — весь кадр (итоги); визор (2.7.0): "mz" — «сейчас играет», "vv", "vn" — скобы и линия, "sc" — сцена.
      */
     private class Sloy(val tex: Int) { var w = 0; var h = 0 }
     private val sloi = linkedMapOf<String, Sloy>()
@@ -487,10 +490,12 @@ class Razvilka(private val w: Int, private val h: Int) {
             } else if (o.sloi && igra) kvadrat(itex, imtx)
             else kvadrat(tex, mtx)
             if (o.sloi) {
+                for (u in RAMKA) sloi[u]?.let { plashkaNa(o, u, it) }      // скобы визора — под всем
                 okno(o)
                 plitkiNa(o)
-                for ((ugol, sl) in sloi) if (ugol != "vse") plashkaNa(o, ugol, sl)
+                for ((ugol, sl) in sloi) if (ugol !in POZZHE) plashkaNa(o, ugol, sl)
                 sloi["vse"]?.let { plashkaNa(o, "vse", it) }               // итоги вечера — поверх всего
+                sloi["sc"]?.let { plashkaNa(o, "sc", it) }                 // сцена визора — и поверх итогов
             }
             if (o.stamp) EGLExt.eglPresentationTimeANDROID(display, o.egl, ts)
             EGL14.eglSwapBuffers(display, o.egl)
@@ -526,6 +531,8 @@ class Razvilka(private val w: Int, private val h: Int) {
         val m = o.h / 100
         var x = if (ugol.startsWith("l")) m else o.w - w - m
         var y = if (ugol.endsWith("n")) m else o.h - h - m
+        if (ugol == "sc") { x = 0; y = 0; w = o.w; h = o.h }
+        else if (Oformlenie.viz) { if (!mestoViz(o, ugol, sl, w, h)) return; return risovatSloy(x0Viz, y0Viz, w, h, sl) }
         when (ugol) {
             "nc" -> { x = nizCentr(o, w) - w / 2; y = o.h * 5 / 100 }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }   // слои гостей: от точки (0; SLOY_Y) 1080p
@@ -548,6 +555,63 @@ class Razvilka(private val w: Int, private val h: Int) {
                 GLES20.glScissor(x, niz, w, verh - niz)
             }
         }
+        risovatSloy(x, y, w, h, sl)
+    }
+
+    private var x0Viz = 0
+    private var y0Viz = 0
+
+    /**
+     * Место слоя в стиле «Визор» (Vizor, точки 1080p от верха → GL от низа): в x0Viz, y0Viz. false — не рисовать
+     * (чату нет места). Чат — правый столбец между плашкой Плюса и «сейчас играет»/окном камеры.
+     */
+    private fun mestoViz(o: Out, ugol: String, sl: Sloy, w: Int, h: Int): Boolean {
+        val s = o.h / 1080f
+        fun gl(verh: Float) = o.h - (verh * s).toInt() - h            // верх слоя (1080p) → низ в GL
+        var x = (Vizor.STOLB_X * s).toInt()
+        var y: Int
+        when (ugol) {
+            "vv" -> { x = 0; y = gl(0f) }
+            "vn" -> { x = 0; y = 0 }
+            "pv" -> { x = (Vizor.PV.l * s).toInt(); y = gl(Vizor.PV.t) }
+            "lv" -> { x = (Vizor.LV.l * s).toInt(); y = gl(Vizor.LV.t) }
+            "ln" -> { x = (Vizor.ROZA.l * s).toInt(); y = gl(Vizor.ROZA.t) }
+            "nc" -> { x = (titryLevo(o) * s).toInt(); y = gl(Vizor.TITRY_VERH) }
+            "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
+            "vse" -> { x = 0; y = 0 }
+            "mz" -> {                        // над окном камеры справа внизу; без камеры — в самом низу столбца
+                val zazor = (Vizor.ZAZOR * s).toInt()
+                y = kameraVerh(o)?.let { it + zazor } ?: (o.h - (Vizor.NIZ * s).toInt())
+            }
+            "pc" -> {
+                val zazor = (Vizor.ZAZOR * s).toInt()
+                val verh = o.h - (Vizor.CHAT_VERH * s).toInt()
+                val mz = sloi["mz"]?.takeIf { it.w > 0 }?.let { (it.h * s).toInt() + zazor } ?: 0
+                val niz = (kameraVerh(o)?.let { it + zazor } ?: (o.h - (Vizor.NIZ * s).toInt())) + mz
+                chatMesto = ((verh - niz) / s).toInt().coerceIn(0, Vizor.CH)
+                if (verh - niz < (60 * s).toInt()) return false
+                y = niz
+                GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+                GLES20.glScissor(x, niz, w, verh - niz)
+            }
+            else -> { x = if (ugol.startsWith("l")) o.h / 100 else o.w - w - o.h / 100; y = if (ugol.endsWith("n")) o.h / 100 else o.h - h - o.h / 100 }
+        }
+        x0Viz = x; y0Viz = y
+        return true
+    }
+
+    /** Левый край субтитров визора (1080p): между розой и окном камеры внизу справа. */
+    private fun titryLevo(o: Out): Float {
+        val v = vid
+        var pravo = Vizor.PRAVO
+        if (kameraVidna() && v.rezhim == "ugol" && v.gde == "pn") {
+            val r = Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v)
+            pravo = minOf(pravo, r[0] * 1080f / o.h)
+        }
+        return Vizor.titryX(pravo)
+    }
+
+    private fun risovatSloy(x: Int, y: Int, w: Int, h: Int, sl: Sloy) {
         GLES20.glViewport(x, y, w, h)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)   // Bitmap — с умноженной альфой
@@ -728,7 +792,15 @@ class Razvilka(private val w: Int, private val h: Int) {
         val v = vid
         val ar = Okno.proporcii(kw, kh, v.povorot)
         val r = Okno.mesto(o.w, o.h, ar, v)
-        if (v.rezhim != "krupno") {
+        if (v.rezhim != "krupno" && Oformlenie.viz) {        // визор: золотые скобы по углам окна
+            GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+            GLES20.glClearColor(0xF2 / 255f, 0xC2 / 255f, 0x30 / 255f, 1f)
+            for (p in Vizor.skobyKamery(r[0], r[1], r[2], r[3], o.h / 1080f)) {
+                GLES20.glScissor(p[0], p[1], p[2], p[3])
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            }
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+        } else if (v.rezhim != "krupno") {
             val b = maxOf(2, o.h / 360)                     // рамка
             GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
             GLES20.glScissor(r[0] - b, r[1] - b, r[2] + 2 * b, r[3] + 2 * b)
@@ -799,6 +871,9 @@ class Razvilka(private val w: Int, private val h: Int) {
 
     companion object {
         private const val EGL_RECORDABLE_ANDROID = 0x3142
+        /** Слои скоб визора — рисуются первыми; POZZHE — не в общем проходе (свой черёд). */
+        private val RAMKA = listOf("vv", "vn")
+        private val POZZHE = setOf("vv", "vn", "vse", "sc")
         /** Копия картинки как есть (с умноженной альфой) — в буфер ящика. */
         private val KOPIYA = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC) }
         private val VERTEX = """

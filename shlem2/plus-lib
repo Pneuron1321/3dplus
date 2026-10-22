@@ -162,6 +162,56 @@ def golos_kuda():
         return None
 
 
+# 2.7.0: мульти-эфир — площадки, у каждой свой ключ (kluch twitch|kick|youtube) и своя строка в статусе
+NAZV = {'twitch': 'Twitch', 'kick': 'Kick', 'youtube': 'YouTube'}
+PL_IMENA = {'twitch': 'twitch', 'tw': 'twitch', 'твич': 'twitch', 'твитч': 'twitch', 'kick': 'kick', 'кик': 'kick',
+            'youtube': 'youtube', 'yt': 'youtube', 'ютуб': 'youtube'}
+SOST = {'idyot': 'идёт', 'podklyuchayus': 'подключаюсь', 'obryv': 'обрыв, переподключаюсь',
+        'net_klyucha': 'не идёт', 'vykl': 'выключена'}
+
+
+def efir_kluch_put(pl):
+    """Файл ключа площадки (кладёт kluch; секрет — только читаем и шлём телом запроса)."""
+    return os.environ.get({'twitch': 'EFIR_KEY', 'kick': 'EFIR_KEY_KICK', 'youtube': 'EFIR_KEY_YOUTUBE'}[pl]) \
+        or '/root/.%s-key' % pl
+
+
+def efir_pl(slova):
+    """«twitch,kick» / «твич и кик» → ['twitch', 'kick']; None — чужое имя, пусто или больше трёх."""
+    t = [x for x in re.split(r'[,\s+;]+', ' '.join(slova).lower()) if x and x != 'и']
+    pl = []
+    for x in t:
+        if x not in PL_IMENA:
+            return None
+        if PL_IMENA[x] not in pl:
+            pl.append(PL_IMENA[x])
+    return pl if 0 < len(pl) <= 3 else None
+
+
+def efir_ploshchadki(d):
+    """Строка по каждой площадке (мост 2.7.0) и совет, если сеть не успевает."""
+    out = []
+    for p in d.get('ploshchadki') or []:
+        imya = NAZV.get(p.get('pl'), p.get('pl'))
+        s = p.get('sostoyanie')
+        if s == 'idyot':
+            t = '%s: идёт %s с, %s кбит/с, потерь %s, попыток %s' % (imya, p.get('sec'), p.get('kbps'), p.get('poteri'),
+                                                                  p.get('popytki'))
+            if p.get('zapasnoy'):
+                t += ' (запасной адрес)'
+        else:
+            t = '%s: %s' % (imya, SOST.get(s, s))
+            if p.get('oshibka'):
+                t += ' — ' + p['oshibka']
+            if s != 'net_klyucha':
+                t += ', попыток %s, потерь %s' % (p.get('popytki'), p.get('poteri'))
+        out.append(t + '.')
+    if d.get('tesno_set'):
+        out.append('Внимание, сеть: %s. Эфир идёт через мобильный интернет айфона — каждая площадка берёт '
+                   'полный поток.' % (d.get('sovet_set') or 'отправка не успевает'))
+    return out
+
+
 def efir_skazat(U):
     r = zapros(U, '/efir', 5)
     if r is None:
@@ -193,21 +243,95 @@ def efir_skazat(U):
         g = golos_kuda()
         if g:
             out.append(g)
+        out += efir_ploshchadki(d)
     elif s == 'podklyuchayus':
-        out.append('Эфир: подключаюсь к Twitch… ' + o)
+        kuda = ', '.join(NAZV.get(x, x) for x in d.get('vybor') or ['twitch'])
+        out.append('Эфир: подключаюсь к %s… ' % kuda + o)
+        out += efir_ploshchadki(d)
     elif s == 'obryv':
         out.append('Эфир: обрыв, переподключаюсь… ' + o)
+        out += efir_ploshchadki(d)
     else:
         out.append('Эфир выключен.' + (' ' + o if o else ''))
+        if isinstance(d.get('kluchi'), dict):            # мост 2.7.0: какие площадки запомнены и у каких есть ключ
+            k = d['kluchi']
+            out.append('Площадки: %s (запомнены); ключи: %s.' % (
+                ', '.join(NAZV.get(x, x) for x in d.get('vybor') or ['twitch']),
+                ', '.join('%s %s' % (NAZV[x], 'есть' if k.get(x) else 'нет') for x in ('twitch', 'kick', 'youtube'))))
     return 0, out
 
 
+def efir_pusk(U, pl, c720):
+    """Начать эфир (или сменить площадки на ходу): ключи площадок — приложению телом запроса, нигде не печатаются.
+    pl — площадки из `efir na …` (None — запомненные мостом)."""
+    r = zapros(U, '/status', 3)
+    if r is None:
+        return 1, [MOLCHIT]
+    if '"capturing":true' not in r[1]:
+        return 1, ['Захват не идёт: в Quest Claude Bridge 2 — «Начать захват» → «Разрешить».']
+    r = zapros(U, '/efir', 5)
+    d = (razobrat(r[1]) or {}) if r else {}
+    mnogo = isinstance(d.get('kluchi'), dict)          # мост 2.7.0 умеет площадки
+    vybor = pl or (d.get('vybor') if mnogo else None) or ['twitch']
+    if not mnogo and vybor != ['twitch']:
+        return 1, ['Эфир на Kick и YouTube — с мостом 2.7.0: обнови приложение (пока только Twitch: efir na twitch).']
+    out, est = [], []
+    for p in vybor:
+        put = efir_kluch_put(p)
+        try:
+            klyuch = open(put, 'rb').read() if os.path.getsize(put) > 0 else b''
+        except OSError:
+            klyuch = b''
+        if not klyuch:
+            out.append('Нет ключа %s: в Ubuntu Плюса — kluch %s.' % (NAZV[p], p))
+            continue
+        r = zapros(U, '/efir/key' + ('' if p == 'twitch' else '?pl=' + p), 5, telo=klyuch)
+        del klyuch
+        if r is None:                                    # приложение замолчало (обновляется, выгружено) — ключ ни при чём
+            return 1, [MOLCHIT]
+        if '"key":true' not in r[1]:
+            out.append('Приложение не приняло ключ (нужно приложение 2.1; ключ не похож на ключ Twitch?).' if p == 'twitch'
+                       else 'Приложение не приняло ключ %s (не похож на ключ?).' % NAZV[p])
+            continue
+        if p == 'kick':                                  # адрес приёма Kick — свой у аккаунта (не секрет, но и не печатаем)
+            try:
+                adr = open(os.environ.get('EFIR_ADRES_KICK') or '/root/.kick-url').read().strip()
+            except OSError:
+                adr = ''
+            if adr:
+                r = zapros(U, '/efir/adres?pl=kick&url=' + urllib.parse.quote(adr, safe=''), 5)
+                if not r or '"adres":true' not in r[1]:
+                    out.append('Адрес Kick не принят: скопируй на странице Kick «Stream URL» (rtmps://…/app) и kluch kick.')
+                    continue
+            elif not d.get('adres_kick'):
+                out.append('Нет адреса Kick: скопируй на странице Kick «Stream URL» и kluch kick (ключ — отдельно, тоже kluch kick).')
+                continue
+        est.append(p)
+    if not est:
+        return 1, out
+    q = (['size=720&kbps=4500'] if c720 else []) + (['pl=' + ','.join(pl)] if pl else [])
+    zapros(U, '/efir/start' + ('?' + '&'.join(q) if q else ''), 20)
+    for _ in range(12):
+        time.sleep(float(os.environ.get('EFIR_SHAG') or 1))
+        r = zapros(U, '/efir', 3)
+        d2 = razobrat(r[1]) if r else None
+        if not d2:
+            continue
+        if d2.get('state') == 'off':
+            break
+        if d2.get('state') == 'efir' and all(x.get('sostoyanie') != 'podklyuchayus'
+                                              for x in d2.get('ploshchadki') or [] if x.get('est_kluch')):
+            break
+    k, o2 = efir_skazat(U)
+    return k, out + o2
+
+
 def efir(a):
-    """efir [720|1080] — начать; efir stop|status; efir mic 4|+25%|-20%. Ключ — из /root/.twitch-key
-    (кладёт `kluch twitch`): уходит приложению телом запроса внутри шлема и нигде не печатается."""
+    """efir [720|1080] — начать; efir na twitch,kick — площадки (запомнить и начать / сменить на ходу);
+    efir stop|status; efir mic 4|+25%|-20%. Ключи — из /root/.twitch-key, /root/.kick-key, /root/.youtube-key
+    (кладёт `kluch twitch|kick|youtube`): уходят приложению телом запроса внутри шлема и нигде не печатаются."""
     a = list(a)
     U = os.environ.get('EFIR_URL') or APP
-    KEY = os.environ.get('EFIR_KEY') or '/root/.twitch-key'
     c = a[0] if a else ''
     if c == 'stop':
         zapros(U, '/efir/stop', 15)
@@ -267,31 +391,26 @@ def efir(a):
             r = zapros(U, '/efir/nastroyki?fps=' + fps, 5)
             if r and r[0] == 200 and '"state":"efir"' in r[1]:
                 return 0, ['Эфир идёт — теперь %s кадров в секунду.' % fps], None
-        c = '720' if '720' in a else ''
-        r = zapros(U, '/status', 3)
+        k, out = efir_pusk(U, None, '720' in a)
+    elif c == 'na':                                     # 2.7.0: «эфир на твич и кик» — запомнить набор и начать / сменить
+        pl = efir_pl([x for x in a[1:] if x not in ('720', '1080')])
+        if not pl:
+            return 1, ['efir na twitch,kick — площадки через запятую: twitch, kick, youtube (не больше трёх).'], None
+        k, out = efir_pusk(U, pl, '720' in a[1:])
+    elif c in ('dobav', 'ubrat'):                       # «добавь ютуб», «убери кик» — от тех, что сейчас
+        pl = efir_pl(a[1:])
+        if not pl:
+            return 1, ['efir dobav youtube — добавить площадку, efir ubrat kick — убрать (twitch, kick, youtube).'], None
+        r = zapros(U, '/efir', 5)
         if r is None:
             return 1, [MOLCHIT], None
-        if '"capturing":true' not in r[1]:
-            return 1, ['Захват не идёт: в Quest Claude Bridge 2 — «Начать захват» → «Разрешить».'], None
-        try:
-            klyuch = open(KEY, 'rb').read() if os.path.getsize(KEY) > 0 else b''
-        except OSError:
-            klyuch = b''
-        if not klyuch:
-            return 1, ['Нет ключа Twitch: в Ubuntu Плюса — kluch twitch.'], None
-        r = zapros(U, '/efir/key', 5, telo=klyuch)
-        del klyuch
-        if r is None:                                    # приложение замолчало (обновляется, выгружено) — ключ ни при чём
-            return 1, [MOLCHIT], None
-        if '"key":true' not in r[1]:
-            return 1, ['Приложение не приняло ключ (нужно приложение 2.1; ключ не похож на ключ Twitch?).'], None
-        zapros(U, '/efir/start' + ('?size=720&kbps=4500' if c == '720' else ''), 20)
-        for _ in range(12):
-            time.sleep(float(os.environ.get('EFIR_SHAG') or 1))
-            r = zapros(U, '/efir', 3)
-            if r and ('"state":"efir"' in r[1] or '"state":"off"' in r[1]):
-                break
-        k, out = efir_skazat(U)
+        sejchas = (razobrat(r[1]) or {}).get('vybor') or ['twitch']
+        novye = [x for x in sejchas if x not in pl] if c == 'ubrat' else sejchas + [x for x in pl if x not in sejchas]
+        if not novye:
+            return 1, ['Последнюю площадку не убираю — закончить эфир: efir stop.'], None
+        if len(novye) > 3:
+            return 1, ['Больше трёх площадок сразу нельзя.'], None
+        k, out = efir_pusk(U, novye, False)
     elif c in ('igra', 'shlem', 'osnova', 'avto'):              # Струны (2.6.7): основа эфира — игра с Моста 3 или вид шлема
         r = zapros(U, '/efir/osnova' + ('' if c == 'osnova' else '?v=' + c), 5)
         if r is None:
@@ -312,7 +431,8 @@ def efir(a):
             out = ['Основа эфира — вид шлема (как раньше).']
         return 0, out, None
     else:
-        return 0, ['efir — начать эфир, efir 720 — полегче, efir stop — закончить, efir status — как идёт; '
+        return 0, ['efir — начать эфир (на запомненные площадки), efir na twitch,kick — площадки (twitch, kick, youtube; '
+                   'запомнятся; идёт — сменятся на ходу), efir dobav youtube / efir ubrat kick, efir 720 — полегче, efir stop — закончить, efir status — как идёт; '
                    'efir 60|50|30 — частота (запомнится), efir potok 10 — поток в Мбит/с; '
                    'efir avto — игра из Моста 3, когда он показывает (по умолчанию), efir igra — всегда игра, efir shlem — вид шлема.'], None
     return k, out, None
@@ -393,7 +513,7 @@ def kamera(a):
     if c in ('klip', 'clip'):
         # 2.5.9: последние N секунд видео телефона как пришли (полное качество) — MP4 в «Фильмы/Plus»
         if a2 and not a2.isdigit():
-            return 1, ['kamera klip 60 — последние 60 секунд (до 120; без числа — 2 минуты).'], None
+            return 1, ['kamera klip 60 — последние 60 секунд (до 150; без числа — 2,5 минуты).'], None
         r = zapros(U, '/kamera/klip' + ('?sek=' + a2 if a2 else ''), 60)
         if r is None:
             return 1, [MOLCHIT], None
@@ -766,8 +886,8 @@ def most3(a):
             if r is None:
                 return 1, [MOST3_MOLCHIT], None
             return 0, ['Мост 3: запись игры ' + ('включена.' if a2 == 'vkl' else 'выключена.')], None
-        sek = a2 if a2.isdigit() else '120'
-        r = zapros(U, '/klip?sek=' + sek, 120)
+        sek = a2 if a2.isdigit() else '150'
+        r = zapros(U, '/klip?sek=' + sek, 150)
         if r is None:
             return 1, [MOST3_MOLCHIT], None
         d = razobrat(r[1]) or {}
@@ -826,13 +946,136 @@ def most3(a):
                'Картинка — karta kartinka (сама идёт в Мост 3, если он открыт).'], None
 
 
-INSTRUMENTY = {'kadr': kadr, 'efir': efir, 'kamera': kamera, 'karta': karta, 'most3': most3}
+# ---------- klipy: страница клипов для айфона (2.7.0) ----------
+
+def klipy(a):
+    """klipy — открыть страницу клипов на 15 минут; klipy zakryt; klipy status. Адрес с ключом — только на
+    экране моста: приложение его сюда не отдаёт, и здесь его не печатаем."""
+    U = os.environ.get('KLIPY_URL') or APP
+    c = a[0] if a else ''
+    put = {'': '/klipy/otkryt', 'otkryt': '/klipy/otkryt', 'start': '/klipy/otkryt', 'zakryt': '/klipy/zakryt',
+           'stop': '/klipy/zakryt', 'status': '/klipy', 's': '/klipy'}.get(c)
+    if put is None:
+        return 1, ['klipy — открыть клипы на айфоне (15 минут); klipy zakryt — закрыть; klipy status.'], None
+    r = zapros(U, put, 10)
+    if r is None:
+        return 1, [MOLCHIT], None
+    if r[0] == 404:
+        return 1, ['Клипы: это приложение ещё не умеет страницу клипов — нужна версия 2.7.0.'], None
+    d = razobrat(r[1]) or {}
+    if d.get('oshibka'):
+        return 1, ['Клипы: ' + str(d['oshibka'])], None
+    if put == '/klipy/zakryt':
+        return 0, ['Страница клипов закрыта: старый адрес больше не открывается.'], None
+    n = d.get('klipov')
+    skolko = (' Клипов: %d.' % n) if isinstance(n, int) and n >= 0 else ''
+    igra = '' if d.get('igra_vidna', True) else (' Клипы игры (Мост 3) пока не видны: в приложении 2 нажми «КЛИПЫ» '
+                                                 'и «Разрешить» (доступ к видео).')
+    if not d.get('otkryta'):
+        return 0, ['Страница клипов закрыта%s. Открыть — klipy.' % (
+            ' (кто-то подбирал адрес — закрыл её сам)' if d.get('podbor') else '') + skolko], None
+    sek = int(d.get('sek') or 0)
+    kak = ('http://%s:%s/k/…/' % (d['ip'], d.get('port'))) if d.get('ip') else 'адрес'
+    if put == '/klipy':
+        return 0, ['Страница клипов открыта, ещё %d мин %02d с.%s Адрес (%s) — на экране моста.' % (
+            sek // 60, sek % 60, skolko, kak) + igra], None
+    return 0, ['Страница клипов открыта на %d минут.%s На айфоне в Safari открой адрес с экрана моста (приложение 2): '
+               '%s — ключ в нём только на экране, вслух его не называй.' % ((sek + 59) // 60, skolko, kak) + igra], None
+
+
+# ---------- scena, vid: оформление эфира «Визор» (мост 2.7.0) ----------
+
+SCENY = {'skoro': '«Скоро начнём»', 'otoshyol': '«Отошёл» (шторка, «Саша скоро вернётся»)', 'konec': '«Конец эфира» (итоги)'}
+SCENA_PODSKAZKA = ('scena skoro 5 [фраза] — заставка «скоро начнём» с таймером на 5 минут; scena otoshyol [3] — шторка '
+                   '«Саша скоро вернётся»; scena konec — итоги «конец эфира»; scena net — убрать; scena — какая сейчас.')
+
+
+def scena_skazat(d):
+    s = d.get('scena') or 'net'
+    if s == 'net':
+        return 'Сцены нет — в кадре игра.'
+    t = SCENY.get(s, s)
+    if d.get('tajmer'):
+        o = int(d.get('ostalos_sek') or 0)
+        t += ', таймер %d:%02d' % (o // 60, o % 60) if o else ', таймер дошёл до нуля'
+    if d.get('fraza'):
+        t += ', фраза «%s»' % d['fraza']
+    return 'Сцена во весь кадр эфира: %s. Убрать — scena net.' % t
+
+
+def scena(a):
+    """scena skoro [минут] [фраза…] | otoshyol [минут] | konec | net — сцена во весь кадр эфира поверх игры (2.7.0);
+    scena — какая сейчас. Живёт до scena net или конца эфира; поставленная до эфира — встанет с его началом."""
+    a = list(a)
+    U = os.environ.get('VIZOR_URL') or APP
+    c = a[0] if a else ''
+    if c in ('', 'status', 's'):
+        put = '/efir/scena'
+    elif c in ('net', 'ubrat', 'stop'):
+        put = '/efir/scena?s=net'
+    elif c in SCENY:
+        q = 's=' + c
+        ost = a[1:]
+        if c != 'konec':
+            if ost and re.fullmatch(r'\d{1,4}(?:[.,]\d+)?', ost[0]):
+                q += '&min=' + ost[0].replace(',', '.')
+                ost = ost[1:]
+            if ost:
+                q += '&t=' + urllib.parse.quote(' '.join(ost)[:140])
+        put = '/efir/scena?' + q
+    else:
+        return 1, [SCENA_PODSKAZKA], None
+    r = zapros(U, put, 5)
+    if r is None:
+        return 1, [MOLCHIT], None
+    if r[0] == 404:
+        return 1, ['Сцены: нужен мост 2.7.0 (обнови приложение).'], None
+    d = razobrat(r[1]) or {}
+    if d.get('oshibka'):
+        return 1, ['Сцена: %s. %s' % (d['oshibka'], SCENA_PODSKAZKA)], None
+    out = [scena_skazat(d)]
+    if (d.get('scena') or 'net') != 'net':
+        e = zapros(U, '/efir', 3)
+        if e and (razobrat(e[1]) or {}).get('state') != 'efir':
+            out.append('Эфир сейчас не идёт — сцена встанет в кадр с его началом.')
+        if d.get('stil') == 'staryj':
+            out.append('Стиль плашек — старый; сцены всё равно в стиле визора.')
+    return 0, out, None
+
+
+def vid(a):
+    """vid stil viz|staryj — стиль плашек эфира: визор (золотые скобы, карточки, Unbounded и Manrope) или старый
+    (как до 2.7.0); мост запоминает. vid — какой сейчас."""
+    a = list(a)
+    U = os.environ.get('VIZOR_URL') or APP
+    if not a or a[0] in ('status', 's') or a == ['stil']:
+        put = '/efir/stil'
+    elif a[0] == 'stil' and len(a) > 1 and a[1] in ('viz', 'staryj'):
+        put = '/efir/stil?v=' + a[1]
+    else:
+        return 1, ['vid stil viz — стиль «Визор» (по умолчанию); vid stil staryj — старые плашки; vid — какой сейчас.'], None
+    r = zapros(U, put, 5)
+    if r is None:
+        return 1, [MOLCHIT], None
+    if r[0] == 404:
+        return 1, ['Стиль эфира: нужен мост 2.7.0 (обнови приложение).'], None
+    d = razobrat(r[1]) or {}
+    if d.get('stil') == 'viz':
+        return 0, ['Стиль эфира — визор: золотые скобы по углам, карточки графит с золотом, шрифты Unbounded и Manrope '
+                   '(мост запомнил).'], None
+    if d.get('stil') == 'staryj':
+        return 0, ['Стиль эфира — старый, как до 2.7.0 (мост запомнил). Вернуть визор — vid stil viz.'], None
+    return 1, ['Стиль эфира: непонятный ответ моста.'], None
+
+
+INSTRUMENTY = {'kadr': kadr, 'efir': efir, 'kamera': kamera, 'karta': karta, 'most3': most3, 'klipy': klipy}
+INSTRUMENTY.update(scena=scena, vid=vid)                  # оформление «Визор» (2.7.0)
 
 
 def main():
     f = INSTRUMENTY.get(sys.argv[1] if len(sys.argv) > 1 else '')
     if f is None:
-        print('plus-lib kadr|efir|kamera|karta|most3 [аргументы]')
+        print('plus-lib kadr|efir|kamera|karta|most3|klipy [аргументы]')
         return 1
     kod, stroki, _ = f(sys.argv[2:])
     for s in stroki:

@@ -33,14 +33,9 @@ class Otpravka(
     private class Pkt(val video: Boolean, val payload: ByteArray, val ptsUs: Long, val key: Boolean)
 
     companion object {
-        /** Куда можно слать ключ эфира: только Twitch (и сам шлем — для проверки). */
-        fun adresRazreshyon(url: String): Boolean = try {
-            val u = java.net.URI(url)
-            val h = u.host.orEmpty()
-            (u.scheme == "rtmp" || u.scheme == "rtmps") &&
-                (h == "live.twitch.tv" || h.endsWith(".twitch.tv") || h.endsWith(".contribute.live-video.net") ||
-                    h == "127.0.0.1" || h == "localhost")
-        } catch (e: Exception) { false }
+        /** Куда можно слать ключ эфира: только площадки эфира (Twitch, Kick, YouTube) и сам шлем — для проверки.
+         *  Ключ каждой площадки — только на её адреса: Ploshchadki.razreshyon. */
+        fun adresRazreshyon(url: String): Boolean = Ploshchadki.VSE.any { Ploshchadki.razreshyon(it, url) }
     }
 
     private val q = LinkedBlockingQueue<Pkt>()
@@ -62,6 +57,9 @@ class Otpravka(
         private set
     @Volatile var podklyucheniy = 0
         private set
+    /** Попыток подключиться всего (и неудачных) — для статуса площадки. */
+    @Volatile var popytok = 0
+        private set
     @Volatile var efirS = 0L                  // когда началось нынешнее подключение, мс
         private set
     private var sentBefore = 0L
@@ -69,11 +67,17 @@ class Otpravka(
     /** Сколько байт ушло за всё время (все подключения). */
     val sent: Long get() = sentBefore + (kanal?.sent ?: 0L)
 
+    /** Сколько кусков ждут отправки: растёт — сеть не успевает. */
+    val ochered: Int get() = q.size
+    val predel: Int get() = limit
+
     fun video(payload: ByteArray, ptsUs: Long, key: Boolean) = put(Pkt(true, payload, ptsUs, key))
     fun audio(payload: ByteArray, ptsUs: Long) = put(Pkt(false, payload, ptsUs, false))
 
     private fun put(p: Pkt) {
-        if (!running) return
+        // не подключены (подключаемся, обрыв) — не копим: после подключения очередь всё равно начнётся заново,
+        // а «потери» тогда — только настоящие, от тесной сети (2.7.0: одна площадка в обрыве — не «тесно» всем)
+        if (!running || kanal == null) return
         if (q.size >= limit) {                 // сеть не успевает: не копим задержку
             drops += q.size
             q.clear()
@@ -92,7 +96,11 @@ class Otpravka(
         running = false
         worker?.interrupt()
         worker?.join(3000)
-        kanal?.let { sentBefore += it.sent; it.zakonchit() }      // Twitch: «эфир окончен», не «разрыв связи»
+        val zastryal = worker?.isAlive == true                      // запись в сокет висит (сеть встала)
+        kanal?.let {
+            sentBefore += it.sent
+            if (zastryal) it.close() else it.zakonchit()           // Twitch: «эфир окончен», не «разрыв связи»
+        }
         kanal = null
         q.clear()
         state = "off"
@@ -112,6 +120,7 @@ class Otpravka(
                     kanal = null
                     state = "obryv"
                 }
+                popytok++
                 k = try {
                     podklyuchit()
                 } catch (e: Exception) {
@@ -120,6 +129,7 @@ class Otpravka(
                     try { Thread.sleep(pauzaMs) } catch (e: InterruptedException) { return }
                     continue
                 }
+                if (!running) { k.zakonchit(); return }         // подключились, когда эфир уже кончили
                 needKey = true; base = -1L; vSent = false; aSent = false
                 q.clear()                                       // старое — не в новый эфир
                 kanal = k

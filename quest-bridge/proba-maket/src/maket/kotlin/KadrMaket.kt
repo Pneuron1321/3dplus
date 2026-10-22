@@ -14,14 +14,14 @@ import java.io.File
  * Стенд макета (2.5.0): кадр эфира 1080p, который рисует НАСТОЯЩИЙ код плашек (Nalozhenie — лицо Плюса с
  * телефоном, роза, субтитры, плитки и пузыри гостей, чат, топ-донатор, табло) через android.graphics поверх
  * Skia; места слоёв — как в Razvilka.plashkaNa, окна камеры — Okno.mesto, плиток — Raskladka. Игра, камера
- * и видео гостей — нарисованные заглушки (в шлеме там кадры). Запуск: sh quest-bridge/proba-maket/zapusk.sh ANDROID_JAR ПАПКА.
+ * и видео гостей — нарисованные заглушки (в шлеме там кадры). Кадры стиля «Визор» и его сцены — KadrVizor.kt. Запуск: sh quest-bridge/proba-maket/zapusk.sh ANDROID_JAR ПАПКА.
  */
-private val unsafe = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe")
+internal val unsafe = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe")
     .apply { isAccessible = true }.get(null) as sun.misc.Unsafe
 
-private fun <T> pustoy(c: Class<T>): T = c.cast(unsafe.allocateInstance(c))
+internal fun <T> pustoy(c: Class<T>): T = c.cast(unsafe.allocateInstance(c))
 
-private fun polePolya(c0: Class<*>, imya: String): java.lang.reflect.Field {
+internal fun polePolya(c0: Class<*>, imya: String): java.lang.reflect.Field {
     var c: Class<*>? = c0
     while (c != null) {
         try { return c.getDeclaredField(imya).apply { isAccessible = true } } catch (e: NoSuchFieldException) { c = c.superclass }
@@ -29,12 +29,12 @@ private fun polePolya(c0: Class<*>, imya: String): java.lang.reflect.Field {
     error("нет поля $imya у ${c0.name}")
 }
 
-private fun pole(o: Any, imya: String, v: Any?) = polePolya(o.javaClass, imya).set(o, v)
+internal fun pole(o: Any, imya: String, v: Any?) = polePolya(o.javaClass, imya).set(o, v)
 
 @Suppress("UNCHECKED_CAST")
-private fun <T> vzyat(o: Any, imya: String): T = polePolya(o.javaClass, imya).get(o) as T
+internal fun <T> vzyat(o: Any, imya: String): T = polePolya(o.javaClass, imya).get(o) as T
 
-private fun zvat(o: Any, imya: String, vararg a: Any?): Any? {
+internal fun zvat(o: Any, imya: String, vararg a: Any?): Any? {
     val m = o.javaClass.declaredMethods.first { it.name == imya && it.parameterCount == a.size }
     m.isAccessible = true
     return m.invoke(o, *a)
@@ -74,6 +74,7 @@ fun main(args: Array<String>) {
         f.writeBytes(kadr(v, File(out, "dir-" + v.imya)).png())
         println("ok: $f")
     }
+    kadryVizor(out)                                                   // стиль «Визор» (2.7.0): кадры и сцены
 }
 
 private fun kadr(v: Varyant, dir: File): ABitmap {
@@ -204,7 +205,7 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
 }
 
 /** Игра — заглушка: вечерний город, улица в перспективе, прицел. */
-private fun igraFon(c: org.jetbrains.skia.Canvas, w: Int, h: Int) {
+internal fun igraFon(c: org.jetbrains.skia.Canvas, w: Int, h: Int) {
     val gor = h * 0.56f
     val p = org.jetbrains.skia.Paint()
     p.shader = Shader.makeLinearGradient(0f, 0f, 0f, gor, intArrayOf(0xFF1A2540.toInt(), 0xFF5B4A6A.toInt(), 0xFFD08A5C.toInt()),
@@ -258,7 +259,7 @@ private fun igraFon(c: org.jetbrains.skia.Canvas, w: Int, h: Int) {
 }
 
 /** Заглушка видео: фон и силуэт человека (в шлеме VR — Александр; в наушниках — гость). */
-private fun chelovek(c: org.jetbrains.skia.Canvas, x: Float, y: Float, w: Float, h: Float, f1: Int, f2: Int,
+internal fun chelovek(c: org.jetbrains.skia.Canvas, x: Float, y: Float, w: Float, h: Float, f1: Int, f2: Int,
                      shlem: Boolean = false, naushniki: Boolean = false, radius: Float = 0f) {
     c.save()
     if (radius > 0f) c.clipRRect(RRect.makeXYWH(x, y, w, h, radius), true) else c.clipRect(org.jetbrains.skia.Rect.makeXYWH(x, y, w, h))

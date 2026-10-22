@@ -60,7 +60,7 @@ class Server(private val port: Int) {
         "/karta/ruchki" -> 200 to ruchki(q)
         "/klip" -> {
             q["vkl"]?.let { Most.klip(it == "1" || it == "vkl") }
-            if (q.containsKey("sek") || q.isEmpty()) 200 to Most.sohranitKlip(q["sek"]?.toIntOrNull() ?: 120)
+            if (q.containsKey("sek") || q.isEmpty()) 200 to Most.sohranitKlip(q["sek"]?.toIntOrNull() ?: 150)
             else 200 to (Most.klip?.status() ?: "{\"idyot\":false,\"vkl\":${Most.klipVkl}}")
         }
         "/rezhim" -> {

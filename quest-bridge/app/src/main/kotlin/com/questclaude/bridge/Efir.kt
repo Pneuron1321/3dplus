@@ -24,17 +24,20 @@ import kotlin.math.abs
  * 2.5.0: гости — в звук эфира (Mikser.vEfir); игра — в смесь гостей (Mikser.fon), а Ава и голос
  * донатеру — отдельно (Mikser.golos, 2.5.3: «Только голоса» гасит гостю игру, но не Плюса);
  * звук игры — в субтитры (Rech «igra», 16 кГц).
+ *
+ * 2.7.0: мульти-эфир — кодировщик один, площадок до трёх (Ploshchadki: Twitch, Kick, YouTube), у каждой
+ * своя отправка; набор меняется на ходу (ploshchadki).
  */
 class Efir(
     private val projection: MediaProjection,
     private val razvilka: Razvilka,
     private val o: Opts,
-    key: String,
+    nastroyki: List<Ploshchadki.Nastroyka>,
 ) {
     class Opts(val url: String, val w: Int, val h: Int, val fps: Int, val kbps: Int, val akbps: Int = 160,
                val mic: Float = MIC) {
         companion object {
-            const val TWITCH = "rtmp://live.twitch.tv/app"
+            const val TWITCH = Ploshchadki.TWITCH
             /** Голос в эфире по умолчанию — втрое громче записи ушей. */
             const val MIC = 3f
 
@@ -63,7 +66,7 @@ class Efir(
 
             fun glush(g: Float) = g.coerceIn(0.5f, 8f)
 
-            fun razreshyon(url: String) = Otpravka.adresRazreshyon(url)
+            fun razreshyon(url: String) = Ploshchadki.razreshyon("twitch", url)
         }
     }
 
@@ -91,21 +94,25 @@ class Efir(
     private val vstavka = Vstavka()                      // голос только в эфир (ответ донатеру)
     private val vstavkaGolos = Vstavka()                 // Ава «вслух» прямо в эфир (2.3.9, «oba»)
     private val fonLenta = Lenta()                       // фоновая музыка (2.5.6, Fon)
-    private val otpravka = Otpravka({
-        val r = Rtmp(o.url, key)
+    private val otpravka = Ploshchadki({ _, url, key ->
+        val r = Rtmp(url, key)
         r.connect()
         r.meta(o.w, o.h, o.fps, o.kbps, o.akbps, RATE)
         r
     }, { klyuchevoy() })
+    private val nachalnye = nastroyki
+
+    /** Адрес Twitch этого эфира (из запроса или обычный) — для смены набора площадок на ходу. */
+    val twitchUrl: String get() = o.url
 
     @Volatile var zvuk = "нет"
         private set
     /** Начало этого эфира — для налёта («за эфир»). */
     val nachaloMs = System.currentTimeMillis()
-    /** Twitch принял поток (не подключаемся и не в обрыве) — налёт капает. */
+    /** Хоть одна площадка приняла поток (не подключаемся и не в обрыве) — налёт капает. */
     val vEfire: Boolean get() = otpravka.state == "efir"
     @Volatile private var kadrov = 0L
-    /** Потерянные кадры эфира всего — диспетчеру «тесно». */
+    /** Потерянные кадры эфира всего (по всем площадкам) — диспетчеру «тесно». */
     val drops: Long get() = otpravka.drops
     private var lastSent = 0L
     private var lastT = System.currentTimeMillis()
@@ -114,9 +121,15 @@ class Efir(
         running = true
         startVideo()
         startAudio()
-        otpravka.start()
+        otpravka.start(nachalnye)
         threads += thread(name = "efir-avto", isDaemon = true) { avtoCikl() }
     }
+
+    /** Набор площадок на ходу: «добавь ютуб», «оставь твич» — кодировщик и остальные площадки не прерываются. */
+    fun ploshchadki(n: List<Ploshchadki.Nastroyka>) = otpravka.ustanovit(n)
+
+    /** Какие площадки в этом эфире. */
+    val vybor: List<String> get() = otpravka.spisok.map { it.pl }
 
     /**
      * Частота и поток на ходу. fps — 30|50|60 (ближайшее), kbps — до KBPS_MAKS. Частота — в развилке (кодировщик
@@ -145,6 +158,7 @@ class Efir(
         while (running) {
             try { Thread.sleep(1000) } catch (e: InterruptedException) { break }
             val now = System.currentTimeMillis()
+            otpravka.tik(now)                                // скорость и теснота сети по площадкам
             val d = Hub.dispetcher
             if (d.igre) {
                 podryad++
@@ -180,11 +194,11 @@ class Efir(
         venc = null; aenc = null; rec = null; vsurf = null
     }
 
-    /** Состояние для /efir и экрана приложения. */
-    fun status(): String {
+    /** Состояние для /efir и экрана приложения; kluchi — есть ли ключ у площадки (только да/нет). */
+    fun status(kluchi: String? = null): String {
         val now = System.currentTimeMillis()
         val sent = otpravka.sent
-        val kbps = if (now > lastT) ((sent - lastSent) * 8 / (now - lastT)).toInt() else 0
+        val kbps = if (now > lastT) maxOf(0L, (sent - lastSent) * 8 / (now - lastT)).toInt() else 0   // площадку убрали — не в минус
         lastSent = sent; lastT = now
         val s = otpravka.state
         val sek = if (s == "efir") (now - otpravka.efirS) / 1000 else 0
@@ -199,15 +213,24 @@ class Efir(
             "\"zagruzok\":${razvilka.zagruzokSek},\"glaza_fps\":${razvilka.glazaFps}," +
             "\"tesno\":${Hub.dispetcher.tesno},\"tesno_pochemu\":${FrameServer.json(Hub.dispetcher.pochemu)}," +
             "\"teplo\":${Hub.teplo}," +
-            "\"oshibka\":${otpravka.oshibka?.let { FrameServer.json(it) } ?: "null"}}"
+            "\"oshibka\":${otpravka.oshibka?.let { FrameServer.json(it) } ?: "null"}," +
+            (kluchi?.let { "\"kluchi\":$it," } ?: "") + otpravka.json(now) + "}"
     }
 
-    /** Коротко — для уведомления и экрана: «ЭФИР 12:34 · 5980 кбит/с». */
-    fun kratko(): String = when (otpravka.state) {
-        "efir" -> "ЭФИР ${(System.currentTimeMillis() - otpravka.efirS) / 60000} мин · звук: $zvuk"
-        "obryv" -> "ЭФИР: обрыв, переподключаюсь… ${otpravka.oshibka.orEmpty()}"
-        "podklyuchayus" -> "ЭФИР: подключаюсь… ${otpravka.oshibka.orEmpty()}"
-        else -> "эфир выключен"
+    /** Коротко — для уведомления и экрана: «ЭФИР 12 мин · Twitch идёт · Kick обрыв · звук: …». */
+    fun kratko(): String {
+        val pl = otpravka.spisok
+        val po = if (pl.size > 1) " · " + pl.joinToString(" · ") { p ->
+            Ploshchadki.NAZVANIE[p.pl] + " " + when (p.sostoyanie) {
+                "idyot" -> "идёт"; "obryv" -> "обрыв"; "net_klyucha" -> "нет ключа"; else -> "подключаюсь"
+            }
+        } else ""
+        return when (otpravka.state) {
+            "efir" -> "ЭФИР ${(System.currentTimeMillis() - otpravka.efirS) / 60000} мин$po · звук: $zvuk"
+            "obryv" -> "ЭФИР: обрыв, переподключаюсь…$po ${otpravka.oshibka.orEmpty()}"
+            "podklyuchayus" -> "ЭФИР: подключаюсь…$po ${otpravka.oshibka.orEmpty()}"
+            else -> "эфир выключен"
+        }
     }
 
     // ---------- видео ----------

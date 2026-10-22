@@ -26,7 +26,7 @@ REZ=${OBNOVI_REZERV:-/root/obnovi-rezerv}
 OTDAT=${OBNOVI_OTDAT:-/sdcard/Download/pravki-shlema.txt}
 VED_MOY=${OBNOVI_VED_MOY:-/root/.vedushchiy/vedushchiy.moy}
 PRAVILA=${OBNOVI_PRAVILA:-/root/.claude/CLAUDE.md}
-FAJLY="plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera karta most3 nalet radar titr donat itogi obzor vedushchiy donaty zriteli golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya nagruzka gosti sinhron muzyka obnovi"
+FAJLY="plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera karta most3 nalet radar titr donat itogi obzor vedushchiy donaty zriteli golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya nagruzka gosti sinhron muzyka klipy scena vid obnovi"
 mkdir -p "$BAZA" 2> /dev/null
 curl -fsSL "$B/obnovi-sumy?t=$(date +%s)" -o "$T/.sumy" 2> /dev/null || : > "$T/.sumy"
 

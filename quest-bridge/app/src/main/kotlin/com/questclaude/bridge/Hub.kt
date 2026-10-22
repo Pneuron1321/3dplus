@@ -56,10 +56,13 @@ object Hub {
 
     /** Ручки картинки карты (2.6.2, /karta/kartinka). */
     @Volatile var kartinka: KartaKartinka? = null
+    /** Страница клипов для айфона (2.7.0, /klipy…): ставит первая служба (нужен Context для галереи). */
+    @Volatile var klipy: KlipyStranica? = null
 
     @Synchronized fun kartaZapustit(ctx: android.content.Context, dir: java.io.File) {
         if (karta == null) karta = try { KartaZvuk(ctx.applicationContext, dir).also { it.start() } } catch (e: Exception) { null }
         if (kartinka == null) kartinka = try { KartaKartinka(ctx.applicationContext, dir).also { it.start() } } catch (e: Exception) { null }
+        if (klipy == null) klipy = KlipyStranica(KlipyGalereya(ctx), { Kamera.ip() })   // клипы (2.7.0): порт — только по команде
     }
 
     /** Музыка в звук эфира: ставит Efir, пока эфир идёт (Fon кладёт, эфир берёт). */
@@ -78,7 +81,7 @@ object Hub {
                 override fun rot(sek: Double) { say?.rot(sek) }
                 override val govorit get() = say?.govorit ?: false
             }, { t, n -> plenkaRisunok(t, n) }, { lastWakeMs }, { efir }, { n -> Pamyat.hvost(n) }, { kamera }, { nalet },
-                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg }, { gosti }, rechi, { fon }, { karta })
+                { plashki }, { t -> plenka.blizhayshiy(t)?.jpeg }, { gosti }, rechi, { fon }, { karta }, { klipy })
             s.start()
             server = s
         }
@@ -91,6 +94,7 @@ object Hub {
             server?.stop()
             server = null
             fon?.stop()                  // мост закрыт — очередь музыки не доигрывать (Александр 17.10)
+            klipy?.zakrytVse()           // мост закрыт — и страница клипов
         }
     }
 }

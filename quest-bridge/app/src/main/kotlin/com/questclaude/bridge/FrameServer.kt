@@ -43,10 +43,16 @@ import kotlin.concurrent.thread
  *   GET /fon/komanda?zhdat=20 -> команда из шторки для плеера ({"k","a"} или {}), /fon/pult?k=sled&a= -> положить команду
  *   POST /chat/pachka        -> chat for the stream overlay in one batch (2.3.9): each body line is a /chat/upr query
  *   GET /efir                -> эфир: {"state":"off|podklyuchayus|efir|obryv", kbps, sec, zvuk, oshibka…}
- *   GET /efir/start[?size=720|1080&fps=&kbps=] -> начать эфир на Twitch (ключ — с /efir/key)
+ *   GET /efir/start[?size=720|1080&fps=&kbps=&pl=twitch,kick] -> начать эфир (ключи — с /efir/key); pl — площадки
+ *                            (запоминаются; эфир идёт — набор меняется на ходу); без pl — запомненные (сначала twitch)
  *   GET /efir/stop           -> закончить эфир
  *   GET /efir/mic?g=3        -> громкость голоса в эфире (0,5–8; приложение запоминает)
- *   POST /efir/key           -> тело — ключ эфира (из `kluch twitch`, через `efir`); обратно не отдаётся
+ *   POST /efir/key[?pl=twitch|kick|youtube] -> тело — ключ эфира площадки (без pl — twitch; из `kluch …`, через
+ *                            `efir`); обратно не отдаётся нигде — в /efir только «kluchi»: есть/нет
+ *   GET /efir/adres?pl=kick&url=rtmps://…/app -> адрес приёма Kick (свой у аккаунта; без ключа)
+ *   GET /efir/scena?s=skoro&min=5&t=…|otoshyol[&min=]|konec|net -> сцена во весь кадр эфира (2.7.0, визор);
+ *                              без s — состояние {"stil","scena","tajmer","ostalos_sek","fraza"}
+ *   GET /efir/stil?v=viz|staryj -> стиль плашек эфира (приложение запоминает; по умолчанию viz)
  *   GET /pamyat[?n=N]        -> хвост замера памяти (свободно у шлема, сколько держит приложение)
  *   GET /kamera              -> камера телефона: {"state":"vykl|zhdu|idyot", razmer, fps, kbps, v_efire, vid, gde,
  *                              dolya, povorot, vplotnuyu, sboku, adres (без ключа), oshibka}
@@ -54,7 +60,7 @@ import kotlin.concurrent.thread
  *                              pov=0|90|180|270 — повернуть картинку по часовой, kray=0 — вплотную снизу (сверху),
  *                              1 — с отступом 3 % высоты; bok=4 — отступ сбоку, % ширины (0 — вплотную; 2.3.8)
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}
- *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 120) с видео телефона — MP4 в «Фильмы/Plus»
+ *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 150) с видео телефона — MP4 в «Фильмы/Plus»
  *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}
  *   GET /karta/upr?vkl=0|1&g=100 -> звук карты в шлем и эфир вкл/выкл, громкость %
  *   GET /karta/kartinka[?yarkost=&kontrast=&nasyshchennost=&ton=  (N, +N, -N, =N, def) &preset=sochno|kak_bylo]
@@ -72,6 +78,8 @@ import kotlin.concurrent.thread
  *   GET /gosti/nastroyka?shlem=0.8&efir=1&eho=0.25&eho_db=10&kartinka=0|1
  *   GET /titry/rech?zhdat=S  -> следующая фраза для субтитров (WAV 16 кГц; X-Golos, X-Nachalo, X-Tihih, X-Db), 204 — нет
  *   GET /titry/upr?ya=0|1&igra=0|1&gosti=0|1&gde=u_plitki|vnizu -> какие голоса слушать, где субтитры гостей
+ *   GET /klipy, /klipy/otkryt, /klipy/zakryt -> страница клипов для айфона (2.7.0, KlipyStranica): на 15 минут,
+ *                              адрес с ключом — только на экране приложения; ответ: {"otkryta","sek","ip","port","klipov",…}
  *
  * Listens on 127.0.0.1 only: the headset view is not exposed to the Wi-Fi.
  * The laptop reaches it through `adb forward tcp:8766 tcp:8766`, and apps on
@@ -102,6 +110,8 @@ class FrameServer(
     private val fon: () -> FonUpr? = { null },
     /** Звук карты захвата (2.6.0). */
     private val karta: () -> KartaUpr? = { null },
+    /** Страница клипов для айфона (2.7.0). */
+    private val klipy: () -> KlipyStranica.Upr? = { null },
 ) {
     class Frame(val jpeg: ByteArray, val width: Int, val height: Int, val timeMs: Long, val count: Long)
 
@@ -124,6 +134,10 @@ class FrameServer(
         fun status(): String
         /** Сохранить ключ эфира; false — не похоже на ключ. */
         fun key(k: String): Boolean
+        /** Ключ площадки (2.7.0: twitch | kick | youtube). */
+        fun key(pl: String, k: String): Boolean = pl == "twitch" && key(k)
+        /** Адрес приёма площадки (Kick — свой у каждого аккаунта). */
+        fun adres(pl: String, url: String): String = "{\"adres\":false}"
         /** Громкость голоса в эфире (и запомнить на следующий). */
         fun mic(g: Float): String
         /** Частота (fps=30|50|60) и поток (kbps) эфира: запомнить на следующий и, если эфир идёт, — на ходу. */
@@ -144,7 +158,7 @@ class FrameServer(
         fun vid(q: Map<String, String>): String
         /** Открыть на 2 минуты страницу для айфона; ответ — её адреса (без ключа). */
         fun stranica(): String = "{\"oshibka\":\"нет страницы\"}"
-        /** Клип камеры (2.5.9): последние sek (до 120) секунд видео телефона как есть — в «Фильмы/Plus». */
+        /** Клип камеры (2.5.9): последние sek (до 150) секунд видео телефона как есть — в «Фильмы/Plus». */
         fun klip(q: Map<String, String>): String = "{\"oshibka\":\"клипов нет\"}"
     }
 
@@ -365,9 +379,13 @@ class FrameServer(
                     reply(out, 200, "application/json", e.dosluh.status().toByteArray())
                 }
             }
+            "/efir/scena" ->                       // визор: сцена во весь кадр (skoro, otoshyol, konec, net)
+                reply(out, 200, "application/json; charset=utf-8", Oformlenie.scenaUpr(query).toByteArray(Charsets.UTF_8))
+            "/efir/stil" ->                        // визор: стиль плашек viz | staryj
+                reply(out, 200, "application/json; charset=utf-8", Oformlenie.stilUpr(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir/osnova" ->                      // Струны: основа эфира — igra (Мост 3) или shlem
                 reply(out, 200, "application/json; charset=utf-8", Struny.ustanovit(query["v"]).toByteArray(Charsets.UTF_8))
-            "/efir", "/efir/start", "/efir/stop", "/efir/mic", "/efir/nastroyki" -> {
+            "/efir", "/efir/start", "/efir/stop", "/efir/mic", "/efir/nastroyki", "/efir/adres" -> {
                 val e = efir()
                 if (e == null) reply(out, 503, "application/json", "{\"state\":\"off\",\"oshibka\":\"захват не идёт\"}".toByteArray())
                 else {
@@ -376,6 +394,8 @@ class FrameServer(
                         "/efir/stop" -> e.stop()
                         "/efir/mic" -> e.mic(query["g"]?.toFloatOrNull() ?: MIC_EFIR)
                         "/efir/nastroyki" -> e.nastroyki(query)
+                        "/efir/adres" -> e.adres(query["pl"].orEmpty(),
+                            try { java.net.URLDecoder.decode(query["url"].orEmpty(), "UTF-8") } catch (ex: Exception) { "" })
                         else -> e.status()
                     }
                     reply(out, 200, "application/json; charset=utf-8", json.toByteArray(Charsets.UTF_8))
@@ -476,7 +496,9 @@ class FrameServer(
                     while (got < length) { val n = reader.read(ch, got, length - got); if (n < 0) break; got += n }
                     String(ByteArray(got) { ch[it].code.toByte() }, Charsets.UTF_8).trim()
                 } else ""
-                val ok = e != null && body.length in 8..300 && body.none { it.isWhitespace() || it < ' ' } && e.key(body)
+                val pl = query["pl"] ?: "twitch"                // без pl — twitch, как до 2.7.0
+                val ok = e != null && pl in Ploshchadki.VSE && body.length in 8..300 &&
+                    body.none { it.isWhitespace() || it < ' ' } && e.key(pl, body)
                 reply(out, if (ok) 200 else if (e == null) 503 else 400, "application/json", "{\"key\":$ok}".toByteArray())
             }
             "/say" -> {
@@ -587,6 +609,15 @@ class FrameServer(
                 if (g == null) reply(out, 404, "text/plain", "no voice".toByteArray())
                 else reply(out, 200, "application/json",
                     "{\"playing\":${g.playing},\"govorit\":${g.govorit},\"rezhimy\":$REZHIMY}".toByteArray())
+            }
+            "/klipy", "/klipy/otkryt", "/klipy/zakryt" -> {
+                val k = klipy()
+                if (k == null) reply(out, 503, "application/json", "{\"oshibka\":\"страница клипов не запущена\"}".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8", when (path) {
+                    "/klipy/otkryt" -> k.otkryt()
+                    "/klipy/zakryt" -> k.zakryt()
+                    else -> k.status()
+                }.toByteArray(Charsets.UTF_8))
             }
             else -> reply(out, 404, "text/plain", "try /frame.jpg, /status or /ear".toByteArray())
         }

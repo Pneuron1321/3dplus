@@ -129,7 +129,7 @@ class Kamera(
     override fun zvuk(aac: ByteArray, ptsUs: Long) = klip.zvuk(aac, ptsUs)
 
     override fun klip(q: Map<String, String>): String =
-        sohranitKlip?.invoke(q["sek"]?.toIntOrNull() ?: 120) ?: "{\"oshibka\":\"клип: служба глаз не готова\"}"
+        sohranitKlip?.invoke(q["sek"]?.toIntOrNull() ?: 150) ?: "{\"oshibka\":\"клип: служба глаз не готова\"}"
 
     override fun konec() = synchronized(lock) {
         klip.konec()

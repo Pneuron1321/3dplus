@@ -1,6 +1,8 @@
 #!/bin/sh
 # Макет кадра эфира 1080p настоящим кодом плашек (Nalozhenie, Raskladka, Okno, Titry, Komnata):
 #   sh zapusk.sh ANDROID_JAR ПАПКА → ПАПКА/gosti-maket.png, gosti-maket-3.png, gosti-maket-vnizu.png
+#   и стиль «Визор» (2.7.0): vizor-efir.png, vizor-efir-bokom.png, scena-skoro.png, scena-otoshyol.png, scena-konec.png,
+#   vizor-itogi.png (шрифты визора — из assets/shrifty, как в приложении)
 # Шрифт — Roboto (как у Android) из npm roboto-fontface, WOFF → TTF своим woff2ttf.py. Нужны gradle и JDK 21.
 set -e
 D=$(cd "$(dirname "$0")" && pwd)

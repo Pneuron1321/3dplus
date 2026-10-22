@@ -20,7 +20,7 @@ object KlipMp4 {
     private val zanyat = java.util.concurrent.atomic.AtomicBoolean(false)
     const val PAPKA = "Movies/Plus"
 
-    /** Ответ JSON: {"ok":true,"put":"Movies/Plus/…mp4","sek":120,"mb":88} или {"oshibka":"…"}. */
+    /** Ответ JSON: {"ok":true,"put":"Movies/Plus/…mp4","sek":150,"mb":88} или {"oshibka":"…"}. */
     fun sohranit(ctx: Context, z: KlipZapis, sek: Int): String {
         if (!zanyat.compareAndSet(false, true)) return "{\"oshibka\":\"клип уже сохраняется\"}"
         try {
@@ -32,7 +32,7 @@ object KlipMp4 {
 
     private fun odinRaz(ctx: Context, z: KlipZapis, sek: Int, sZvukom: Boolean): String {
         run {
-            val s = z.snimok(sek.coerceIn(5, 125)) ?: return "{\"oshibka\":\"игра ещё не записана — клипа нет (карта показывает? запись включена?)\"}"
+            val s = z.snimok(sek.coerceIn(5, 155)) ?: return "{\"oshibka\":\"игра ещё не записана — клипа нет (карта показывает? запись включена?)\"}"
             val imya = "most3-igra-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".mp4"
             val r = ctx.contentResolver
             val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {

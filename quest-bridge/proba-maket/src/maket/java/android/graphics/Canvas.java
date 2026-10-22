@@ -30,7 +30,17 @@ public class Canvas {
         float w = p.getTextAlign() == Paint.Align.LEFT ? 0f : p.measureText(s);
         if (p.getTextAlign() == Paint.Align.CENTER) x -= w / 2f;
         else if (p.getTextAlign() == Paint.Align.RIGHT) x -= w;
-        c.drawString(s, x, y, p.font(), p.sk());
+        if (p.getLetterSpacing() == 0f) { c.drawString(s, x, y, p.font(), p.sk()); return; }
+        float d = p.getLetterSpacing() * p.getTextSize();                // разрядка — по букве
+        org.jetbrains.skia.Font f = p.font();
+        org.jetbrains.skia.Paint sp = p.sk();
+        for (int i = 0; i < s.length(); ) {
+            int n = Character.charCount(s.codePointAt(i));
+            String ch = s.substring(i, i + n);
+            c.drawString(ch, x, y, f, sp);
+            x += f.measureTextWidth(ch) + d;
+            i += n;
+        }
     }
     public void drawBitmap(Bitmap b, Rect src, RectF dst, Paint p) {
         org.jetbrains.skia.Rect s = src == null ? org.jetbrains.skia.Rect.Companion.makeWH(b.getWidth(), b.getHeight())

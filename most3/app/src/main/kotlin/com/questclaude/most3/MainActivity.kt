@@ -149,7 +149,7 @@ class MainActivity : Activity() {
         addView(knopka("Звук −") { Most.gromkost = Most.gromkost - 0.1f })
         addView(knopka("Звук +") { Most.gromkost = Most.gromkost + 0.1f })
         addView(knopka("Звук вкл/выкл") { val v = !Most.zvukVkl; Most.vFone { Most.zvuk(v) } })
-        addView(knopka("Клип 2 мин") { stroka.text = "Сохраняю клип игры…"; Most.vFone { val o = Most.sohranitKlip(120); ui.post { stroka.text = o } } })
+        addView(knopka("Клип 2,5 мин") { stroka.text = "Сохраняю клип игры…"; Most.vFone { val o = Most.sohranitKlip(150); ui.post { stroka.text = o } } })
         addView(knopka("Режим ▸") {
             val vse = Profil.values(); val sl = vse[(Most.profil.ordinal + 1) % vse.size]
             stroka.text = "Режим: ${sl.nadpis} — переподключаю…"; Most.smenitProfil(sl)
