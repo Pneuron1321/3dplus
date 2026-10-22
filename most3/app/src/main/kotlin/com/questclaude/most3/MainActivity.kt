@@ -28,6 +28,8 @@ import android.widget.TextView
 /**
  * Окно игры Мост 3: видео карты на весь экран окна, сверху строка состояния, снизу — наборы картинки и звук,
  * по кнопке «Ручки» — ползунки. Панель прячется через 5 с; коснулся картинки — вернулась.
+ * 3.1.3 (Александр 22.10: полоска «режим, приём, показ, звук» попала в эфир): строка состояния прячется вместе с
+ * панелью, пока видео идёт; нет видео или ошибка — строка видна.
  */
 class MainActivity : Activity() {
     private lateinit var gl: GLSurfaceView
@@ -36,9 +38,17 @@ class MainActivity : Activity() {
     private lateinit var panel: LinearLayout
     private lateinit var polzunki: LinearLayout
     private val ui = Handler(Looper.getMainLooper())
-    private val spryatat = Runnable { panel.visibility = View.GONE; polzunki.visibility = View.GONE }
+    private var panelVidna = true
+    private val spryatat = Runnable {
+        panel.visibility = View.GONE; polzunki.visibility = View.GONE; panelVidna = false
+        if (Most.video?.rabotaet == true) stroka.visibility = View.GONE
+    }
     private val obnovit = object : Runnable {
-        override fun run() { stroka.text = strokaSostoyaniya(); ui.postDelayed(this, 1000) }
+        override fun run() {
+            stroka.text = strokaSostoyaniya()
+            stroka.visibility = if (panelVidna || Most.video?.rabotaet != true) View.VISIBLE else View.GONE
+            ui.postDelayed(this, 1000)
+        }
     }
 
     private val usb = object : BroadcastReceiver() {
@@ -187,7 +197,7 @@ class MainActivity : Activity() {
     }
 
     private fun pokazatPanel() {
-        panel.visibility = View.VISIBLE
+        panel.visibility = View.VISIBLE; stroka.visibility = View.VISIBLE; panelVidna = true
         ui.removeCallbacks(spryatat); ui.postDelayed(spryatat, 5000)
     }
 

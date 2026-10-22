@@ -177,6 +177,8 @@ def efir_skazat(U):
                       d.get('mic'), d.get('drops')))
         if d.get('mic_propuski') is not None:
             out.append('Голос: микропауз %s, сбросов %s (норма — 0).' % (d.get('mic_propuski'), d.get('mic_sbrosy', 0)))
+        if d.get('avto30'):
+            out.append('Шлему тесно — эфир сейчас на 30 кадрах (выбрано %s), вернётся сам через минуту спокойствия.' % d.get('fps_vybor'))
         if d.get('ekran_fps') is not None:             # 2.3.9: игра или эфир
             out.append('Игра: %s кадров/с; плашки эфира: %s мс в секунду; глазам Плюса: %s кадра/с.'
                        % (d.get('ekran_fps'), d.get('plashki_ms'), d.get('glaza_fps')))
@@ -233,7 +235,31 @@ def efir(a):
                else 'Голос в эфире: ×%s (приложение запомнило).' % g]
         k, o2 = efir_skazat(U)
         out += o2
-    elif c in ('', '720', '1080'):
+    elif c in ('chastota', 'potok'):                    # 2.6.9: частота 30|50|60 и поток (Мбит или кбит/с) — запомнить, на ходу
+        v = a[1].lower().rstrip('m').replace(',', '.') if len(a) > 1 else ''
+        try:
+            n = float(v)
+        except ValueError:
+            return 1, ['efir chastota 30|50|60 — кадров в секунду; efir potok 10 — поток в Мбит/с (до 12).'], None
+        q = 'fps=%d' % n if c == 'chastota' else 'kbps=%d' % (n * 1000 if n <= 50 else n)
+        r = zapros(U, '/efir/nastroyki?' + q, 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if r[0] == 404:
+            return 1, ['Частота и поток эфира: нужен мост 2.6.9 (обнови приложение).'], None
+        d = razobrat(r[1]) or {}
+        out = ['Эфир: %s кадров в секунду, поток %s кбит/с (мост запомнил%s).' % (
+            d.get('fps_vybor'), d.get('tsel_kbps'), ', уже идёт' if d.get('state') == 'efir' else ' на следующий эфир')]
+        if (d.get('tsel_kbps') or 0) > 8000:
+            out.append('Выше 8 Мбит Twitch не советует: у зрителей без выбора качества может подтормаживать.')
+        return 0, out, None
+    elif all(x in ('720', '1080', '30', '50', '60') for x in a):
+        fps = next((x for x in a if x in ('30', '50', '60')), None)
+        if fps:                                         # «эфир на 60»: запомнить; идёт — сменится на ходу
+            r = zapros(U, '/efir/nastroyki?fps=' + fps, 5)
+            if r and r[0] == 200 and '"state":"efir"' in r[1]:
+                return 0, ['Эфир идёт — теперь %s кадров в секунду.' % fps], None
+        c = '720' if '720' in a else ''
         r = zapros(U, '/status', 3)
         if r is None:
             return 1, [MOLCHIT], None
@@ -258,27 +284,29 @@ def efir(a):
             if r and ('"state":"efir"' in r[1] or '"state":"off"' in r[1]):
                 break
         k, out = efir_skazat(U)
-    elif c in ('igra', 'shlem', 'osnova'):              # Струны (2.6.7): основа эфира — игра с Моста 3 или вид шлема
+    elif c in ('igra', 'shlem', 'osnova', 'avto'):              # Струны (2.6.7): основа эфира — игра с Моста 3 или вид шлема
         r = zapros(U, '/efir/osnova' + ('' if c == 'osnova' else '?v=' + c), 5)
         if r is None:
             return 1, [MOLCHIT], None
         d = razobrat(r[1]) or {}
         if r[0] != 200 or 'osnova' not in d:
             return 1, ['Основа эфира: нужен мост 2.6.7 (обнови приложение).'], None
-        if d['osnova'] == 'igra':
+        if d['osnova'] in ('igra', 'avto'):
             if d.get('igra_idyot'):
                 st = 'игра идёт с Моста 3 (кадров %s).' % d.get('igra_kadrov')
             elif d.get('efir'):
                 st = 'Мост 3 пока не рисует — эфир на виде шлема, пока не пойдут кадры (Мост 3 открыт и показывает?).'
             else:
                 st = 'включится с началом эфира, если Мост 3 показывает карту.'
-            out = ['Основа эфира — игра с карты (Мост 3, 1080 из 1440p/4K): ' + st]
+            out = ['Основа эфира — %s: %s' % ('игра с карты (Мост 3, 1080 во весь кадр)' if d['osnova'] == 'igra' else
+                                              'сама: игра из Моста 3, когда он показывает, иначе вид шлема', st)]
         else:
             out = ['Основа эфира — вид шлема (как раньше).']
         return 0, out, None
     else:
         return 0, ['efir — начать эфир, efir 720 — полегче, efir stop — закончить, efir status — как идёт; '
-                   'efir igra — в эфир игру с карты (Мост 3), efir shlem — вид шлема.'], None
+                   'efir 60|50|30 — частота (запомнится), efir potok 10 — поток в Мбит/с; '
+                   'efir avto — игра из Моста 3, когда он показывает (по умолчанию), efir igra — всегда игра, efir shlem — вид шлема.'], None
     return k, out, None
 
 

@@ -90,7 +90,7 @@ object Most {
     }
 
     /** Профиль режимов (заход 2): efir / plavno / maks / 4k / hdr. Смена — переподключение. */
-    @Volatile var profil = Profil.EFIR; private set
+    @Volatile var profil = Profil.MAKS; private set     // Александр 22.10: «Максимум» (NV12 1440p60) по умолчанию
 
     /** Режим по номеру (most3 rezhim N) — один раз, до смены профиля или переподключения; в профиль не пишется. */
     @Volatile private var ruchnoj: UvcRezhim? = null
@@ -310,7 +310,7 @@ object Most {
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.1.2"
+    const val VERSIYA = "3.1.3"
 }
 
 /**

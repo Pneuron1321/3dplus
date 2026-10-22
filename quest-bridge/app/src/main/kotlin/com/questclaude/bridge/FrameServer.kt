@@ -126,6 +126,8 @@ class FrameServer(
         fun key(k: String): Boolean
         /** Громкость голоса в эфире (и запомнить на следующий). */
         fun mic(g: Float): String
+        /** Частота (fps=30|50|60) и поток (kbps) эфира: запомнить на следующий и, если эфир идёт, — на ходу. */
+        fun nastroyki(q: Map<String, String>): String = status()
     }
 
     /** Налёт и плашка в эфире (CaptureService; в тестах — подделка). Ответы — JSON. */
@@ -365,7 +367,7 @@ class FrameServer(
             }
             "/efir/osnova" ->                      // Струны: основа эфира — igra (Мост 3) или shlem
                 reply(out, 200, "application/json; charset=utf-8", Struny.ustanovit(query["v"]).toByteArray(Charsets.UTF_8))
-            "/efir", "/efir/start", "/efir/stop", "/efir/mic" -> {
+            "/efir", "/efir/start", "/efir/stop", "/efir/mic", "/efir/nastroyki" -> {
                 val e = efir()
                 if (e == null) reply(out, 503, "application/json", "{\"state\":\"off\",\"oshibka\":\"захват не идёт\"}".toByteArray())
                 else {
@@ -373,6 +375,7 @@ class FrameServer(
                         "/efir/start" -> e.start(query)
                         "/efir/stop" -> e.stop()
                         "/efir/mic" -> e.mic(query["g"]?.toFloatOrNull() ?: MIC_EFIR)
+                        "/efir/nastroyki" -> e.nastroyki(query)
                         else -> e.status()
                     }
                     reply(out, 200, "application/json; charset=utf-8", json.toByteArray(Charsets.UTF_8))

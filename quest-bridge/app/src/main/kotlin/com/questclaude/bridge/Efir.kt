@@ -38,13 +38,26 @@ class Efir(
             /** Голос в эфире по умолчанию — втрое громче записи ушей. */
             const val MIC = 3f
 
-            /** Из запроса /efir/start: size=720|1080, fps, kbps, url (только Twitch или свой шлем). */
-            fun iz(q: Map<String, String>, mic: Float = MIC): Opts {
+            /** Частота эфира по умолчанию и что можно выбрать (2.6.9, Александр: «нужны 50 и 60 кадров»). */
+            const val FPS = 30
+            val FPS_MOZHNO = listOf(30, 50, 60)
+            const val KBPS = 6000
+            /** Поток: до 12 Мбит/с (Александр 22.10: «9–12 мегабит»; Twitch советует до 6–8 — выше на свой риск). */
+            const val KBPS_MAKS = 12000
+            /** Тесно шлему — эфир сам на столько кадров. */
+            const val FPS_TESNO = 30
+
+            fun fps(v: Int?) = v?.let { f -> FPS_MOZHNO.minByOrNull { kotlin.math.abs(it - f) } }
+            fun kbps(v: Int?) = v?.coerceIn(1000, KBPS_MAKS)
+
+            /** Из запроса /efir/start: size=720|1080, fps (30|50|60), kbps, url (только Twitch или свой шлем);
+             *  чего нет в запросе — из запомненного (fps0, kbps0). */
+            fun iz(q: Map<String, String>, mic: Float = MIC, fps0: Int = FPS, kbps0: Int = KBPS): Opts {
                 val url = q["url"]?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: TWITCH
                 require(razreshyon(url)) { "адрес эфира — только Twitch (ключ не уходит чужим)" }
                 val p = if (q["size"] == "720") 1280 to 720 else 1920 to 1080
-                return Opts(url, p.first, p.second, q["fps"]?.toIntOrNull()?.coerceIn(15, 60) ?: 30,
-                    q["kbps"]?.toIntOrNull()?.coerceIn(1000, 8000) ?: 6000,
+                return Opts(url, p.first, p.second, fps(q["fps"]?.toIntOrNull()) ?: fps0,
+                    kbps(q["kbps"]?.toIntOrNull()) ?: kbps0,
                     mic = q["mic"]?.toFloatOrNull()?.let { glush(it) } ?: mic)
             }
 
@@ -56,6 +69,17 @@ class Efir(
 
     /** Громкость голоса в эфире — меняется на ходу (`efir mic 4`). */
     @Volatile var mikrofon = o.mic
+
+    /** Частота и поток, которые выбрал Александр (меняются на ходу: `efir 60`, `efir potok 10`). */
+    @Volatile var celFps = o.fps
+        private set
+    @Volatile var celKbps = o.kbps
+        private set
+    /** Сколько кадров идёт сейчас: тесно шлему — FPS_TESNO, потом снова celFps. */
+    @Volatile var fpsSeychas = o.fps
+        private set
+    @Volatile private var spokojnoS = 0L
+    @Volatile private var tesnoS = 0L
 
     private var venc: MediaCodec? = null
     private var vsurf: Surface? = null
@@ -91,6 +115,49 @@ class Efir(
         startVideo()
         startAudio()
         otpravka.start()
+        threads += thread(name = "efir-avto", isDaemon = true) { avtoCikl() }
+    }
+
+    /**
+     * Частота и поток на ходу. fps — 30|50|60 (ближайшее), kbps — до KBPS_MAKS. Частота — в развилке (кодировщик
+     * просто получает реже кадры), поток — параметром кодировщика без перезапуска.
+     */
+    fun nastroit(fps: Int?, kbps: Int?) {
+        Opts.fps(fps)?.let { celFps = it; if (tesnoS == 0L) postavitFps(it) }
+        Opts.kbps(kbps)?.let { k ->
+            celKbps = k
+            try { venc?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, k * 1000) }) } catch (e: Exception) { }
+        }
+    }
+
+    private fun postavitFps(f: Int) {
+        if (f == fpsSeychas) return
+        fpsSeychas = f
+        vsurf?.let { try { razvilka.fps(it, f) } catch (e: Exception) { } }
+    }
+
+    /**
+     * Автооткат (Александр 22.10): тесно самой игре (кадры экрана просели или шлем греется — Dispetcher.igre) три
+     * секунды подряд — эфир на 30 кадров; спокойно минуту — снова выбранная частота.
+     */
+    private fun avtoCikl() {
+        var podryad = 0
+        while (running) {
+            try { Thread.sleep(1000) } catch (e: InterruptedException) { break }
+            val now = System.currentTimeMillis()
+            val d = Hub.dispetcher
+            if (d.igre) {
+                podryad++
+                if (podryad >= 3 && celFps > Opts.FPS_TESNO && tesnoS == 0L) { tesnoS = now; postavitFps(Opts.FPS_TESNO) }
+                spokojnoS = 0
+            } else {
+                podryad = 0
+                if (tesnoS != 0L) {
+                    if (spokojnoS == 0L) spokojnoS = now
+                    if (now - spokojnoS >= 60_000) { tesnoS = 0; spokojnoS = 0; postavitFps(celFps) }
+                }
+            }
+        }
     }
 
     fun stop() {
@@ -123,7 +190,8 @@ class Efir(
         val sek = if (s == "efir") (now - otpravka.efirS) / 1000 else 0
         return "{\"state\":\"$s\",\"sec\":$sek,\"kbps\":$kbps,\"kadrov\":$kadrov,\"drops\":${otpravka.drops}," +
             "\"podklyucheniy\":${otpravka.podklyucheniy},\"zvuk\":${FrameServer.json(zvuk)}," +
-            "\"razmer\":\"${o.w}x${o.h}@${o.fps}\",\"tsel_kbps\":${o.kbps},\"mic\":$mikrofon," +
+            "\"razmer\":\"${o.w}x${o.h}@$fpsSeychas\",\"tsel_kbps\":$celKbps,\"mic\":$mikrofon," +
+            "\"fps\":$fpsSeychas,\"fps_vybor\":$celFps,\"avto30\":${tesnoS != 0L}," +
             "\"mic_propuski\":${mic.propuski},\"mic_sbrosy\":${mic.sbrosy}," +
             // 2.3.9: игра или эфир — кадры экрана (то, что видит игрок), загрузки плашек, глаза Плюса
             "\"ekran_fps\":${String.format(java.util.Locale.ROOT, "%.1f", razvilka.ekranFps)}," +
@@ -156,7 +224,7 @@ class Efir(
             if (cbr) setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
             if (high) {
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
-                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel41)
+                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel42)   // 1080p60 (4.1 — до 1080p30)
             }
         }
         var ok = false

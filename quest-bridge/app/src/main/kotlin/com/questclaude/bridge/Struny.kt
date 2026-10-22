@@ -12,6 +12,9 @@ import java.io.File
  * карту в шлеме в 1440p/4K и тем же кадром рисует 1920×1080 с суперсэмплингом в поверхность развилки; эфир
  * получает игру с карты, а не вид шлема (без двойного сжатия и без рамки окна). Переключатель — `efir igra|shlem`
  * (по умолчанию shlem: этап 1 включается вручную, пока не замерили в шлеме).
+ * 2.6.9 (Александр 22.10: на эфире было окно Моста 3 не во всю ширину и с полоской режима сверху): по умолчанию
+ * "avto" — Мост 3 показывает карту, эфир берёт игру из него (1080 во весь кадр, без окна и надписей); Мост 3 молчит
+ * дольше секунды — вид шлема. `efir shlem` — всегда вид шлема, `efir igra` — всегда игра.
  *
  * Мост 3 спрашивает поверхность через [StrunySluzhba] (Binder, разрешение уровня подписи: оба приложения
  * подписаны одним ключом). Поколение растёт, когда поверхность меняется (новый эфир, переключатель) —
@@ -26,13 +29,14 @@ object Struny {
     @Volatile var pokolenie = 1
         private set
     @Volatile var dir: File? = null
-    /** "igra" — основа эфира с Моста 3; "shlem" — вид шлема (как было). */
-    @Volatile var osnova = "shlem"
+    /** "avto" — игра из Моста 3, если он показывает, иначе вид шлема; "igra"; "shlem" — вид шлема (как было). */
+    @Volatile var osnova = "avto"
         private set
+    private val MOZHNO = setOf("avto", "igra", "shlem")
 
     fun zagruzit(d: File) {
         dir = d
-        osnova = try { File(d, FAJL).readText().trim().takeIf { it == "igra" } ?: "shlem" } catch (e: Exception) { "shlem" }
+        osnova = try { File(d, FAJL).readText().trim().takeIf { it in MOZHNO } ?: "avto" } catch (e: Exception) { "avto" }
     }
 
     fun podklyuchit(rz: Razvilka) { razvilka = rz; pokolenie++ }
@@ -44,7 +48,7 @@ object Struny {
 
     /** `efir igra|shlem`: ответ — JSON для Плюса. */
     fun ustanovit(v: String?): String {
-        if (v == "igra" || v == "shlem") {
+        if (v != null && v in MOZHNO) {
             if (v != osnova) {
                 osnova = v
                 if (v == "shlem") razvilka?.let { try { it.igraUbrat() } catch (e: Exception) { } }
@@ -63,7 +67,7 @@ object Struny {
 
     /** Поверхность для Моста 3 — только когда эфир идёт и основа «игра». */
     fun poverhnost(): android.view.Surface? {
-        if (osnova != "igra") return null
+        if (osnova == "shlem") return null
         val rz = razvilka ?: return null
         return try { rz.igra() } catch (e: Exception) { null }
     }

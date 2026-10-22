@@ -61,6 +61,7 @@ class CaptureService : Service() {
         const val EYE_FPS = 2
         private const val KLYUCH = "efir-klyuch"   // ключ эфира — в закрытой папке приложения
         private const val MIC = "efir-mic"         // громкость голоса в эфире — запомненная
+        private const val NASTROYKI = "efir-nastroyki"   // частота и поток эфира — запомненные (2.6.9): «fps kbps»
         private const val NALET = "nalet-sek"      // налёт: всего секунд в эфире
         private const val POKAZ = "nalozhenie"     // плашки в эфире: «lico nalet radar», 1/0
         private const val CEL = "donat-cel"        // цель доната: сумма, собрано, валюта, показ, на что
@@ -345,13 +346,22 @@ class CaptureService : Service() {
         override fun start(q: Map<String, String>) = try { naPotoke { efirStart(q) } } catch (e: Exception) { oshibka(e.message ?: "?") }
         override fun stop() = try { naPotoke { efirStop() } } catch (e: Exception) { oshibka(e.message ?: "?") }
         override fun status() = efir?.status() ?:
-            "{\"state\":\"off\",\"klyuch\":${File(filesDir, KLYUCH).exists()},\"mic\":${micZapomnen()},\"teplo\":${Hub.teplo}}"
+            "{\"state\":\"off\",\"klyuch\":${File(filesDir, KLYUCH).exists()},\"mic\":${micZapomnen()},\"teplo\":${Hub.teplo}," +
+                "\"fps_vybor\":${nastroykiZapomneny().first},\"tsel_kbps\":${nastroykiZapomneny().second}}"
         override fun key(k: String) = try { File(filesDir, KLYUCH).writeText(k); true } catch (e: Exception) { false }
         override fun mic(g: Float): String {
             val v = Efir.Opts.glush(g)
             try { File(filesDir, MIC).writeText(v.toString()) } catch (e: Exception) { }
             efir?.mikrofon = v
             return efir?.status() ?: "{\"state\":\"off\",\"mic\":$v}"
+        }
+        override fun nastroyki(q: Map<String, String>): String {
+            val (f0, k0) = nastroykiZapomneny()
+            val f = Efir.Opts.fps(q["fps"]?.toIntOrNull()) ?: f0
+            val k = Efir.Opts.kbps(q["kbps"]?.toIntOrNull()) ?: k0
+            try { File(filesDir, NASTROYKI).writeText("$f $k") } catch (e: Exception) { }
+            efir?.nastroit(f, k)
+            return efir?.status() ?: "{\"state\":\"off\",\"fps_vybor\":$f,\"tsel_kbps\":$k}"
         }
     }
 
@@ -397,6 +407,12 @@ class CaptureService : Service() {
         }
     }
 
+    /** Запомненные частота и поток эфира (нет файла — 30 к/с и 6000 кбит/с, как было). */
+    private fun nastroykiZapomneny(): Pair<Int, Int> = try {
+        val z = File(filesDir, NASTROYKI).readText().trim().split(' ')
+        (Efir.Opts.fps(z[0].toIntOrNull()) ?: Efir.Opts.FPS) to (Efir.Opts.kbps(z[1].toIntOrNull()) ?: Efir.Opts.KBPS)
+    } catch (e: Exception) { Efir.Opts.FPS to Efir.Opts.KBPS }
+
     private fun micZapomnen() = try { File(filesDir, MIC).readText().trim().toFloat() } catch (e: Exception) { Efir.Opts.MIC }
 
     private fun oshibka(msg: String) = "{\"state\":\"off\",\"oshibka\":${FrameServer.json(msg)}}"
@@ -416,7 +432,8 @@ class CaptureService : Service() {
         efir?.let { return it.status() }
         val key = File(filesDir, KLYUCH).takeIf { it.exists() }?.readText()?.trim().orEmpty()
         if (key.isEmpty()) return oshibka("нет ключа эфира: в Termux `kluch twitch`, потом `efir`")
-        val opts = try { Efir.Opts.iz(q, micZapomnen()) } catch (e: Exception) { return oshibka(e.message ?: "настройки эфира") }
+        val (fps0, kbps0) = nastroykiZapomneny()
+        val opts = try { Efir.Opts.iz(q, micZapomnen(), fps0, kbps0) } catch (e: Exception) { return oshibka(e.message ?: "настройки эфира") }
         val p = projection ?: return oshibka("захват не идёт")
         val d = display ?: return oshibka("захват не идёт")
         val h = handler ?: return oshibka("захват не идёт")
