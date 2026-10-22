@@ -101,4 +101,41 @@ class TitryTest {
         assertTrue(tt.upr(mapOf("kto" to "ya", "t" to "def")).contains("\"ok\":true"))
         assertEquals(listOf("xyz", "def"), tt.seychas().map { it.tekst })
     }
+
+    /** Черновик растёт на месте, чистовик заменяет и закрепляет; опоздавший черновик его не трогает. */
+    @Test fun chernovikChistovik() {
+        val tt = Titry({ now })
+        tt.upr(mapOf("kto" to "ya", "t" to "привет как", "ot" to "s", "id" to "r1"))
+        tt.upr(mapOf("kto" to "ya", "t" to "привет как дела", "ot" to "s", "id" to "r1"))
+        assertEquals(listOf("привет как дела"), tt.seychas().map { it.tekst })
+        val o = tt.upr(mapOf("kto" to "ya", "t" to "Привет, как дела?", "t2" to "Hi, how are you?", "ot" to "s", "id" to "r1", "tochno" to "1"))
+        assertTrue(o.contains("\"id\":true") && o.contains("\"zakreplena\":true"))
+        tt.upr(mapOf("kto" to "ya", "t" to "привет как дела ну", "ot" to "s", "id" to "r1"))
+        assertEquals(listOf("Привет, как дела?"), tt.seychas().map { it.tekst })
+        assertEquals("Hi, how are you?", tt.seychas()[0].perevod)
+        tt.upr(mapOf("kto" to "ya", "t" to "вторая реплика", "ot" to "s", "id" to "r2"))
+        assertEquals(2, tt.seychas().size)
+    }
+
+    /** Уши (полная модель) — чистовик для реплики sinhron, кто бы ни пришёл первым; чужая реплика не трогается. */
+    @Test fun ushiChistovik() {
+        val tt = Titry({ now }, { true })
+        tt.upr(mapOf("kto" to "ya", "t" to "плюс покажи карту", "ot" to "s", "id" to "r1"))
+        val o = tt.upr(mapOf("kto" to "ya", "t" to "Покажи карту.", "t2" to "Show the map."))
+        assertTrue(o, o.contains("\"chistovik\":true"))
+        assertEquals(listOf("Покажи карту."), tt.seychas().map { it.tekst })
+        // уши раньше sinhron: ждут реплику и становятся её текстом
+        tt.upr(mapOf("kto" to "ya", "t" to "Какая сейчас погода?"))
+        tt.upr(mapOf("kto" to "ya", "t" to "какая сейчас пагода", "ot" to "s", "id" to "r2"))
+        assertEquals("Какая сейчас погода?", tt.seychas().last().tekst)
+        assertTrue(tt.zakreplena("ya", "r2"))
+        // непохожая реплика — остаётся своей
+        tt.upr(mapOf("kto" to "ya", "t" to "Стреляй левее."))
+        tt.upr(mapOf("kto" to "ya", "t" to "вчера смотрели кино до ночи с друзьями и потом гуляли", "ot" to "s", "id" to "r3"))
+        assertEquals("вчера смотрели кино до ночи с друзьями и потом гуляли", tt.seychas().last().tekst)
+        // старая фраза ушей (больше 12 с) не цепляется
+        now += 13_000
+        tt.upr(mapOf("kto" to "ya", "t" to "стреляй левее", "ot" to "s", "id" to "r4"))
+        assertEquals("стреляй левее", tt.seychas().last().tekst)
+    }
 }

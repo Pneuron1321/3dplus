@@ -23,6 +23,10 @@
   sinhron rpm 18          — запросов к Whisper в минуту
   sinhron platnyy | besplatnyy — уровень Groq: платный — 120 в минуту и без предела звука
   sinhron demon           — сам цикл (запускает plus; второй не запустится)
+  Черновик → чистовик (22.10, мост 2.6.8+): куски одной реплики растут в одной строке (черновик turbo, сразу); после
+  паузы вся реплика — одним запросом к полной модели (large-v3), и строка заменяется чистовиком. Чистовику — своя
+  копилка (CHIST_RPM в минуту, CHIST_ASH секунд в час), чтобы не съесть слух Плюса на той же модели; на сегодня у
+  полной меньше CHIST_DEN_MIN — чистовиков нет, остаются черновики. Говоришь Плюсу — чистовик ставят уши (мост).
 Ключ — /root/.groq-key (кладёт `kluch`): не печатать, не читать вслух. Слова гостей и игры Плюсу с
 инструментами не идут — только в кадр и в /tmp/sinhron-istoriya.log."""
 import fcntl
@@ -58,6 +62,14 @@ STAROE_IGRA = 9.0
 SKLEIT_MAKS = 16.0     # склеенный запрос не длиннее, с
 MIN_SEK = 10.0         # Groq считает запрос короче 10 с за 10 с
 ASH = 7000.0           # секунд звука в час (у бесплатного Groq — 7200)
+# Черновик → чистовик: куски одной реплики — пауза между ними меньше REPLIKA_PAUZA, вся реплика не длиннее SKLEIT_MAKS
+REPLIKA_PAUZA = 2.0
+REPLIKA_KONEC = 2.5     # тишина после реплики (по приходу последнего куска) — пора чистовика, с
+REPLIKA_ZHIVET = 25.0   # старше — чистовик уже не нужен (строка ушла с экрана)
+CHIST_GOLOSA = ('ya', 'g1', 'g2', 'g3')     # игре — только черновик: её речь редко стоит запроса
+CHIST_RPM = float(os.environ.get('SINHRON_CHIST_RPM', 6))
+CHIST_ASH = float(os.environ.get('SINHRON_CHIST_ASH', 1800))
+CHIST_DEN_MIN = 300     # у полной модели на сегодня меньше — чистовиков нет (это и слух Плюса)
 POROG_TIHIH = 0.12     # «тихих» кусков меньше — музыка, не речь (только игра)
 ZHDAT_PEREVOD = 1.2    # перевод — пачкой: ждём столько с первой фразы
 IGRA_DOLYA = 1 / 3     # игре — не больше трети запросов и секунд звука
@@ -233,6 +245,18 @@ class Sinhron:
         self.oshibka = ''
         self.zhiv_most = False
         self.staroe = False                   # приложение без /titry/rech (старше 2.5.0)
+        # черновик → чистовик
+        self.id_da = None                     # мост понимает реплики (/titr ответил "id":true) — None: ещё не знаю
+        self.repliki = {}                     # голос → открытая реплика
+        self.repl_po_id = {}                  # id → реплика (и закрытые — пока живут)
+        self.n_repl = 0
+        self.chist_korzina = 2.0
+        self.chist_zvuk = 120.0
+        self.chistT = time.time()
+        self.chist_pauza_do = 0.0
+        self.ostalos_polnaya = None
+        for k in ('chistovikov', 'chist_propusk', 'chist_zakrepleno'):
+            self.schet[k] = 0
 
     # ---------- приём фраз ----------
 
@@ -396,7 +420,105 @@ class Sinhron:
         self.prompt[f.golos] = tekst[-200:]
         self.yaz[f.golos] = yazyk
         with self.lock:
-            self.perevod.append((f.golos, tekst, yazyk, time.time()))
+            meta = self._v_repliku(f, tekst, yazyk)
+            self.perevod.append((f.golos, tekst, yazyk, time.time(), meta))
+            self.lock.notify_all()
+
+    # ---------- черновик → чистовик ----------
+
+    def _v_repliku(self, f, tekst, yazyk):
+        """Кусок — в открытую реплику голоса (или новую). Под self.lock. → (id, номер куска) или None."""
+        if self.id_da is False:
+            return None
+        r = self.repliki.get(f.golos)
+        konec_kuska = f.nachalo + f.sek
+        if (r is None or r['zakryta'] or f.nachalo - r['konec'] > REPLIKA_PAUZA * SEK
+                or r['sek'] + f.sek > SKLEIT_MAKS or len(' '.join(r['teksty'])) + len(tekst) > 150
+                or self.id_da is None and r['teksty']):           # пока не знаю, понимает ли мост, — по строке на кусок
+            self.n_repl += 1
+            r = {'id': 'r%d-%d' % (os.getpid() % 10000, self.n_repl), 'golos': f.golos, 'frazy': [], 'teksty': [],
+                 'perevody': [], 'yazyk': yazyk, 'sek': 0.0, 'konec': konec_kuska, 'prishla': f.prishla,
+                 'zakryta': False, 'rodilas': time.time()}
+            self.repliki[f.golos] = r
+            self.repl_po_id[r['id']] = r
+            for rid in [k for k, v in self.repl_po_id.items() if time.time() - v['rodilas'] > REPLIKA_ZHIVET * SEK * 2]:
+                del self.repl_po_id[rid]
+        r['frazy'].append(f)
+        r['teksty'].append(tekst)
+        r['perevody'].append(None)
+        r['sek'] += f.sek
+        r['konec'] = max(r['konec'], konec_kuska)
+        r['prishla'] = f.prishla
+        r['yazyk'] = yazyk
+        return (r['id'], len(r['teksty']) - 1)
+
+    def chistovik(self):
+        """Тишина после реплики — вся реплика полной моделью одним запросом; строка заменяется чистовиком."""
+        while True:
+            time.sleep(0.25 * SEK)
+            r = None
+            with self.lock:
+                now = time.time()
+                for g, x in list(self.repliki.items()):
+                    if x['zakryta'] or now - x['prishla'] < REPLIKA_KONEC * SEK:
+                        continue
+                    if any(f.golos == g for f in self.ochered):              # голос ещё говорит — ждём
+                        continue
+                    if any(m and m[0] == x['id'] for *_, m in self.perevod):   # черновик ещё не показан
+                        continue
+                    x['zakryta'] = True
+                    del self.repliki[g]
+                    log('реплика %s закрыта: кусков %d, %.1f с' % (x['id'], len(x['frazy']), x['sek']))
+                    if self.id_da and g in CHIST_GOLOSA and now - x['rodilas'] < REPLIKA_ZHIVET * SEK:
+                        r = x
+                        break
+            if r is None:
+                continue
+            try:
+                self.chistovik_odin(r)
+            except Exception as e:
+                self.schet['oshibok'] += 1
+                self.oshibka = 'чистовик: %s %s' % (type(e).__name__, str(e)[:60])
+                log(self.oshibka)
+
+    def _chist_byudzhet(self, cena):
+        now = time.time()
+        dt = (now - self.chistT) / max(SEK, 0.001)
+        self.chistT = now
+        self.chist_korzina = min(2.0, self.chist_korzina + dt * CHIST_RPM / 60.0)
+        self.chist_zvuk = min(120.0, self.chist_zvuk + dt * CHIST_ASH / 3600.0)
+        if now < self.chist_pauza_do or self.chist_korzina < 1 or self.chist_zvuk < cena:
+            return False
+        if self.ostalos_polnaya is not None and self.ostalos_polnaya < CHIST_DEN_MIN:
+            return False
+        self.chist_korzina -= 1
+        self.chist_zvuk -= cena
+        return True
+
+    def chistovik_odin(self, r):
+        if model() == MODEL_POLNAYA and len(r['frazy']) < 2:
+            return                                  # платный уровень: черновик уже полной моделью
+        key = klyuch()
+        if not key:
+            return
+        f = skleit(r['frazy']) if len(r['frazy']) > 1 else r['frazy'][0]
+        log('чистовик %s: %d кусков' % (r['id'], len(r['frazy'])))
+        if not self._chist_byudzhet(max(MIN_SEK, f.sek)):
+            self.schet['chist_propusk'] += 1
+            return
+        golos, ya = r['golos'], r['golos'] == 'ya'
+        yazyk = r['yazyk'] if r['yazyk'] in ('ru', 'uk', 'en') else ('ru' if ya else None)
+        pod = self.podskazka(golos, yazyk)
+        d, _ = self.whisper(f, key, yazyk, pod, mdl=MODEL_POLNAYA)
+        self.schet['zaprosov'] += 1
+        tekst = self.otbor(d, 0.6, pod, False, ya)
+        chern = ' '.join(r['teksty'])
+        if not tekst or tekst == chern:
+            return
+        self.prompt[golos] = tekst[-200:]
+        self.schet['chistovikov'] += 1
+        with self.lock:
+            self.perevod.append((golos, tekst, yazyk or r['yazyk'], time.time(), (r['id'], -1)))
             self.lock.notify_all()
 
     def _igra_itog(self, est_rech):
@@ -454,9 +576,10 @@ class Sinhron:
             ostalos.append(t)
         return ' '.join(ostalos).strip()
 
-    def whisper(self, f, key, yazyk=None, pod=''):
+    def whisper(self, f, key, yazyk=None, pod='', mdl=None):
         b = uuid.uuid4().hex
-        polya = {'model': model(), 'response_format': 'verbose_json', 'temperature': '0'}
+        chist = mdl is not None                 # чистовик: свои лимиты, своя пауза — черновики не ждут
+        polya = {'model': mdl or model(), 'response_format': 'verbose_json', 'temperature': '0'}
         if pod:
             polya['prompt'] = pod
         if yazyk:
@@ -470,11 +593,14 @@ class Sinhron:
             'Content-Type': 'multipart/form-data; boundary=' + b})
         try:
             with urllib.request.urlopen(req, timeout=12) as r:
-                self._limity(r.headers, 'whisper')
+                self._limity(r.headers, 'polnaya' if chist else 'whisper')
                 return json.loads(r.read().decode('utf-8')), r.headers
         except urllib.error.HTTPError as e:
-            self._limity(e.headers, 'whisper')
-            if e.code == 429:
+            self._limity(e.headers, 'polnaya' if chist else 'whisper')
+            if e.code == 429 and chist:
+                self.chist_pauza_do = time.time() + max(60.0, self._pauza(e.headers)) * SEK
+                log('чистовик: лимит полной модели (429) — пауза')
+            elif e.code == 429:
                 pauza = self._pauza(e.headers)
                 self.pauza_do = time.time() + pauza * SEK
                 self.oshibka = 'Groq: лимит (429), жду %.0f с' % pauza
@@ -487,7 +613,9 @@ class Sinhron:
         try:
             v = h.get('x-ratelimit-remaining-requests')
             if v is not None:
-                if chto == 'whisper':
+                if chto == 'polnaya':
+                    self.ostalos_polnaya = int(float(v))
+                elif chto == 'whisper':
                     self.ostalos_den = int(float(v))
                     if self.ostalos_den < 200 and 'malo' not in self.skazano:
                         self.skazano.add('malo')
@@ -523,15 +651,25 @@ class Sinhron:
                 self.schet['oshibok'] += 1
                 self.oshibka = 'перевод: %s' % type(e).__name__
                 perevody = [None] * len(pachka)
-            for (golos, tekst, yazyk, _), p in zip(pachka, perevody):
-                self.pokazat(golos, tekst, p, yazyk)
+            for (golos, tekst, yazyk, _, meta), p in zip(pachka, perevody):
+                if not meta:
+                    self.pokazat(golos, tekst, p, yazyk)
+                    continue
+                rid, i = meta
+                with self.lock:
+                    r = self.repl_po_id.get(rid)
+                    if r is not None and i >= 0:
+                        r['perevody'][i] = p or ''
+                        tekst = ' '.join(r['teksty'][:i + 1])            # черновик реплики — все куски до этого
+                        p = ' '.join(x for x in r['perevody'][:i + 1] if x)
+                self.pokazat(golos, tekst, p, yazyk, rid, tochno=i < 0)
 
     def perevesti(self, pachka):
         key = klyuch()
         if not key or not pachka:
             return [None] * len(pachka)
         stroki = ['%d. [to %s] %s' % (i + 1, 'Russian' if y == 'en' else 'English', t)
-                  for i, (_, t, y, _) in enumerate(pachka)]
+                  for i, (_, t, y, *_) in enumerate(pachka)]
         zadanie = ('You translate live-stream subtitles (a VR game stream with guests). Each user line is '
                    '"N. [to LANGUAGE] text". Translate every line into its target language: short, natural, '
                    'spoken style; keep names (Plus, Alexander, guest names), game terms and numbers; add '
@@ -575,20 +713,28 @@ class Sinhron:
             return out
         return [None] * len(pachka)
 
-    def pokazat(self, golos, tekst, perevod, yazyk):
+    def pokazat(self, golos, tekst, perevod, yazyk, rid=None, tochno=False):
         q = {'kto': golos, 't': tekst, 'ot': 's'}
+        if rid:
+            q['id'] = rid
+        if tochno:
+            q['tochno'] = '1'
         if perevod and pismo(perevod) not in (None, 'kir' if yazyk == 'en' else 'lat'):
             perevod = None                    # «перевод» тем же языком — второй ряд не нужен
         if perevod and perevod != tekst:
             q['t2'] = perevod
         try:
-            most('/titr?' + urllib.parse.urlencode(q, quote_via=urllib.parse.quote))
+            otv = most('/titr?' + urllib.parse.urlencode(q, quote_via=urllib.parse.quote))
             self.schet['subtitrov'] += 1
+            self.id_da = '"id":true' in otv                  # мост 2.6.8+ понимает реплики
+            if '"zakreplena":true' in otv and not tochno:
+                self.schet['chist_zakrepleno'] += 1           # чистовик уже поставили уши
         except Exception as e:
             self.oshibka = 'приложение: %s' % type(e).__name__
         try:
             with open(ISTORIYA, 'a') as f:
-                f.write('%s %s %s | %s | %s\n' % (time.strftime('%H:%M:%S'), golos, yazyk, tekst, perevod or ''))
+                f.write('%s %s %s%s | %s | %s\n' % (time.strftime('%H:%M:%S'), golos, yazyk, ' ЧИСТОВИК' if tochno else '',
+                                                    tekst, perevod or ''))
         except OSError:
             pass
 
@@ -602,7 +748,8 @@ class Sinhron:
                          v_ocheredi=len(self.ochered), pauza=max(0, round(self.pauza_do - time.time())),
                          most=self.zhiv_most, staroe=self.staroe, oshibka=self.oshibka, model=model(),
                          igra_pauza=max(0, round((self.igra_pauza_do - time.time()) / max(SEK, 0.001))),
-                         perevod=PEREVOD[self.perevod_model].strip(), ms=int(time.time() * 1000))
+                         perevod=PEREVOD[self.perevod_model].strip(), ms=int(time.time() * 1000),
+                         chistovik=self.id_da, ostalos_polnaya=self.ostalos_polnaya)
                 tmp = SOST + '.novyy'
                 with open(tmp, 'w') as f:
                     json.dump(d, f, ensure_ascii=False)
@@ -629,7 +776,7 @@ def demon():
         return 0
     log('запущен')
     s = Sinhron()
-    for f in (s.priyom, s.slushat, s.perevodit, s.sostoyanie):
+    for f in (s.priyom, s.slushat, s.perevodit, s.sostoyanie, s.chistovik):
         threading.Thread(target=f, daemon=True).start()
     mt = os.path.getmtime(__file__)
     while True:
@@ -704,6 +851,12 @@ def main(a):
           'устарели %d, склеено %d; перевод — %s.' % (
               s.get('fraz', 0), s.get('zaprosov', 0), s.get('subtitrov', 0), s.get('muzyka', 0), s.get('vydumki', 0),
               s.get('tishina', 0), s.get('starye', 0), s.get('skleeno', 0), s.get('perevod')))
+    if s.get('chistovik'):
+        print('Черновик → чистовик: чистовиков %d, пропущено (копилка полной модели) %d, поставили уши %d; '
+              'у полной модели на сегодня: %s.' % (s.get('chistovikov', 0), s.get('chist_propusk', 0),
+                                                   s.get('chist_zakrepleno', 0), s.get('ostalos_polnaya') or 'не знаю'))
+    elif s.get('chistovik') is False:
+        print('Черновик → чистовик: мост старше 2.6.8 — только черновики.')
     if s.get('staroe'):
         print('Приложение 2 старше 2.5.0 — фраз по голосам не отдаёт: субтитры начнутся с APK 2.5.0.')
     if s.get('pauza'):

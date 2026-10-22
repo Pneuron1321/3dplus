@@ -219,6 +219,7 @@ object Most {
         zametkaSluzhby?.let { append("$it\n") }
         append("Эфир (Струны): ${Struny.sostoyanie}, отдано кадров ${Struny.kadrov}\n")
         append("Внешние камеры Android (запасной путь): ${vneshnieKamery(ctx)}\n")
+        append("Разжиматель MJPEG в железе (проба для «Максимума»): ${mjpegZhelezo()}\n")
         k?.c?.rawDescriptors?.let { append("Дескрипторы (${it.size} Б): ${Hex.str(it)}\n") }
     }
 
@@ -237,6 +238,21 @@ object Most {
             "id $id: YUV $razm"
         }
     } catch (e: Exception) { "не прочитать: ${e.javaClass.simpleName}" }
+
+    /**
+     * Проба (Александр 22.10: «зачем разжимать процессором»): есть ли в шлеме декодер MJPEG, который Android
+     * открывает приложениям, и аппаратный ли он. Есть аппаратный — «Максимум» можно перевести на него.
+     */
+    fun mjpegZhelezo(): String = try {
+        val tipy = setOf("video/mjpeg", "video/x-motion-jpeg", "image/jpeg")
+        val naideno = android.media.MediaCodecList(android.media.MediaCodecList.ALL_CODECS).codecInfos
+            .filter { !it.isEncoder && it.supportedTypes.any { t -> t.lowercase() in tipy } }
+            .map { c ->
+                val zhel = if (android.os.Build.VERSION.SDK_INT >= 29) (if (c.isHardwareAccelerated) "железо" else "программный") else "?"
+                "${c.name} [${c.supportedTypes.filter { it.lowercase() in tipy }.joinToString(",")}; $zhel]"
+            }
+        if (naideno.isEmpty()) "нет — разжимаем процессором (BitmapFactory в ${Pokaz.POTOKOV} потоках)" else naideno.joinToString("; ")
+    } catch (e: Exception) { "не узнать: ${e.javaClass.simpleName}" }
 
     fun status(): String {
         val k = karta
@@ -273,7 +289,7 @@ object Most {
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.1.0"
+    const val VERSIYA = "3.1.1"
 }
 
 /**
