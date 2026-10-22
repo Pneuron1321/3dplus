@@ -31,6 +31,8 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
     @Volatile var plohih = 0L; private set
     @Volatile var sbrosheno = 0L; private set        // байт выброшено, чтобы звук не отставал
     @Volatile var pik = 0; private set                // пик за последние ~0,5 с (0..32767)
+    /** Куда ещё отдать PCM (запись игры, Klip3): буфер, байт, время в мкс по System.nanoTime. */
+    @Volatile var naPcm: ((ByteArray, Int, Long) -> Unit)? = null
     @Volatile var gromkost = 1f
         set(v) { field = v.coerceIn(0f, 1.5f); trek?.setVolume(field.coerceAtMost(1f)) }
 
@@ -110,6 +112,7 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
             }
             vPolete.incrementAndGet()
             if (n == 0) continue
+            naPcm?.invoke(vyhod, n, System.nanoTime() / 1000)
             pikOkno = maxOf(pikOkno, Pcm.pik(vyhod, n))
             if (++pikSchet >= 50) { pik = pikOkno; pikOkno = 0; pikSchet = 0 }
             // Часы карты и шлема расходятся: если в AudioTrack накопилось больше 120 мс — этот кусок выбросить.

@@ -689,6 +689,22 @@ def most3(a):
         if r is None:
             return 1, [MOST3_MOLCHIT], None
         return 0, ['Мост 3: ' + str((razobrat(r[1]) or {}).get('otvet'))], None
+    if c == 'klip':
+        a2 = a[1] if len(a) > 1 else ''
+        if a2 in ('vkl', 'vykl'):
+            r = zapros(U, '/klip?vkl=' + ('1' if a2 == 'vkl' else '0'), 5)
+            if r is None:
+                return 1, [MOST3_MOLCHIT], None
+            return 0, ['Мост 3: запись игры ' + ('включена.' if a2 == 'vkl' else 'выключена.')], None
+        sek = a2 if a2.isdigit() else '120'
+        r = zapros(U, '/klip?sek=' + sek, 120)
+        if r is None:
+            return 1, [MOST3_MOLCHIT], None
+        d = razobrat(r[1]) or {}
+        if d.get('oshibka'):
+            return 1, ['Клип игры: ' + d['oshibka']], None
+        return 0, ['Клип игры сохранён: %s, %s с, %s МБ%s.' % (d.get('put'), d.get('sek'), d.get('mb'),
+                                                               '' if d.get('zvuk') else ', без звука')], None
     if c in ('diagnoz', 'otchet'):
         r = zapros(U, '/diagnoz', 10)
         if r is None:
@@ -699,7 +715,7 @@ def most3(a):
         if r is None:
             return 1, [MOST3_MOLCHIT], None
         return 0, r[1].strip().split('\n'), None
-    return 0, ['most3 — что показывает; most3 zvuk 80|vkl|vykl; most3 podklyuchit; most3 rezhimy; most3 diagnoz. '
+    return 0, ['most3 — что показывает; most3 zvuk 80|vkl|vykl; most3 podklyuchit; most3 rezhimy; most3 diagnoz; most3 klip [60] — клип игры. '
                'Картинка — karta kartinka (сама идёт в Мост 3, если он открыт).'], None
 
 

@@ -54,6 +54,7 @@ class MainActivity : Activity() {
         Most.zapusk(this)
         gl = GLSurfaceView(this).apply {
             setEGLContextClientVersion(3)
+            setEGLConfigChooser(Konfig)                        // «записываемая» поверхность — для записи игры
             setRenderer(Pokaz(Most.polka))
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
             setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) pokazatPanel(); false }
@@ -129,6 +130,7 @@ class MainActivity : Activity() {
         addView(knopka("Звук −") { Most.gromkost = Most.gromkost - 0.1f })
         addView(knopka("Звук +") { Most.gromkost = Most.gromkost + 0.1f })
         addView(knopka("Звук вкл/выкл") { Most.zvuk(!Most.zvukVkl) })
+        addView(knopka("Клип 2 мин") { Thread { val o = Most.sohranitKlip(120); ui.post { stroka.text = o } }.start() })
         addView(knopka("Ручки") { polzunki.visibility = if (polzunki.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
     }
 
@@ -183,6 +185,19 @@ class MainActivity : Activity() {
         super.onDestroy()
         try { unregisterReceiver(usb) } catch (e: Exception) { }
         if (isFinishing) Most.ostanovit()
+    }
+
+    /** RGBA8, OpenGL ES 3, EGL_RECORDABLE_ANDROID (кодировщик берёт ту же конфигурацию); нет такой — без «записываемой». */
+    private object Konfig : GLSurfaceView.EGLConfigChooser {
+        override fun chooseConfig(egl: javax.microedition.khronos.egl.EGL10, d: javax.microedition.khronos.egl.EGLDisplay): javax.microedition.khronos.egl.EGLConfig {
+            fun vybrat(zapis: Boolean): javax.microedition.khronos.egl.EGLConfig? {
+                val a = intArrayOf(0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3040, 0x40) +
+                    (if (zapis) intArrayOf(0x3142, 1) else intArrayOf()) + intArrayOf(0x3038)
+                val c = arrayOfNulls<javax.microedition.khronos.egl.EGLConfig>(1); val n = IntArray(1)
+                return if (egl.eglChooseConfig(d, a, c, 1, n) && n[0] > 0) c[0] else null
+            }
+            return vybrat(true) ?: vybrat(false) ?: throw IllegalStateException("нет конфигурации EGL для OpenGL ES 3")
+        }
     }
 
     companion object {

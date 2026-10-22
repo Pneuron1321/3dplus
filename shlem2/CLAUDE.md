@@ -149,7 +149,8 @@
   `most3` — что показывает; `most3 zvuk 80|vkl|vykl`; «картинка/ярче/сочнее/ночь/резче/как было» — тот же
   `karta kartinka …` (если Мост 3 показывает, команда сама идёт в него: наборы obychno monitor noch yarko rezko,
   шаги yarche temnee sochnee blednee kontrastnee myagche rezche, gamma|teni|rezkost|avtonoch N). Чёрный экран или
-  «не показывает» — `most3 diagnoz`, первую строку скажи, весь ответ Александр пересылает Claude Code.
+  «не показывает» — `most3 diagnoz`, «сохрани клип игры» — `most3 klip` (2 мин; «за минуту» — `most3 klip 60`; картинка
+  как в шлеме, со звуком игры; в галерею, папка Plus). Чёрный экран или первую строку скажи, весь ответ Александр пересылает Claude Code.
   Доступ к карте (2.6.6): мосту нужны «Камера» и «USB-камера» (кнопка «Всё сразу» спросит).
   Своё окно «Разрешить» Quest не показывает. Путь: вынуть карту из хаба на 5 с,
   вставить; в «Choose an app to use with your video device» выбрать «Плюс: картинка карты → HDMI Link» (можно Always) —

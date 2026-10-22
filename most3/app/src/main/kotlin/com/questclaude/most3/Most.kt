@@ -18,6 +18,9 @@ object Most {
     @Volatile var oshibkaPokaza: String? = null
     @Volatile var nastrojki = Nastrojki(); private set
     @Volatile var zvukVkl = true; private set
+    /** Запись игры в круг (Klip3) — для «сохрани клип игры». */
+    @Volatile var klip: Klip3? = null; private set
+    @Volatile var klipVkl = true; private set
     /** Последний целый кадр для показа (поток чтения кладёт, GL берёт). */
     val polka = Polka()
     private var dir: File? = null
@@ -63,6 +66,7 @@ object Most {
             val s = v.sbor
             if ((s?.kadrov ?: 0) > 0) {
                 popytki += "${r.opisanie()}: кадры идут"
+                if (klipVkl) vklKlip(k, r)
                 if (zvukVkl) vklZvuk()
                 oshibka = null
                 return "показываю: ${r.opisanie()}" + if (popytki.size > 1) " (после ${popytki.size - 1} откат.)" else ""
@@ -82,7 +86,7 @@ object Most {
         val a1 = k.interfejs(z.interfejs, z.alt) ?: return
         val um = app?.getSystemService(UsbManager::class.java) ?: return
         val c2 = um.openDevice(k.ustr) ?: run { zvukOshibka = "второе соединение с картой не открылось"; return }
-        val zz = Zvuk(c2, z, a0, a1).also { it.gromkost = gromkost }
+        val zz = Zvuk(c2, z, a0, a1).also { it.gromkost = gromkost; it.naPcm = { b, n, t -> klip?.pcm(b, n, t) } }
         if (zz.start()) { zvuk = zz; zvukOshibka = null } else { zvukOshibka = zz.oshibka; zz.stop() }   // stop закроет своё соединение
     }
 
@@ -92,6 +96,25 @@ object Most {
     @Volatile var gromkost = 1f
         set(v) { field = v.coerceIn(0f, 1.5f); zvuk?.gromkost = field; sohranit() }
 
+    private fun vklKlip(k: Karta, r: UvcRezhim) {
+        val c = app ?: return
+        val z = k.op.zvuk
+        klip = Klip3(c.cacheDir, r.shirina, r.vysota).also { it.start(z?.chastoty?.firstOrNull { h -> h == 48000 } ?: z?.chastoty?.firstOrNull(), z?.kanaly ?: 2) }
+    }
+
+    fun klip(vkl: Boolean) {
+        klipVkl = vkl; sohranit()
+        if (!vkl) { klip?.stop(); klip = null }
+        else if (klip == null) { val k = karta; val r = video?.rezhim; if (k != null && r != null && video?.rabotaet == true) vklKlip(k, r) }
+    }
+
+    /** Последние [sek] секунд игры — в MP4 в галерею (Movies/Plus). Ответ JSON, как у клипа камеры моста 2. */
+    fun sohranitKlip(sek: Int): String {
+        val c = app ?: return "{\"oshibka\":\"мост не запущен\"}"
+        val k = klip ?: return "{\"oshibka\":\"запись игры выключена (most3 klip vkl)\"}"
+        return KlipMp4.sohranit(c, k.zapis, sek)
+    }
+
     fun zvuk(vkl: Boolean) {
         zvukVkl = vkl; sohranit()
         if (!vkl) { zvuk?.stop(); zvuk = null } else if (zvuk == null && video?.rabotaet == true) vklZvuk()
@@ -99,6 +122,7 @@ object Most {
 
     @Synchronized fun ostanovit() {
         zvuk?.stop(); zvuk = null
+        klip?.stop(); klip = null
         video?.stop(); video = null
         karta?.zakryt(); karta = null
     }
@@ -142,6 +166,7 @@ object Most {
             append("Видео: ${it.status()}\n")
         }
         z?.let { append("Звук: ${it.status()}\n") }
+        klip?.let { append("Запись игры: ${it.status()}\n") }
         append("Показ: ${"%.0f".format(polka.pokazFps)} к/с, средняя яркость ${"%.3f".format(polka.srednyaya)}" +
             (oshibkaPokaza?.let { ", ошибка: $it" } ?: "") + "\n")
         append("Внешние камеры Android (запасной путь): ${vneshnieKamery(ctx)}\n")
@@ -167,7 +192,7 @@ object Most {
     fun status(): String {
         val k = karta
         return "{\"versiya\":\"$VERSIYA\",\"karta\":${k?.let { Json.str(it.ustr.productName.orEmpty()) } ?: "null"}," +
-            "\"video\":${video?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: zvukOshibka?.let { "{\"idyot\":false,\"oshibka\":${Json.str(it)}}" } ?: "null"},\"zvuk_vkl\":$zvukVkl," +
+            "\"video\":${video?.status() ?: "null"},\"klip\":${klip?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: zvukOshibka?.let { "{\"idyot\":false,\"oshibka\":${Json.str(it)}}" } ?: "null"},\"zvuk_vkl\":$zvukVkl," +
             "\"pokaz_fps\":${"%.1f".format(polka.pokazFps)},\"srednyaya\":${"%.3f".format(polka.srednyaya)}," +
             "\"avto_teni\":${"%.3f".format(polka.avtoTeni)},\"kartinka\":${nastrojkiJson()}," +
             "\"oshibka_pokaza\":${oshibkaPokaza?.let { Json.str(it) } ?: "null"}," +
@@ -185,13 +210,14 @@ object Most {
         try {
             val z = File(d, "zvuk").readText().trim().split(' ')
             zvukVkl = z.getOrNull(0) != "0"; z.getOrNull(1)?.toFloatOrNull()?.let { gromkost = it }
+            klipVkl = z.getOrNull(2) != "0"
         } catch (e: Exception) { }
     }
 
     private fun sohranit() {
         val d = dir ?: return
         try { File(d, "kartinka").writeText(nastrojki.vStroku()) } catch (e: Exception) { }
-        try { File(d, "zvuk").writeText("${if (zvukVkl) 1 else 0} $gromkost") } catch (e: Exception) { }
+        try { File(d, "zvuk").writeText("${if (zvukVkl) 1 else 0} $gromkost ${if (klipVkl) 1 else 0}") } catch (e: Exception) { }
     }
 
     const val PORT = 8767

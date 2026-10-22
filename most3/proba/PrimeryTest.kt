@@ -1,5 +1,8 @@
 package com.questclaude.most3
 
+// Картинки «до/после» шейдера. java.awt есть только на обычной JVM, в тестах Android его нет — поэтому файл здесь,
+// а не в app/src/test. Запуск: scratchpad/acompile5 → gradle --offline -q test -Dprimery=1
+
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.awt.Color

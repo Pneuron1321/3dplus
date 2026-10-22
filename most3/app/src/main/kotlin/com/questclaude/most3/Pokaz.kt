@@ -2,6 +2,12 @@ package com.questclaude.most3
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.opengl.EGL14
+import android.opengl.EGLConfig as EglKonfig
+import android.opengl.EGLContext
+import android.opengl.EGLDisplay
+import android.opengl.EGLExt
+import android.opengl.EGLSurface
 import android.opengl.GLES30.*
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
@@ -32,6 +38,10 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
     private var tPred = System.nanoTime()
     private var nv12: ByteArray? = null
     private val mjpeg = Mjpeg()
+    // Запись игры (Klip3): та же картинка — ещё и в поверхность кодировщика (EGL14 поверх контекста GLSurfaceView)
+    private var eglD: EGLDisplay? = null; private var eglK: EGLContext? = null; private var eglCfg: EglKonfig? = null
+    private var kodPov: EGLSurface? = null; private var kodSurface: android.view.Surface? = null
+    private var kodNelzya = false
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         progYuy2 = programma(Shader.FRAG_YUY2); progNv12 = programma(Shader.FRAG_NV12); progRgba = programma(Shader.FRAG_RGBA)
@@ -54,6 +64,12 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
         glPixelStorei(GL_PACK_ALIGNMENT, 1)
         tekVid = null; poslednij = -1
+        eglD = EGL14.eglGetCurrentDisplay(); eglK = EGL14.eglGetCurrentContext()
+        val id = IntArray(1)
+        EGL14.eglQueryContext(eglD, eglK, EGL14.EGL_CONFIG_ID, id, 0)
+        val cfgs = arrayOfNulls<EglKonfig>(1); val n = IntArray(1)
+        EGL14.eglChooseConfig(eglD, intArrayOf(EGL14.EGL_CONFIG_ID, id[0], EGL14.EGL_NONE), 0, cfgs, 0, 1, n, 0)
+        eglCfg = cfgs[0]; kodPov = null; kodSurface = null; kodNelzya = false
     }
 
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) { ekranW = w; ekranH = h }
@@ -90,9 +106,33 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         val vw = (kw * m).toInt(); val vh = (kh * m).toInt()
         glViewport((ekranW - vw) / 2, (ekranH - vh) / 2, vw, vh)
         risovat(prog, n, polka.avtoTeni, syroe = false)
+        if (novyj) zapisat(prog, n)
 
         kadrovPokaz++
         if (t - t0 >= 1_000_000_000L) { polka.pokazFps = kadrovPokaz * 1e9f / (t - t0); kadrovPokaz = 0; t0 = t }
+    }
+
+    /** Кадр — в кодировщик записи игры: переключиться на его поверхность, нарисовать, отметить время, вернуться. */
+    private fun zapisat(prog: Int, n: Nastrojki) {
+        val k = Most.klip
+        val s = k?.poverhnost
+        if (s !== kodSurface) {
+            kodPov?.let { EGL14.eglDestroySurface(eglD, it) }
+            kodPov = null; kodSurface = s; kodNelzya = false
+            if (s != null) kodPov = try {
+                EGL14.eglCreateWindowSurface(eglD, eglCfg, s, intArrayOf(EGL14.EGL_NONE), 0).takeIf { it != EGL14.EGL_NO_SURFACE }
+            } catch (e: Exception) { null }
+            if (s != null && kodPov == null) { kodNelzya = true; Most.oshibkaPokaza = "запись игры: поверхность кодировщика не создалась" }
+        }
+        val pov = kodPov ?: return
+        if (kodNelzya || k == null) return
+        val draw = EGL14.eglGetCurrentSurface(EGL14.EGL_DRAW); val read = EGL14.eglGetCurrentSurface(EGL14.EGL_READ)
+        if (!EGL14.eglMakeCurrent(eglD, pov, pov, eglK)) { kodNelzya = true; return }
+        glViewport(0, 0, k.shirina, k.vysota)
+        risovat(prog, n, polka.avtoTeni, syroe = false)
+        EGLExt.eglPresentationTimeANDROID(eglD, pov, System.nanoTime())
+        EGL14.eglSwapBuffers(eglD, pov)
+        EGL14.eglMakeCurrent(eglD, draw, read, eglK)
     }
 
     private fun risovat(prog: Int, n: Nastrojki, avto: Float, syroe: Boolean) {

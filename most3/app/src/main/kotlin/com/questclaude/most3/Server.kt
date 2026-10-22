@@ -15,6 +15,7 @@ import java.net.URLDecoder
  *   GET /zvuk?vkl=0|1&g=80            — звук карты в шлем, громкость в %
  *   GET /karta/ruchki?yarkost=N&…     — ручки внутри карты (UVC): yarkost kontrast ton nasyshchennost
  *   GET /rezhimy                      — что умеет карта (текст)
+ *   GET /klip?sek=60                  — последние N секунд игры в MP4 (галерея, Movies/Plus); ?vkl=0|1 — запись в круг
  *   GET /diagnoz                      — самоотчёт первого запуска (текст; первая строка — итог)
  */
 class Server(private val port: Int) {
@@ -56,6 +57,11 @@ class Server(private val port: Int) {
             200 to (Most.zvuk?.status() ?: "{\"idyot\":false,\"vkl\":${Most.zvukVkl}}")
         }
         "/karta/ruchki" -> 200 to ruchki(q)
+        "/klip" -> {
+            q["vkl"]?.let { Most.klip(it == "1" || it == "vkl") }
+            if (q.containsKey("sek") || q.isEmpty()) 200 to Most.sohranitKlip(q["sek"]?.toIntOrNull() ?: 120)
+            else 200 to (Most.klip?.status() ?: "{\"idyot\":false,\"vkl\":${Most.klipVkl}}")
+        }
         "/diagnoz" -> 200 to (Most.app?.let { Most.diagnoz(it) } ?: "мост не запущен")
         "/rezhimy" -> 200 to (Most.karta?.let { Most.opisanieKarty(it) }
             ?: Most.app?.let { File(it.filesDir, "karta-rezhimy.txt").takeIf { f -> f.exists() }?.readText() } ?: "карта ещё не открывалась")
