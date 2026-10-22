@@ -33,7 +33,10 @@
     PU: '#8656ec', PU2: '#7444dc', PU3: '#9464f0',
     OT1: '#e06c00', OT2: '#cc5e00', OT3: '#ec7a04',
     /* v5 — тело по листу 2 */
-    MG3: '#74787e', MG4: '#65696f', DG3: '#343432', BR: '#6a5d55', FG: '#646466'
+    MG3: '#74787e', MG4: '#65696f', DG3: '#343432', BR: '#6a5d55', FG: '#646466',
+    /* голова «зверя» (лист Александра: зелёный громила) */
+    ZG1: '#5c9c2c', ZG2: '#4d8a25', ZG3: '#6daf3a', ZG4: '#3c6e1e', ZG5: '#7fbf45',
+    ZM: '#5c1212', ZM2: '#7a1c18', ZT: '#b4463c', ZI: '#efe4c4', ZI2: '#e0d0a4'
   };
 
   /* смеси: класс клетки → из чего выбирается цвет каждого кирпича */
@@ -69,7 +72,11 @@
     footBase: [['O4', 0.6], ['O3', 0.4]],
     footMid: [['O1', 0.62], ['O6', 0.2], ['O5', 0.18]],
     footTop: [['OT1', 0.45], ['OT3', 0.3], ['OT2', 0.25]],
-    bracket: [['O2', 0.6], ['O6', 0.4]]
+    bracket: [['O2', 0.6], ['O6', 0.4]],
+    zver: [['ZG1', 0.55], ['ZG2', 0.27], ['ZG3', 0.18]],
+    zverDark: [['ZG4', 0.65], ['ZG2', 0.35]],
+    zverMouth: [['ZM', 0.7], ['ZM2', 0.3]],
+    zverTongue: [['ZT', 1]]
   };
 
   function create(T, opts) {
@@ -79,8 +86,6 @@
     /* ---------- цвет и случайность (детерминированно) ---------- */
     const LIN = {};
     Object.keys(PALETTE).forEach(k => { LIN[k] = new T.Color(PALETTE[k]).convertSRGBToLinear(); });
-    if (opts.cvet === 'zel') Object.entries({ YE: '#4f9a2a', YE2: '#428a22', YE3: '#5aab32' })     // зелёная раскраска «зверя»
-      .forEach(([k, v]) => { LIN[k] = new T.Color(v).convertSRGBToLinear(); });
     let seed = opts.seed || 90217;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
     const hash = (a, b, c) => {
@@ -690,9 +695,8 @@
         }
       }).box(0, 4, 0, 5, 0, 1, 'skull').build(lico.bufs.plastic);
       /* объёмное лицо (Александр 22.10, фото: «там объёмное лицо»): щёки и подбородок выступают вперёд накладкой —
-         подкова вокруг рта (ряды под линзой), края скруглены наружу и вниз; у «зверя» — второй слой: тяжёлая челюсть */
-      const zver = opts.lico === 'zver';
-      const cheek = (x, y) => (x <= 1 || x >= 10) ? y <= 5 : y <= (zver ? 1 : 2);
+         подкова вокруг рта (ряды под линзой), края скруглены наружу и вниз */
+      const cheek = (x, y) => (x <= 1 || x >= 10) ? y <= 5 : y <= 2;
       const sloy = (z0, dz, fn) => new Vox({ cell: [S, FACE_ROW, dz], at: [-4.8, FACE_Y0, z0], maxLen: 4, merge: 0.55, salt: 8 + dz * 10,
         gap: 0.02, bev: 0.03,
         clip: c => {
@@ -707,8 +711,7 @@
         .del(v => !v.cls)
         .build(lico.bufs.plastic);
       sloy(4.8, 0.4, cheek);
-      if (!zver) sloy(5.2, 0.2, (x, y) => (x <= 1 || x >= 10) && y >= 1 && y <= 4);   // середина щеки — выпуклее
-      if (zver) sloy(5.2, 0.32, (x, y) => (x >= 0 && x <= 11) && ((x <= 1 || x >= 10) ? y <= 3 : y === 0));
+      sloy(5.2, 0.2, (x, y) => (x <= 1 || x >= 10) && y >= 1 && y <= 4);              // середина щеки — выпуклее
       [[-3.2, -2.4], [3.2, -2.4], [-3.2, 2.4], [3.2, 2.4]].forEach(([x, z]) => magnet(lico, x, CAP_Y + 0.02, z, [0, 1, 0]));
       [-1, 1].forEach(s => { magnet(lico, s * 4.8, 2.4, -2.0, [s, 0, 0]); magnet(lico, s * 4.8, 5.2, -2.0, [s, 0, 0]); });
     }
@@ -740,37 +743,6 @@
       const t = new T.Mesh(mb.geometry(), MAT.plastic);
       t.name = 'teeth'; t.position.set(0, W(19.2), FZ + 0.02); t.visible = false;
       lico.g.add(t); faceParts.teeth = t;
-    }
-    /* ---- вариант «зверь» (opts.lico = 'zver', по образцу Александра — зелёный громила): тяжёлые надбровья над
-            визором (злой излом к переносице), оскал — тёмная пасть с верхними зубами и клыками сверху и снизу;
-            улыбка обычного лица в этом варианте скрыта ---- */
-    if (opts.lico === 'zver') {
-      ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => { faceParts[n].visible = false; });
-      const brovi = new MeshBuf(), q = new T.Quaternion(), e = new T.Euler();
-      [-1, 1].forEach(sx => {
-        e.set(0.25, 0, sx * 0.3); q.setFromEuler(e);
-        m4.compose(new T.Vector3(sx * 2.0, W(23.45), 5.25), q, ss.set(1, 1, 1));
-        bevelBox(brovi, 0, 0, 0, 1.75, 0.42, 0.62, 0.12, LIN.YE2, 63, m4);
-        e.set(0.25, 0, sx * 0.12); q.setFromEuler(e);
-        m4.compose(new T.Vector3(sx * 4.3, W(23.85), 5.0), q, ss.set(1, 1, 1));
-        bevelBox(brovi, 0, 0, 0, 0.9, 0.3, 0.5, 0.1, LIN.YE2, 63, m4);
-      });
-      const bm = new T.Mesh(brovi.geometry(), MAT.plastic); bm.name = 'zverBrovi'; bm.castShadow = true;
-      lico.g.add(bm); faceParts.brovi = bm;
-      const oskal = new T.Group(); oskal.name = 'zverOskal'; oskal.position.set(0, W(19.15), FZ - 0.005);
-      const past = new MeshBuf();
-      bevelBox(past, 0, 0, 0, 2.75, 0.62, 0.06, 0.05, LIN.BK, 63 - 32);                       // пасть
-      bevelBox(past, 0, -0.32, 0.01, 2.3, 0.2, 0.06, 0.05, new T.Color('#7a1414').convertSRGBToLinear(), 63 - 32);  // глотка
-      const pm = new T.Mesh(past.geometry(), MAT.ink); pm.name = 'zverPast'; oskal.add(pm);
-      const zuby = new MeshBuf(), WH = LIN.WH2;
-      for (let i = -3; i <= 3; i++) bevelBox(zuby, i * 0.62, 0.42, 0.06, 0.24, 0.16, 0.05, 0.04, WH, 63 - 32);   // верхний ряд
-      const klyk = (x, y, dn) => {                                                                          // клык: ромб остриём
-        m4.makeRotationZ(Math.PI / 4).premultiply(new T.Matrix4().makeScale(0.8, dn ? 1.9 : 1.4, 1)).setPosition(x, y, 0.08);
-        bevelBox(zuby, 0, 0, 0, 0.2, 0.2, 0.06, 0.04, WH, 63 - 32, m4);
-      };
-      [-1, 1].forEach(sx => { klyk(sx * 1.95, 0.08, true); klyk(sx * 1.2, -0.32, false); });
-      const zm = new T.Mesh(zuby.geometry(), MAT.plastic); zm.name = 'zverZuby'; oskal.add(zm);
-      lico.g.add(oskal); faceParts.oskal = oskal;
     }
 
     /* ---- боковые плиты как на листе 1: наборные модули 1.8 × 1.6 (4 ряда × 5 столбцов, y 1.15…8.35,
@@ -992,6 +964,168 @@
       rimMesh.name = 'ochki_oprava'; rimMesh.castShadow = true; ochki.add(rimMesh);
     }
     parts.ochki = { g: ochki, name: 'ochki' };
+
+    /* ============================================================
+       ВАРИАНТ ГОЛОВЫ «ЗВЕРЬ» (opts.lico = 'zver') — по листу Александра (зелёный громила, HEAD DETAIL):
+       низкий лоб под тяжёлыми надбровьями со злым изломом к переносице, глубоко посаженные оранжевые глаза,
+       широкий приплюснутый нос с ноздрями и морщинами на переносице, выпуклые скулы, тяжёлая широкая челюсть
+       с брылами, огромная раскрытая пасть (тёмно-красная, язык) с рядами клыков сверху и снизу и длинными
+       клыками по краям, острые уши назад, гребень из шипов-перьев от лба через макушку назад, бахрома шипов
+       у скул. Голова — те же кирпичи (сетка 0.8 × 0.512 × 0.8, скосы по рёбрам), шипы и зубы — гранёные конусы.
+       Шапка, очки, боковые плиты и улыбка в этом варианте убраны (группы остаются пустыми — разлёт и мимика
+       работают); глаза моргают.
+       ============================================================ */
+    if (opts.lico === 'zver') {
+      ['shapka', 'bokL', 'bokR', 'lico'].forEach(n => parts[n].g.clear());
+      ochki.clear();
+      const z = part('lico_zver');
+      const R = FACE_ROW, X0 = -6.4, Z0 = -6.4, NX = 16, NY = 20, NZ = 16;
+      const sq = v => v * v;
+      const ell = (X, Y, Z, cx, cy, cz, rx, ry, rz) => sq((X - cx) / rx) + sq((Y - cy) / ry) + sq((Z - cz) / rz) <= 1;
+      const MOUTH = { cy: 1.95, rx: 2.75, ry: 1.2, z0: 2.3 };
+      const inMouth = (X, Y, Z) => Z >= MOUTH.z0 && sq(X / MOUTH.rx) + sq((Y - MOUTH.cy) / MOUTH.ry) <= 1;
+      const jawW = Y => 4.85 - 0.18 * Math.max(0, Y - 3) - (Y < 0.9 ? 0.9 * (0.9 - Y) : 0);
+      function solid(X, Y, Z) {
+        if (Y < 0.2) return false;
+        const cran = ell(X, Y, Z, 0, 5.3, -0.9, 4.5, 3.6, 4.3);
+        const jaw = Y <= 4.2 && Math.pow(Math.abs(X) / jawW(Y), 3) + Math.pow(Math.abs(Z - 0.5) / 4.3, 3) <= 1;
+        const cheek = ell(X, Y, Z, 3.3, 3.9, 3.0, 1.7, 1.2, 1.7) || ell(X, Y, Z, -3.3, 3.9, 3.0, 1.7, 1.2, 1.7);
+        const yb = 4.55 + 0.52 * Math.abs(X);                             // злой излом: у переносицы низко, к вискам вверх
+        const brow = Math.abs(X) <= 3.7 && Math.abs(Y - yb) <= 0.4 && Z >= 1.5 && Z <= 5.15 - 0.06 * X * X - (Y > yb + 0.15 ? 0.45 : 0);
+        const face = ell(X, Y, Z, 0, 4.0, 2.6, 3.4, 1.4, 1.9);
+        const nose = ell(X, Y, Z, 0, 3.85, 4.45, 1.5, 0.78, 1.05) || (Math.abs(X) <= 0.7 && Y >= 3.8 && Y <= 5.0 && Z <= 4.75);
+        const muzzle = ell(X, Y, Z, 0, 1.95, 3.5, 3.7, 2.15, 1.85);
+        return cran || jaw || cheek || brow || face || nose || muzzle;
+      }
+      const tongue = (X, Y, Z) => ell(X, Y, Z, 0, 1.05, 3.0, 1.7, 0.5, 1.4);
+      const occ = new Set(), key = (i, j, k) => (i * 64 + j) * 64 + k;
+      const C = (i, j, k) => [X0 + (i + 0.5) * S, (j + 0.5) * R, Z0 + (k + 0.5) * S];
+      for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) for (let k = 0; k < NZ; k++) {
+        const [X, Y, Zc] = C(i, j, k);
+        if ((solid(X, Y, Zc) && !inMouth(X, Y, Zc)) || tongue(X, Y, Zc)) occ.add(key(i, j, k));
+      }
+      const has = (i, j, k) => occ.has(key(i, j, k));
+      const nearMouth = (i, j, k) => [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+        .some(([a, b, c]) => { const [X, Y, Zc] = C(i + a, j + b, k + c); return inMouth(X, Y, Zc) && !has(i + a, j + b, k + c); });
+      const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]];
+      new Vox({ cell: [S, R, S], at: [X0, 0, Z0], maxLen: 2, merge: 0.32, salt: 41, gap: 0.02, bev: 0.034,
+        clip: c => {                                                       // скругление: скос каждого открытого ребра
+          const open = DIRS.filter(([a, b, d]) => !has(c.x + a, c.y + b, c.z + d)), pl = [];
+          for (let p = 0; p < open.length; p++) for (let q = p + 1; q < open.length; q++) {
+            const A = open[p], B = open[q];
+            if (A[0] + B[0] === 0 && A[1] + B[1] === 0 && A[2] + B[2] === 0) continue;
+            pl.push(...CUT.edge(A, B, 0.82));
+          }
+          return pl.length ? pl : null;
+        } })
+        .box(0, NX, 0, NY, 0, NZ, (i, j, k) => {
+          if (!has(i, j, k)) return null;
+          const [X, Y, Zc] = C(i, j, k);
+          if (tongue(X, Y, Zc) && inMouth(X, Y, Zc)) return 'zverTongue';
+          if (nearMouth(i, j, k)) {                                         // внутренность пасти; губы и подбородок — зелёные
+            const [Xf, Yf, Zf] = C(i, j, k + 1);
+            if (has(i, j, k + 1) || inMouth(Xf, Yf, Zf)) return 'zverMouth';
+          }
+          if (Math.abs(X) <= 0.8 && Y >= 4.1 && Y <= 5.4 && Zc >= 3.6) return (j % 2 ? 'zverDark' : 'zver');   // морщины переносицы, борозда между бровей
+          if (Y >= 4.6 && Zc >= 1.5 && Math.abs(Y - (4.55 + 0.52 * Math.abs(X))) <= 0.25 && Zc >= 4.0) return 'zverDark'; // тень под надбровьем
+          return 'zver';
+        })
+        .del(v => !v.cls)
+        .build(z.bufs.plastic);
+      /* ноздри — тёмные провалы на носу */
+      [-1, 1].forEach(sx => bevelBox(z.bufs.plastic, sx * 0.62, 3.5, 5.42, 0.3, 0.17, 0.12, 0.05, LIN.BK, 63));
+
+      /* гранёный конус (шип, клык, ухо): основание r = 1 на y = 0, острие на y = 1 */
+      const CONE = latheTpl([[0, 0, 0, -1], [1, 0, 0, -1], [1, 0, 0.72, 0.69], [0.42, 0.62, 0.8, 0.6], [0, 1, 0.5, 0.86]], opts.lite ? 5 : 7);
+      const dirV = new T.Vector3();
+      function cone(mb, x, y, zz, dir, len, rw, rd, col, twist) {
+        dirV.set(dir[0], dir[1], dir[2]).normalize();
+        qq.setFromUnitVectors(UP, dirV);
+        if (twist) qq.multiply(new T.Quaternion().setFromAxisAngle(UP, twist));
+        m4.compose(vv.set(x, y, zz), qq, ss.set(rw, len, rd));
+        emitTpl(mb, CONE, m4, col);
+      }
+      const ZC = ['ZG1', 'ZG2', 'ZG3', 'ZG5', 'ZG4'];
+      let sd = 777;
+      const rr = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
+      /* гребень: шипы-перья по поверхности черепа — от лба над надбровьями через макушку назад,
+         смотрят вверх и назад, выше и крупнее на макушке, по бокам ложатся наружу */
+      const spikes = new MeshBuf(true);
+      const NSP = opts.lite ? 70 : 120;
+      for (let n = 0; n < NSP * 3 && spikes.v < 1e7; n++) {
+        const u = rr() * 2 - 1, ph = rr() * Math.PI * 2, rxy = Math.sqrt(1 - u * u);
+        const nx = rxy * Math.cos(ph), ny = u, nz = rxy * Math.sin(ph);
+        const X = nx * 4.5, Y = 5.3 + ny * 3.6, Zs = -0.9 + nz * 4.3;
+        if (Y < 6.1 && !(Zs < -1.2 && Y > 3.6)) continue;                // гребень: верх и затылок
+        if (Zs > 1.6 && Y < 5.95) continue;                               // лоб низкий — шипы начинаются сразу над бровями
+        if (n % 3 && Y < 7.2 && Zs < -1.2 && rr() < 0.4) continue;
+        const top = Math.max(0, Math.min(1, (Y - 5.5) / 3.4));
+        const nrm = new T.Vector3(nx / 4.5, ny / 3.6, nz / 4.3).normalize();
+        const d = nrm.clone().add(new T.Vector3(0, 0.45, -1.05)).normalize();      // зачёсаны назад, как на листе
+        const back = Math.max(0, Math.min(1, (1.5 - Zs) / 5));
+        const len = (1.2 + 1.5 * top + 1.0 * back) * (0.8 + rr() * 0.45), rw = 0.5 + 0.28 * top + rr() * 0.12;
+        cone(spikes, X - d.x * 0.35, Y - d.y * 0.35, Zs - d.z * 0.35, [d.x, d.y, d.z], len, rw, rw * 0.55,
+          LIN[ZC[Math.floor(rr() * 4)]], Math.atan2(X, Zs + 3));
+      }
+      /* грива вокруг лица (как на листе: лицо в рамке шипов): от скул до висков, наружу и назад,
+         три слоя по глубине; ниже — короче и смотрят вниз */
+      [-1, 1].forEach(sx => {
+        for (let n = 0; n < 11; n++) for (let l = 0; l < 3; l++) {
+          const Y = 1.2 + n * 0.5 + l * 0.2, Zs = 2.4 - l * 1.5 - rr() * 0.4;
+          const hi = Math.max(0, Math.min(1, (Y - 1.2) / 5));
+          const w = Y <= 4.2 ? jawW(Y) : 4.5 * Math.sqrt(Math.max(0.2, 1 - sq((Y - 5.3) / 3.6)));
+          const d = [sx * 1, -0.6 + hi * 1.1, -0.55 - l * 0.25];
+          cone(spikes, sx * (w - 0.5), Y, Zs, d, (1.0 + hi * 1.2 + l * 0.3) * (0.8 + rr() * 0.4), 0.5, 0.26, LIN[ZC[(n + l) % 4]], sx * 0.5);
+        }
+      });
+      /* острые уши: вбок и назад-вверх, внутри — тёмная впадина */
+      [-1, 1].forEach(sx => {
+        cone(spikes, sx * 4.3, 4.6, 0.6, [sx * 1, 0.35, -0.45], 2.8, 0.85, 0.36, LIN.ZG2, sx * 0.2);
+        cone(spikes, sx * 4.55, 4.6, 0.78, [sx * 1, 0.35, -0.45], 2.0, 0.52, 0.16, LIN.ZG4, sx * 0.2);
+      });
+      spikes.bakeAO && spikes.bakeAO();
+      const spM = new T.Mesh(spikes.geometry(), MAT.plastic); spM.name = 'zver_greben'; spM.castShadow = true; spM.receiveShadow = true;
+
+      /* клыки: внешний ряд по губе пасти (сверху вниз, снизу вверх), длинные клыки по краям, второй ряд глубже */
+      const zuby = new MeshBuf(true);
+      const muzzleZ = (X, Y) => 3.5 + 1.85 * Math.sqrt(Math.max(0, 1 - sq(X / 3.7) - sq((Y - 1.95) / 2.15)));
+      function ryad(top, n, depth, k) {
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) / n * 2 - 1, X = t * MOUTH.rx * 0.86;
+          const e = Math.sqrt(Math.max(0, 1 - sq(X / MOUTH.rx)));
+          const Y = MOUTH.cy + (top ? 1 : -1) * MOUTH.ry * e * 1.04;
+          const Zt = Math.min(muzzleZ(X, Y), 5.2) - 0.32 - depth;
+          const fang = top ? Math.abs(Math.abs(t) - 0.62) < 0.12 : Math.abs(Math.abs(t) - 0.5) < 0.13;
+          const len = (fang ? (top ? 1.35 : 1.05) : 0.55 + 0.12 * (1 - Math.abs(t))) * k;
+          const w = (fang ? 0.3 : 0.2 + 0.05 * (1 - Math.abs(t))) * k;
+          const dx = -X * 0.06;
+          cone(zuby, X, Y, Zt, [dx, top ? -1 : 1, 0.05], len, w, w * 0.8, LIN[fang ? 'ZI' : (i % 2 ? 'ZI' : 'ZI2')]);
+        }
+      }
+      ryad(true, 10, 0, 1); ryad(false, 9, 0, 1);
+      ryad(true, 8, 0.75, 0.75); ryad(false, 7, 0.75, 0.7);
+      const zbM = new T.Mesh(zuby.geometry(), MAT.plastic); zbM.name = 'zver_klyki'; zbM.castShadow = true;
+
+      /* глаза: злой прищур (внутренний край ниже), светятся оранжевым; узкий тёмный зрачок */
+      const glow = new T.MeshStandardMaterial({ color: new T.Color('#ff8a1e').convertSRGBToLinear(), emissive: new T.Color('#ff5a00').convertSRGBToLinear(),
+        emissiveIntensity: 1.25, roughness: 0.3, metalness: 0 });
+      glow.name = 'zver_glaz';
+      [-1, 1].forEach(sx => {
+        const g = new T.Group(); g.name = sx < 0 ? 'eyeL' : 'eyeR';
+        g.position.set(sx * 1.72, 4.45, 4.12); g.rotation.z = -sx * 0.32;
+        const eb = new MeshBuf(); bevelBox(eb, 0, 0, 0, 0.7, 0.28, 0.1, 0.06, LIN.WH, 63);
+        const em = new T.Mesh(eb.geometry(), glow); g.add(em);
+        const pb = new MeshBuf(); bevelBox(pb, sx * -0.05, 0, 0.09, 0.07, 0.2, 0.03, 0.02, LIN.BK, 63);
+        g.add(new T.Mesh(pb.geometry(), MAT.ink));
+        z.g.add(g); faceParts[g.name] = g;
+      });
+      z.finish(); z.g.add(spM, zbM);
+      lico.g.add(z.g);
+      /* мимика обычного лица — пустышки (рта-улыбки у зверя нет) */
+      ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => {
+        const o = new T.Object3D(); o.name = n; o.visible = false; o.userData.home = o.position.clone(); faceParts[n] = o;
+      });
+    }
 
     /* ============================================================
        ШЕЯ-ШТЫРЬ: воронёный ПВХ, воротник с винтами; входит в гнездо на верху груди
@@ -1477,10 +1611,6 @@
         leg.visible = smile;
       });
       F.teeth.visible = smile || (talk && open > 2);
-      if (F.oskal) {                                                         // «зверь»: пасть вместо улыбки, рычит при речи
-        ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => { F[n].visible = false; });
-        ease(F.oskal.scale, 'y', talk ? 0.8 + open * 0.2 : 1, talk ? 1 : k);
-      }
       F.teeth.scale.x = talk ? 0.8 : 1;
       F.teeth.position.y = H.y + (smile ? 0.0 : 0.08);
       st.glasses += (st.glassesTarget - st.glasses) * lerpK(0.1, dtK);
