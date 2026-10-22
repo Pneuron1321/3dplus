@@ -270,11 +270,15 @@ data class Shag(val rezhim: UvcRezhim, val maxFps: Int)
  * Лестница профиля: сначала режимы, подходящие задаче профиля (лучшие вперёд), потом — запасная лестница «Эфир»,
  * без повторов «формат+размер». zapomnennyj (режим, который уже срабатывал в этом профиле) — первым.
  */
-fun UvcOpisanie.lestnica(profil: Profil, zapomnennyj: UvcRezhim? = null, maks: Int = 6): List<Shag> {
+/**
+ * Режимы, ради которых профиль существует (лучшие вперёд). Запомнить в профиле можно только их (шлем 22.10: «Максимум»
+ * запомнил запасной MJPEG 1080p с USB 2 и потом не поднимался до 1440p60, хотя карта уже снова была на USB 3).
+ * 4К (шлем 22.10): несжатый NV12 4K30 — 25 к/с и сотни ошибок приёма (край канала USB) — сначала MJPEG.
+ */
+fun UvcOpisanie.podhodyat(profil: Profil): List<UvcRezhim> {
     fun fpsPri(r: UvcRezhim, cap: Int) = r.fps(r.luchshijInterval(cap))
     fun prioritet(v: UvcVid) = when (v) { UvcVid.NV12 -> 3; UvcVid.YUY2 -> 2; UvcVid.I420 -> 1; else -> 0 }
-    val cap = profil.maxFps
-    val podhodyat: List<UvcRezhim> = when (profil) {
+    return when (profil) {
         Profil.EFIR -> emptyList()
         Profil.PLAVNO -> rezhimy.filter { it.shirina == 1920 && it.vysota == 1080 && fpsPri(it, 120) >= 99 &&
             (it.nesjatyj || it.vid == UvcVid.MJPEG) }
@@ -283,10 +287,16 @@ fun UvcOpisanie.lestnica(profil: Profil, zapomnennyj: UvcRezhim? = null, maks: I
             .sortedWith(compareByDescending<UvcRezhim> { fpsPri(it, 60) >= 49.9 }      // плавные — вперёд
                 .thenByDescending { it.nesjatyj }.thenByDescending { prioritet(it.vid) }.thenByDescending { fpsPri(it, 60) })
         Profil.K4 -> rezhimy.filter { it.vysota == 2160 && (it.nesjatyj || it.vid == UvcVid.MJPEG) && fpsPri(it, 30) >= 23.9 }
-            .sortedWith(compareByDescending<UvcRezhim> { it.nesjatyj }.thenByDescending { fpsPri(it, 30) })
+            .sortedWith(compareByDescending<UvcRezhim> { it.vid == UvcVid.MJPEG }.thenByDescending { fpsPri(it, 30) })
         Profil.HDR -> rezhimy.filter { it.vid == UvcVid.P010 && fpsPri(it, 60) >= 23.9 }
             .sortedWith(compareByDescending<UvcRezhim> { it.shirina.toLong() * it.vysota * minOf(fpsPri(it, 60), 60.0) })
     }
+}
+
+fun UvcOpisanie.lestnica(profil: Profil, zapomnennyj: UvcRezhim? = null, maks: Int = 6): List<Shag> {
+    fun fpsPri(r: UvcRezhim, cap: Int) = r.fps(r.luchshijInterval(cap))
+    val cap = profil.maxFps
+    val podhodyat = podhodyat(profil)
     val out = ArrayList<Shag>()
     fun dobavit(r: UvcRezhim, c: Int) {
         if (out.size < maks && out.none { it.rezhim.vid == r.vid && it.rezhim.shirina == r.shirina && it.rezhim.vysota == r.vysota })

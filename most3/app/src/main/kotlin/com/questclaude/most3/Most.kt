@@ -59,7 +59,8 @@ object Most {
         val k = Karta.otkryt(um, d) ?: return osh("карта не открылась")
         karta = k
         try { File(dir, "karta-rezhimy.txt").writeText(opisanieKarty(k)) } catch (e: Exception) { }
-        val lestnica = k.op.lestnica(profil, zapomnennyj(k, profil))
+        val lestnica = ruchnoj?.let { r -> k.op.rezhimy.firstOrNull { it == r } }?.let { listOf(Shag(it, profil.maxFps)) }
+            ?: k.op.lestnica(profil, zapomnennyj(k, profil))
         if (lestnica.isEmpty()) return osh("карта не назвала ни одного режима видео")
         for ((r, potolok) in lestnica) {
             polka.rezhim = r
@@ -74,7 +75,7 @@ object Most {
             if ((s?.kadrov ?: 0) > 0) {
                 polka.rezhim = v.rezhim                            // карта могла поправить режим при COMMIT
                 popytki += "${v.rezhim.opisanie()}: кадры идут"
-                zapomnit(profil, v.rezhim)
+                if (ruchnoj == null) zapomnit(k, profil, v.rezhim)
                 if (klipVkl) vklKlip(k, v.rezhim)
                 if (zvukVkl) vklZvuk()
                 app?.let { Sluzhba.vkl(it) }
@@ -91,32 +92,47 @@ object Most {
     /** Профиль режимов (заход 2): efir / plavno / maks / 4k / hdr. Смена — переподключение. */
     @Volatile var profil = Profil.EFIR; private set
 
-    /** Сменить профиль и переподключить карту (в фоне — окно и пульт не ждут). */
+    /** Режим по номеру (most3 rezhim N) — один раз, до смены профиля или переподключения; в профиль не пишется. */
+    @Volatile private var ruchnoj: UvcRezhim? = null
+
+    /** Сменить профиль и переподключить карту (в фоне — окно и пульт не ждут); ручной режим — забыть. */
     fun smenitProfil(p: Profil) {
-        profil = p; sohranit()
+        profil = p; sohranit(); ruchnoj = null
         val c = app ?: return
         vFone { ostanovit(); podklyuchit(c) }
     }
 
-    /** Режим вручную по номеру из списка (most3 rezhimy): запомнить для текущего профиля и переподключить. */
+    /** Режим вручную по номеру из списка (most3 rezhimy): переподключить на нём; профиль его не запоминает. */
     fun vybratRezhim(n: Int): String {
         val r = karta?.op?.rezhimy?.getOrNull(n - 1) ?: return "нет режима №$n (карта открыта? most3 rezhimy)"
-        zapomnit(profil, r)
+        ruchnoj = r
         val c = app ?: return "мост не запущен"
         vFone { ostanovit(); podklyuchit(c) }
         return "пробую: ${r.opisanie()}"
     }
 
-    /** Режим, который уже срабатывал в профиле (файл rezhim-<профиль>: формат кадр Ш В вид) — первым в лестнице. */
+    /**
+     * Режим, который уже срабатывал в профиле — первым в лестнице. Файл rezhim-<профиль>-<код карты>: у Elgato на USB 2
+     * и USB 3 разные коды (009d/009c) и разные списки режимов — номера одного не годятся для другого.
+     */
+    private fun fajlRezhima(k: Karta, p: Profil) = File(dir, "rezhim-${p.imya}-%04x".format(k.ustr.productId))
+
     private fun zapomnennyj(k: Karta, p: Profil): UvcRezhim? = try {
-        val z = File(dir, "rezhim-${p.imya}").readText().trim().split(' ')
+        val z = fajlRezhima(k, p).readText().trim().split(' ')
         k.op.rezhimy.firstOrNull { it.formatIndex == z[0].toInt() && it.frameIndex == z[1].toInt() &&
             it.shirina == z[2].toInt() && it.vysota == z[3].toInt() && it.vid.name == z[4] }
     } catch (e: Exception) { null }
 
-    private fun zapomnit(p: Profil, r: UvcRezhim) {
-        try { File(dir, "rezhim-${p.imya}").writeText("${r.formatIndex} ${r.frameIndex} ${r.shirina} ${r.vysota} ${r.vid.name}") } catch (e: Exception) { }
+    /** Запомнить только режим, ради которого профиль (запасной — нет); «Эфир» — любой рабочий. */
+    private fun zapomnit(k: Karta, p: Profil, r: UvcRezhim) {
+        if (p != Profil.EFIR && k.op.podhodyat(p).none { it == r }) return
+        try { fajlRezhima(k, p).writeText("${r.formatIndex} ${r.frameIndex} ${r.shirina} ${r.vysota} ${r.vid.name}") } catch (e: Exception) { }
     }
+
+    /** Карта на USB 2 (bcdUSB в дескрипторе устройства < 3.0): у Elgato 4K X тогда нет 1440p/4K и несжатого 1080p. */
+    fun usb2(k: Karta): Boolean = k.c.rawDescriptors?.let { d -> d.size > 3 && (d[3].toInt() and 0xff) < 3 } ?: false
+
+    const val USB2_SOVET = "карта на USB 2 — только сжатый 1080p, без 1440p/4K: переткни карту, проверь кабель и хаб (нужен USB 3, SS/5 Gbps)"
 
     /** Звук — на своём соединении с картой (второй openDevice): у usbfs очередь готовых передач — на fd. */
     private fun vklZvuk() {
@@ -177,13 +193,17 @@ object Most {
     private fun osh(s: String): String { oshibka = s; return s }
 
     fun opisanieKarty(k: Karta): String = buildString {
-        append("Карта: ${k.ustr.productName} (${"%04x:%04x".format(k.ustr.vendorId, k.ustr.productId)}), UVC ${"%x".format(k.op.bcdUvc)}\n")
+        append("Карта: ${k.ustr.productName} (${"%04x:%04x".format(k.ustr.vendorId, k.ustr.productId)}), UVC ${"%x".format(k.op.bcdUvc)}" +
+            (if (usb2(k)) " — ВНИМАНИЕ: $USB2_SOVET" else ", USB 3") + "\n")
         append("Видео: интерфейс ${k.op.vsInterfejs}, точка 0x${k.op.tochka.toString(16)} ${if (k.op.bulk) "bulk" else "iso"}\n")
         append("Ручки: блок ${k.op.puId}, биты ${Integer.toBinaryString(k.op.puUpravlenie)}\n")
         k.op.zvuk?.let { append("Звук: интерфейс ${it.interfejs} alt ${it.alt}, точка 0x${it.tochka.toString(16)}, ${it.kanaly} к., ${it.bajt * 8} бит, ${it.chastoty} Гц, пакет ${it.paket}\n") }
         append("Режимы:\n"); k.op.rezhimy.forEachIndexed { i, r -> append("  ${i + 1}. ${r.opisanie()} (формат ${r.formatIndex}, кадр ${r.frameIndex})\n") }
         append("Профиль: ${profil.nadpis}\n")
-        append("Выбран: ${k.op.vybrat()?.opisanie()}\n")
+        // шлем 22.10: «Выбран» показывал выбор по умолчанию, а не то, что идёт, — путало
+        append("Сейчас идёт: ${video?.takeIf { it.rabotaet }?.rezhim?.opisanie() ?: "ничего"}" +
+            (ruchnoj?.let { " (вручную, до смены профиля)" } ?: "") + "\n")
+        append("Лестница профиля: ${k.op.lestnica(profil, zapomnennyj(k, profil)).joinToString(" → ") { it.rezhim.opisanie() }}\n")
     }
 
     /**
@@ -193,7 +213,8 @@ object Most {
     fun diagnoz(ctx: Context): String = buildString {
         val v = video; val z = zvuk; val k = karta
         append(when {
-            v?.rabotaet == true && (v.sbor?.kadrov ?: 0) > 0 -> "ИТОГ: видео идёт, ${v.rezhim.opisanie()}, ${"%.0f".format(v.fps)} к/с"
+            v?.rabotaet == true && (v.sbor?.kadrov ?: 0) > 0 -> "ИТОГ: видео идёт, ${v.rezhim.opisanie()}, ${"%.0f".format(v.fps)} к/с" +
+                (if (k != null && usb2(k)) "; $USB2_SOVET" else "")
             k == null -> "ИТОГ: карта не открыта — ${oshibka ?: "нет"}"
             else -> "ИТОГ: карта открыта, кадров нет — ${oshibka ?: v?.oshibka ?: "?"}"
         })
@@ -214,12 +235,12 @@ object Most {
         z?.let { append("Звук: ${it.status()}\n") }
         klip?.let { append("Запись игры: ${it.status()}\n") }
         append("Показ: ${"%.0f".format(polka.pokazFps)} к/с, средняя яркость ${Json.num(polka.srednyaya, 3)}" +
-            (if (polka.mjpegMs > 0) ", MJPEG ${Json.num(polka.mjpegMs)} мс/кадр в ${Pokaz.POTOKOV} потоках, не дождались ${polka.mjpegPropuskov}" else "") +
+            (if (polka.mjpegMs > 0 && video?.rezhim?.vid == UvcVid.MJPEG) ", MJPEG ${Json.num(polka.mjpegMs)} мс/кадр в ${Pokaz.POTOKOV} потоках, не дождались ${polka.mjpegPropuskov}" else "") +
             (oshibkaPokaza?.let { ", ошибка: $it" } ?: "") + "\n")
         zametkaSluzhby?.let { append("$it\n") }
         append("Эфир (Струны): ${Struny.sostoyanie}, отдано кадров ${Struny.kadrov}\n")
         append("Внешние камеры Android (запасной путь): ${vneshnieKamery(ctx)}\n")
-        append("Разжиматель MJPEG в железе (проба для «Максимума»): ${mjpegZhelezo()}\n")
+        if (video?.rezhim?.vid == UvcVid.MJPEG) append("Разжиматель MJPEG в железе (проба для «Максимума»): ${mjpegZhelezo()}\n")
         k?.c?.rawDescriptors?.let { append("Дескрипторы (${it.size} Б): ${Hex.str(it)}\n") }
     }
 
@@ -258,7 +279,7 @@ object Most {
         val k = karta
         return "{\"versiya\":\"$VERSIYA\",\"karta\":${k?.let { Json.str(it.ustr.productName.orEmpty()) } ?: "null"}," +
             "\"video\":${video?.status() ?: "null"},\"klip\":${klip?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: zvukOshibka?.let { "{\"idyot\":false,\"oshibka\":${Json.str(it)}}" } ?: "null"},\"zvuk_vkl\":$zvukVkl," +
-            "\"profil\":\"${profil.imya}\",\"pokaz_fps\":${Json.num(polka.pokazFps)},\"srednyaya\":${Json.num(polka.srednyaya, 3)}," +
+            "\"usb2\":${k?.let { usb2(it) } ?: false},\"ruchnoj\":${ruchnoj != null},\"profil\":\"${profil.imya}\",\"pokaz_fps\":${Json.num(polka.pokazFps)},\"srednyaya\":${Json.num(polka.srednyaya, 3)}," +
             "\"avto_teni\":${Json.num(polka.avtoTeni, 3)},\"mjpeg_ms\":${Json.num(polka.mjpegMs)},\"mjpeg_propuskov\":${polka.mjpegPropuskov},\"efir\":${Json.str(Struny.sostoyanie)},\"efir_kadrov\":${Struny.kadrov},\"kartinka\":${nastrojkiJson()}," +
             "\"oshibka_pokaza\":${oshibkaPokaza?.let { Json.str(it) } ?: "null"}," +
             "\"oshibka\":${oshibka?.let { Json.str(it) } ?: "null"}}"
@@ -289,7 +310,7 @@ object Most {
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.1.1"
+    const val VERSIYA = "3.1.2"
 }
 
 /**

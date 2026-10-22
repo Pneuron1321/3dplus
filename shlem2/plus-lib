@@ -688,6 +688,8 @@ def most3(a):
         if not v.get('idyot'):
             return 0, ['Мост 3 открыт, но карта не показывается: %s' % (v.get('oshibka') or d.get('oshibka') or 'нет карты')], None
         out = 'Мост 3 показывает: %s, приём %s к/с, показ %s к/с.' % (v.get('rezhim'), v.get('fps'), d.get('pokaz_fps'))
+        if d.get('usb2'):
+            out += ' Карта на USB 2 — только сжатый 1080p, без 1440p/4K: переткни карту, проверь кабель и хаб.'
         if z.get('idyot'):
             out += ' Звук игры %s дБ, громкость %d %%.' % (z.get('pik_db'), round((z.get('gromkost') or 0) * 100))
         elif not d.get('zvuk_vkl'):
@@ -699,10 +701,13 @@ def most3(a):
         return 0, [out], None
     if c == 'zvuk':
         a2 = a[1] if len(a) > 1 else ''
+        potolok = False
         if a2 in ('vkl', 'vykl'):
             put = '/zvuk?vkl=' + ('1' if a2 == 'vkl' else '0')
         elif a2.rstrip('%').isdigit():
             put = '/zvuk?g=' + a2.rstrip('%')
+            if int(a2.rstrip('%')) > 150:
+                potolok = True
         else:
             return 1, ['most3 zvuk 80 — громкость игры в %; most3 zvuk vkl|vykl.'], None
         r = zapros(U, put, 5)
@@ -711,7 +716,8 @@ def most3(a):
         d = razobrat(r[1]) or {}
         if not d.get('idyot'):
             return 0, ['Мост 3: звук игры выключен.' if d.get('vkl') is False else 'Мост 3: звука нет.'], None
-        return 0, ['Мост 3: звук игры, громкость %d %%.' % round((d.get('gromkost') or 0) * 100)], None
+        return 0, ['Мост 3: звук игры, громкость %d %%%s.' % (round((d.get('gromkost') or 0) * 100),
+                                                             ' — это потолок, громче мост не делает' if potolok else '')], None
     if c == 'podklyuchit':
         r = zapros(U, '/podklyuchit', 15)
         if r is None:
@@ -759,9 +765,27 @@ def most3(a):
         d = razobrat(r[1]) or {}
         if r[0] != 200:
             return 1, ['Мост 3: ' + str(d.get('oshibka') or 'не понял')], None
-        if 'otvet' in d:
-            return 0, ['Мост 3: %s.' % d['otvet']], None
-        return 0, ['Мост 3, профиль: %s.' % d.get('nadpis')], None
+        if 'otvet' not in d:
+            return 0, ['Мост 3, профиль: %s.' % d.get('nadpis')], None
+        # переподключение идёт в фоне (лестница — до ~2,5 с на ступень): дождаться и сказать, на чём встал
+        out = ['Мост 3: %s.' % d['otvet']]
+        time.sleep(float(os.environ.get('MOST3_SHAG') or 2))
+        konec = time.time() + float(os.environ.get('MOST3_ZHDAT') or 18)
+        st = None
+        while time.time() < konec:
+            r = zapros(U, '/status', 3)
+            st = razobrat(r[1]) if r and r[0] == 200 else None
+            if st and (st.get('video') or {}).get('idyot'):
+                break
+            time.sleep(float(os.environ.get('MOST3_SHAG') or 1))
+        v = (st or {}).get('video') or {}
+        if v.get('idyot'):
+            out.append('Встал на: %s, приём %s к/с.' % (v.get('rezhim'), v.get('fps')))
+            if st.get('usb2'):
+                out.append('Карта на USB 2 — 1440p/4K недоступны: переткни карту, проверь кабель и хаб (нужен USB 3).')
+        else:
+            out.append('Пока не показывает: %s (подробно — most3 diagnoz).' % ((st or {}).get('oshibka') or v.get('oshibka') or 'ждёт карту'))
+        return 0, out, None
     return 0, ['most3 — что показывает; most3 zvuk 80|vkl|vykl; most3 podklyuchit; most3 rezhimy; most3 rezhim maks|plavno|efir|4k|hdr|N; most3 diagnoz; most3 klip [60] — клип игры. '
                'Картинка — karta kartinka (сама идёт в Мост 3, если он открыт).'], None
 
