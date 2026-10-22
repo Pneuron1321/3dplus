@@ -9,6 +9,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ONLY_RENDERS = process.argv.includes('--renders-only');
 const PICK = process.argv.find(a => a.startsWith('--view='))?.slice(7);
+/* вариант лица (--lico=zver): рендеры с суффиксом -zver, GLB pixel-mech-zver.glb, без rig/паспорта */
+const LICO = process.argv.find(a => a.startsWith('--lico='))?.slice(7);
+const CVET = process.argv.find(a => a.startsWith('--cvet='))?.slice(7);          // --cvet=zel — зелёная раскраска
+const SUF = (LICO ? '-' + LICO : '') + (CVET ? '-' + CVET : '');
 
 function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
@@ -61,7 +65,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1400, height: 1400 } });
 page.on('console', m => { if (m.type() === 'error') console.error('[page]', m.text()); });
 page.on('pageerror', e => console.error('[page error]', e.message));
-await page.goto(pathToFileURL(join(ROOT, 'tools', 'render.html')).href);
+await page.goto(pathToFileURL(join(ROOT, 'tools', 'render.html')).href + '?' + new URLSearchParams({ ...(LICO && { lico: LICO }), ...(CVET && { cvet: CVET }) }));
 await page.waitForFunction('window.ready === true', null, { timeout: 120000 });
 console.log('детали:', await page.evaluate('JSON.stringify(window.stats())'));
 
@@ -69,15 +73,16 @@ mkdirSync(join(ROOT, 'renders'), { recursive: true });
 for (const [name, spec] of Object.entries(VIEWS)) {
   if (PICK ? !PICK.split(',').includes(name) : spec.qa) continue;
   const { png, anchors } = await page.evaluate(s => window.renderView(s), spec);
-  writeFileSync(join(ROOT, 'renders', name + '.png'), Buffer.from(png.split(',')[1], 'base64'));
-  if (spec.anchors) writeFileSync(join(ROOT, 'renders', name + '.json'), JSON.stringify(anchors, null, 1));
+  writeFileSync(join(ROOT, 'renders', name + SUF + '.png'), Buffer.from(png.split(',')[1], 'base64'));
+  if (spec.anchors) writeFileSync(join(ROOT, 'renders', name + SUF + '.json'), JSON.stringify(anchors, null, 1));
   console.log('рендер', name);
 }
-if (!ONLY_RENDERS && !PICK) {
+if (!ONLY_RENDERS && (!PICK || SUF)) {
   const b64 = await page.evaluate(() => window.exportGLB());
   const buf = Buffer.from(b64, 'base64');
-  writeFileSync(join(ROOT, 'pixel-mech.glb'), buf);
-  console.log('pixel-mech.glb', (buf.length / 1048576).toFixed(2), 'МБ');
+  writeFileSync(join(ROOT, 'pixel-mech' + SUF + '.glb'), buf);
+  console.log('pixel-mech' + SUF + '.glb', (buf.length / 1048576).toFixed(2), 'МБ');
+  if (!SUF) {
   /* для Godot/VR: скелет (гуманоидные имена костей), метры; полная и облегчённая геометрия */
   mkdirSync(join(ROOT, 'export'), { recursive: true });
   for (const [file, lite] of [['pixel-mech-rig.glb', false], ['pixel-mech-rig-lite.glb', true]]) {
@@ -88,5 +93,6 @@ if (!ONLY_RENDERS && !PICK) {
   const man = await page.evaluate(() => window.brickManifest());
   writeFileSync(join(ROOT, 'export', 'pixel-mech.bricks.json'), man);
   console.log('export/pixel-mech.bricks.json', (man.length / 1024).toFixed(0), 'КБ');
+  }
 }
 await browser.close();

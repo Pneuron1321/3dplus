@@ -79,6 +79,8 @@
     /* ---------- цвет и случайность (детерминированно) ---------- */
     const LIN = {};
     Object.keys(PALETTE).forEach(k => { LIN[k] = new T.Color(PALETTE[k]).convertSRGBToLinear(); });
+    if (opts.cvet === 'zel') Object.entries({ YE: '#4f9a2a', YE2: '#428a22', YE3: '#5aab32' })     // зелёная раскраска «зверя»
+      .forEach(([k, v]) => { LIN[k] = new T.Color(v).convertSRGBToLinear(); });
     let seed = opts.seed || 90217;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
     const hash = (a, b, c) => {
@@ -657,6 +659,7 @@
           const sx = c.x < 6 ? -1 : 1, pl = [];
           const edgeX = c.x === chinW(c.y) || c.x === 11 - chinW(c.y);
           if (c.y === 0 && edgeX) pl.push(...CUT.edge([sx, 0, 0], [0, -1, 0], 0.6));   // углы подбородка — чуть скруглены
+          if (c.z === 11 && edgeX && c.y <= 5) pl.push(...CUT.edge([sx, 0, 0], [0, 0, 1], 0.8));   // щёки огибают угол лица
           if (c.z === 0 && (c.x === 2 || c.x === 9)) pl.push(...CUT.edge([sx, 0, 0], [0, 0, -1], 0.9));  // затылок в плане
           if (c.z === 1 && (c.x === 0 || c.x === 11)) pl.push(...CUT.edge([sx, 0, 0], [0, 0, -1], 0.9));
           if ((c.z === 0 && c.y === 3) || (c.z === 1 && c.y === 2) || (c.z === 2 && c.y === 0)) pl.push(...CUT.edge([0, -1, 0], [0, 0, -1], 0.9));
@@ -686,6 +689,26 @@
           return pl.length ? pl : null;
         }
       }).box(0, 4, 0, 5, 0, 1, 'skull').build(lico.bufs.plastic);
+      /* объёмное лицо (Александр 22.10, фото: «там объёмное лицо»): щёки и подбородок выступают вперёд накладкой —
+         подкова вокруг рта (ряды под линзой), края скруглены наружу и вниз; у «зверя» — второй слой: тяжёлая челюсть */
+      const zver = opts.lico === 'zver';
+      const cheek = (x, y) => (x <= 1 || x >= 10) ? y <= 5 : y <= (zver ? 1 : 2);
+      const sloy = (z0, dz, fn) => new Vox({ cell: [S, FACE_ROW, dz], at: [-4.8, FACE_Y0, z0], maxLen: 4, merge: 0.55, salt: 8 + dz * 10,
+        gap: 0.02, bev: 0.03,
+        clip: c => {
+          const pl = [], top = c.y === 5 || !fn(c.x, c.y + 1), inL = !fn(c.x - 1, c.y), inR = !fn(c.x + 1, c.y);
+          if (c.x === 0 || (inL && c.x > 0)) pl.push(...CUT.edge([-1, 0, 0], [0, 0, 1], 0.75));
+          if (c.x === 11 || (inR && c.x < 11)) pl.push(...CUT.edge([1, 0, 0], [0, 0, 1], 0.75));
+          if (top) pl.push(...CUT.edge([0, 1, 0], [0, 0, 1], 0.75));
+          if (c.y === 0) pl.push(...CUT.edge([0, -1, 0], [0, 0, 1], 0.6));          // подбородок скруглён вперёд
+          return pl.length ? pl : null;
+        } })
+        .box(0, 12, 0, 6, 0, 1, (x, y) => (fn(x, y) ? 'yellow' : null))
+        .del(v => !v.cls)
+        .build(lico.bufs.plastic);
+      sloy(4.8, 0.4, cheek);
+      if (!zver) sloy(5.2, 0.2, (x, y) => (x <= 1 || x >= 10) && y >= 1 && y <= 4);   // середина щеки — выпуклее
+      if (zver) sloy(5.2, 0.32, (x, y) => (x >= 0 && x <= 11) && ((x <= 1 || x >= 10) ? y <= 3 : y === 0));
       [[-3.2, -2.4], [3.2, -2.4], [-3.2, 2.4], [3.2, 2.4]].forEach(([x, z]) => magnet(lico, x, CAP_Y + 0.02, z, [0, 1, 0]));
       [-1, 1].forEach(s => { magnet(lico, s * 4.8, 2.4, -2.0, [s, 0, 0]); magnet(lico, s * 4.8, 5.2, -2.0, [s, 0, 0]); });
     }
@@ -717,6 +740,37 @@
       const t = new T.Mesh(mb.geometry(), MAT.plastic);
       t.name = 'teeth'; t.position.set(0, W(19.2), FZ + 0.02); t.visible = false;
       lico.g.add(t); faceParts.teeth = t;
+    }
+    /* ---- вариант «зверь» (opts.lico = 'zver', по образцу Александра — зелёный громила): тяжёлые надбровья над
+            визором (злой излом к переносице), оскал — тёмная пасть с верхними зубами и клыками сверху и снизу;
+            улыбка обычного лица в этом варианте скрыта ---- */
+    if (opts.lico === 'zver') {
+      ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => { faceParts[n].visible = false; });
+      const brovi = new MeshBuf(), q = new T.Quaternion(), e = new T.Euler();
+      [-1, 1].forEach(sx => {
+        e.set(0.25, 0, sx * 0.3); q.setFromEuler(e);
+        m4.compose(new T.Vector3(sx * 2.0, W(23.45), 5.25), q, ss.set(1, 1, 1));
+        bevelBox(brovi, 0, 0, 0, 1.75, 0.42, 0.62, 0.12, LIN.YE2, 63, m4);
+        e.set(0.25, 0, sx * 0.12); q.setFromEuler(e);
+        m4.compose(new T.Vector3(sx * 4.3, W(23.85), 5.0), q, ss.set(1, 1, 1));
+        bevelBox(brovi, 0, 0, 0, 0.9, 0.3, 0.5, 0.1, LIN.YE2, 63, m4);
+      });
+      const bm = new T.Mesh(brovi.geometry(), MAT.plastic); bm.name = 'zverBrovi'; bm.castShadow = true;
+      lico.g.add(bm); faceParts.brovi = bm;
+      const oskal = new T.Group(); oskal.name = 'zverOskal'; oskal.position.set(0, W(19.15), FZ - 0.005);
+      const past = new MeshBuf();
+      bevelBox(past, 0, 0, 0, 2.75, 0.62, 0.06, 0.05, LIN.BK, 63 - 32);                       // пасть
+      bevelBox(past, 0, -0.32, 0.01, 2.3, 0.2, 0.06, 0.05, new T.Color('#7a1414').convertSRGBToLinear(), 63 - 32);  // глотка
+      const pm = new T.Mesh(past.geometry(), MAT.ink); pm.name = 'zverPast'; oskal.add(pm);
+      const zuby = new MeshBuf(), WH = LIN.WH2;
+      for (let i = -3; i <= 3; i++) bevelBox(zuby, i * 0.62, 0.42, 0.06, 0.24, 0.16, 0.05, 0.04, WH, 63 - 32);   // верхний ряд
+      const klyk = (x, y, dn) => {                                                                          // клык: ромб остриём
+        m4.makeRotationZ(Math.PI / 4).premultiply(new T.Matrix4().makeScale(0.8, dn ? 1.9 : 1.4, 1)).setPosition(x, y, 0.08);
+        bevelBox(zuby, 0, 0, 0, 0.2, 0.2, 0.06, 0.04, WH, 63 - 32, m4);
+      };
+      [-1, 1].forEach(sx => { klyk(sx * 1.95, 0.08, true); klyk(sx * 1.2, -0.32, false); });
+      const zm = new T.Mesh(zuby.geometry(), MAT.plastic); zm.name = 'zverZuby'; oskal.add(zm);
+      lico.g.add(oskal); faceParts.oskal = oskal;
     }
 
     /* ---- боковые плиты как на листе 1: наборные модули 1.8 × 1.6 (4 ряда × 5 столбцов, y 1.15…8.35,
@@ -1423,6 +1477,10 @@
         leg.visible = smile;
       });
       F.teeth.visible = smile || (talk && open > 2);
+      if (F.oskal) {                                                         // «зверь»: пасть вместо улыбки, рычит при речи
+        ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => { F[n].visible = false; });
+        ease(F.oskal.scale, 'y', talk ? 0.8 + open * 0.2 : 1, talk ? 1 : k);
+      }
       F.teeth.scale.x = talk ? 0.8 : 1;
       F.teeth.position.y = H.y + (smile ? 0.0 : 0.08);
       st.glasses += (st.glassesTarget - st.glasses) * lerpK(0.1, dtK);

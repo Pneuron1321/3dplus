@@ -77,6 +77,8 @@ npm run build        # рендеры + pixel-mech.glb + export/ (скелетн
 npm run renders      # только картинки
 node tools/build.mjs --view=front,three4   # отдельные ракурсы
 node tools/build.mjs --view=qa             # камера сверки для tools/qa_body.py (в git не входит)
+node tools/build.mjs --lico=zver --view=hero,face          # вариант лица «зверь»: renders/*-zver.png + pixel-mech-zver.glb
+node tools/build.mjs --lico=zver --cvet=zel --view=hero   # он же в зелёной раскраске (*-zver-zel)
 ```
 
 Нужен Chromium: скрипт берёт его из `CHROME_PATH`, `PLAYWRIGHT_BROWSERS_PATH` или обычной установки Playwright.
