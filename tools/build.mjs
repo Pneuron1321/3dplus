@@ -13,6 +13,8 @@ const PICK = process.argv.find(a => a.startsWith('--view='))?.slice(7);
 const LICO = process.argv.find(a => a.startsWith('--lico='))?.slice(7);
 const CVET = process.argv.find(a => a.startsWith('--cvet='))?.slice(7);          // --cvet=zel — зелёная раскраска
 const SUF = (LICO ? '-' + LICO : '') + (CVET ? '-' + CVET : '');
+/* отладка: --opt=ключ=значение уходит в opts модели (суффикс -dbg, GLB не пишется) */
+const OPTS = process.argv.filter(a => a.startsWith('--opt=')).map(a => a.slice(6).split('='));
 
 function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
@@ -61,6 +63,10 @@ const VIEWS = {
   hback:    { w: 600, h: 640, yaw: Math.PI, pitch: 0.06, target: [0, 24.6, 0], height: 13.5, fov: 14, only: HEAD, floor: false, bg: BG, list: 1 },
   hright:   { w: 600, h: 640, yaw: Math.PI / 2, pitch: 0.06, target: [0, 24.6, 0], height: 13.5, fov: 14, only: HEAD, floor: false, bg: BG, list: 1 },
   h34:      { w: 600, h: 640, yaw: 0.62, pitch: 0.18, target: [0, 24.6, 0], height: 13.5, fov: 14, only: HEAD, floor: false, bg: BG, list: 1 },
+  /* голова «зверя» по листу (--view=zlist): спереди, сбоку (морда влево, как на листе), 3/4 — сверка с HEAD DETAIL */
+  zfront:   { w: 640, h: 660, yaw: 0, pitch: 0.04, target: [0, 26.0, 0.6], height: 15.5, fov: 14, only: HEAD, floor: false, bg: '#e9e9e7', zlist: 1 },
+  zside:    { w: 700, h: 660, yaw: Math.PI / 2, pitch: 0.04, target: [0, 26.0, 0.0], height: 15.5, fov: 14, only: HEAD, floor: false, bg: '#e9e9e7', zlist: 1 },
+  z34:      { w: 640, h: 660, yaw: 0.6, pitch: 0.12, target: [0, 26.0, 0.4], height: 15.5, fov: 14, only: HEAD, floor: false, bg: '#e9e9e7', zlist: 1 },
   hero:     { w: 1600, h: 1600, yaw: 0.5, pitch: 0.16, target: [0.2, 15.4, 0.4], height: 35.5 }
 };
 
@@ -71,15 +77,15 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1400, height: 1400 } });
 page.on('console', m => { if (m.type() === 'error') console.error('[page]', m.text()); });
 page.on('pageerror', e => console.error('[page error]', e.message));
-await page.goto(pathToFileURL(join(ROOT, 'tools', 'render.html')).href + '?' + new URLSearchParams({ ...(LICO && { lico: LICO }), ...(CVET && { cvet: CVET }) }));
+await page.goto(pathToFileURL(join(ROOT, 'tools', 'render.html')).href + '?' + new URLSearchParams({ ...(LICO && { lico: LICO }), ...(CVET && { cvet: CVET }), ...Object.fromEntries(OPTS) }));
 await page.waitForFunction('window.ready === true', null, { timeout: 120000 });
 console.log('детали:', await page.evaluate('JSON.stringify(window.stats())'));
 
 mkdirSync(join(ROOT, 'renders'), { recursive: true });
 for (const [name, spec] of Object.entries(VIEWS)) {
-  if (PICK ? !(PICK.split(',').includes(name) || (spec.list && PICK.split(',').includes('hlist'))) : (spec.qa || spec.list)) continue;
+  if (PICK ? !(PICK.split(',').includes(name) || (spec.list && PICK.split(',').includes('hlist')) || (spec.zlist && PICK.split(',').includes('zlist'))) : (spec.qa || spec.list || spec.zlist)) continue;
   const { png, anchors } = await page.evaluate(s => window.renderView(s), spec);
-  writeFileSync(join(ROOT, 'renders', name + SUF + '.png'), Buffer.from(png.split(',')[1], 'base64'));
+  writeFileSync(join(ROOT, 'renders', name + SUF + (OPTS.length ? '-dbg' : '') + '.png'), Buffer.from(png.split(',')[1], 'base64'));
   if (spec.anchors) writeFileSync(join(ROOT, 'renders', name + SUF + '.json'), JSON.stringify(anchors, null, 1));
   console.log('рендер', name);
 }

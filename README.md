@@ -77,7 +77,7 @@ npm run build        # рендеры + pixel-mech.glb + export/ (скелетн
 npm run renders      # только картинки
 node tools/build.mjs --view=front,three4   # отдельные ракурсы
 node tools/build.mjs --view=qa             # камера сверки для tools/qa_body.py (в git не входит)
-node tools/build.mjs --lico=zver --view=hero,face          # голова «зверь» (лист Александра): renders/*-zver.png + pixel-mech-zver.glb
+node tools/build.mjs --lico=zver --view=zlist,hero        # голова «зверь» — органическая лепка (src/zver-golova.js, docs/ZVER-GOLOVA.md)
 node tools/build.mjs --view=hlist                 # лист головы: спереди, бока, сзади, 3/4 (renders/h*.png)
 node tools/build.mjs --lico=kub --view=hero      # прежняя голова-куб (renders/*-kub.png + pixel-mech-kub.glb)
 ```
