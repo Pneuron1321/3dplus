@@ -27,22 +27,45 @@ object Struny {
     @Volatile var sostoyanie = "мост 2 не найден"; private set
     @Volatile var kadrov = 0L
 
+    @Volatile private var privyazan = false
+    @Volatile private var popytkaMs = 0L
+    private var app: Context? = null
+
     private val svyaz = object : ServiceConnection {
         override fun onServiceConnected(n: ComponentName?, b: IBinder?) { dver = b; pokolenie = 0; sostoyanie = "мост 2 на связи" }
         override fun onServiceDisconnected(n: ComponentName?) { dver = null; sbrosit(); sostoyanie = "мост 2 закрылся" }
+        // мост 2 переустановили (обновление), пока Мост 3 открыт: эта связь мертва навсегда — привязаться заново
+        override fun onBindingDied(n: ComponentName?) { dver = null; sbrosit(); otvyazat(); sostoyanie = "мост 2 обновился — переподключаюсь" }
+        override fun onNullBinding(n: ComponentName?) { otvyazat(); sostoyanie = "мост 2 не отдал дверь (нужна 2.6.7+)" }
     }
 
     fun start(ctx: Context) {
-        val i = Intent().setComponent(ComponentName(PAKET, "com.questclaude.bridge.StrunySluzhba"))
-        val ok = try { ctx.bindService(i, svyaz, Context.BIND_AUTO_CREATE) } catch (e: SecurityException) {
-            sostoyanie = "мост 2 не пускает (подпись или старая версия моста 2 — нужна 2.6.7+)"; false
-        }
-        if (!ok && dver == null && !sostoyanie.startsWith("мост 2 не пускает")) sostoyanie = "мост 2 не найден (нужна 2.6.7+)"
+        app = ctx.applicationContext
+        privyazat()
         Thread({
             while (true) {
-                try { Thread.sleep(2000); proverit() } catch (e: InterruptedException) { break } catch (e: Exception) { }
+                try {
+                    Thread.sleep(2000)
+                    if (dver == null && System.currentTimeMillis() - popytkaMs > 10_000) { otvyazat(); privyazat() }   // 3.1.4
+                    proverit()
+                } catch (e: InterruptedException) { break } catch (e: Exception) { }
             }
         }, "most3-struny").apply { isDaemon = true; start() }
+    }
+
+    private fun privyazat() {
+        val c = app ?: return
+        popytkaMs = System.currentTimeMillis()
+        val i = Intent().setComponent(ComponentName(PAKET, "com.questclaude.bridge.StrunySluzhba"))
+        privyazan = try { c.bindService(i, svyaz, Context.BIND_AUTO_CREATE) } catch (e: SecurityException) {
+            sostoyanie = "мост 2 не пускает (подпись или старая версия моста 2 — нужна 2.6.7+)"; false
+        }
+        if (!privyazan && dver == null && !sostoyanie.startsWith("мост 2 не пускает")) sostoyanie = "мост 2 не найден (нужна 2.6.7+)"
+    }
+
+    private fun otvyazat() {
+        if (privyazan) try { app?.unbindService(svyaz) } catch (e: Exception) { }
+        privyazan = false
     }
 
     /** Показ не смог рисовать в поверхность (её закрыли — эфир кончился): спросить заново. */

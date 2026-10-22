@@ -179,8 +179,16 @@ def efir_skazat(U):
             out.append('Голос: микропауз %s, сбросов %s (норма — 0).' % (d.get('mic_propuski'), d.get('mic_sbrosy', 0)))
         if d.get('avto30'):
             out.append('Шлему тесно — эфир сейчас на 30 кадрах (выбрано %s), вернётся сам через минуту спокойствия.' % d.get('fps_vybor'))
+        r2 = zapros(U, '/efir/osnova', 3)               # 2.6.9: откуда кадр эфира — от этого зависят его кадры
+        o = (razobrat(r2[1]) or {}) if r2 and r2[0] == 200 else {}
+        if o.get('igra_idyot'):
+            out.append('Основа эфира — игра из Моста 3 (кадров от него: %s): эфир получает столько кадров, сколько даёт карта.'
+                       % o.get('igra_kadrov'))
+        elif o:
+            out.append('Основа эфира — вид шлема (режим %s): Мост 3 кадров эфиру не даёт, поэтому кадров не больше, чем у '
+                       'захвата шлема.' % o.get('osnova'))
         if d.get('ekran_fps') is not None:             # 2.3.9: игра или эфир
-            out.append('Игра: %s кадров/с; плашки эфира: %s мс в секунду; глазам Плюса: %s кадра/с.'
+            out.append('Захват шлема: %s кадров/с; плашки эфира: %s мс в секунду; глазам Плюса: %s кадра/с.'
                        % (d.get('ekran_fps'), d.get('plashki_ms'), d.get('glaza_fps')))
         g = golos_kuda()
         if g:

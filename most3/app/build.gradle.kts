@@ -13,8 +13,8 @@ android {
         applicationId = "com.questclaude.most3"
         minSdk = 29
         targetSdk = 34
-        versionCode = 313
-        versionName = "3.1.3"
+        versionCode = 314
+        versionName = "3.1.4"
         ndk { abiFilters += "arm64-v8a" }
     }
 
