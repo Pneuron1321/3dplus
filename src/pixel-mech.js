@@ -1084,7 +1084,7 @@
       ochki.clear();
       const ZV = global.PixelMechZver;                                       // src/zver-golova.js — органическая лепка
       if (!ZV) throw new Error('lico=zver: подключи src/zver-golova.js перед pixel-mech.js');
-      const zg = ZV.build(T, { lite: !!opts.lite, bezShipov: !!opts.bezShipov, lepka: !!opts.lepka });
+      const zg = ZV.build(T, Object.assign({}, opts, { lite: !!opts.lite, bezShipov: !!opts.bezShipov, lepka: !!opts.lepka }));
       lico.g.add(zg.group);
       Object.assign(faceParts, zg.glaza);                                   // глаза моргают (масштаб по y)
       /* мимика обычного лица — пустышки (рта-улыбки у зверя нет) */

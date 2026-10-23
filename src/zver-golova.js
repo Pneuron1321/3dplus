@@ -569,8 +569,68 @@
     return { group, glaza, stats: { vershin: nv } };
   }
 
+  /* ======================================================================================================
+     ФОРМА ПО ГЛУБИНЕ (opts.glubina, данные src/zver-glubina.js, крупный план из комикса) — проба, ждёт решения
+     Александра; по умолчанию не включена. Голова собрана в камере самого рисунка —
+     поворот «в сторону» остаётся как нарисован. Перед — рельеф от нейросети глубины по рисунку, зад — закрыт
+     огибающей (толще к середине силуэта); кожа — сам рисунок, спроецированный спереди.
+     ====================================================================================================== */
+  function buildGlubina(T, o, G) {
+    const lite = !!o.lite;
+    const FR = vid(G), zz = dekod(G.z), w = G.w, hh = G.h;
+    const U = +o.gu || 0.038, YC = -0.3, DZ = +o.gz || 6.5, ZN = 5.6, KB = +o.gb || 0.25, TB = +o.gt || 0.7, RK = +o.gr || 1.6;
+    const fX = x => G.cx + x / U, fY = y => G.chin - (y - YC) / U;
+    const zAt = (px, py) => {
+      px = clamp(px, 0, w - 1); py = clamp(py, 0, hh - 1);
+      const x0 = Math.floor(px), y0 = Math.floor(py), x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, hh - 1), fx = px - x0, fy = py - y0;
+      return ((zz[y0 * w + x0] * (1 - fx) + zz[y0 * w + x1] * fx) * (1 - fy) + (zz[y1 * w + x0] * (1 - fx) + zz[y1 * w + x1] * fx) * fy) / 250;
+    };
+    const Z0 = ZN - DZ;
+    function pole(x, y, z) {
+      const px = fX(x), py = fY(y);
+      const sd = FR.sdAt(px, py), dF = sd * U;
+      const r = zAt(px, py), zf = Z0 + DZ * r;
+      const vn = Math.max(0, -sd) * U;                                  // глубже от края — толще затылок
+      const zb = Z0 - DZ * KB * r - TB * Math.sqrt(vn * 3);
+      const zm = (zf + zb) / 2, t = clamp(vn / RK, 0, 1), sk = Math.sqrt(1 - (1 - t) * (1 - t));   // края — скруглены, без стенки
+      return Math.max(dF, z - (zm + (zf - zm) * sk), (zm - (zm - zb) * sk) - z);
+    }
+    const h = lite ? 0.14 : 0.07;
+    const XL = -G.cx * U - 0.4, XR = (w - G.cx) * U + 0.4, YT = YC + G.chin * U + 0.4, YB = YC - (hh - G.chin) * U - 0.4;
+    const { pos, idx } = poverhnost(pole, XL, YB, Z0 - DZ * KB - TB * 6, XR, YT, ZN + 0.4, h);
+    const nv = pos.length / 3, nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), e = 0.04;
+    const ZEL = [0.2, 0.36, 0.12];
+    const lin = c => c.map(v => Math.pow(v, 2.2));
+    for (let i = 0; i < nv; i++) {
+      const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+      let gx = pole(x + e, y, z) - pole(x - e, y, z), gy = pole(x, y + e, z) - pole(x, y - e, z), gz = pole(x, y, z + e) - pole(x, y, z - e);
+      const gl = Math.hypot(gx, gy, gz) || 1; gx /= gl; gy /= gl; gz /= gl;
+      nor.set([gx, gy, gz], i * 3);
+      const px = fX(x), py = fY(y), cF = FR.cvet(px, py);
+      const zf = Z0 + DZ * zAt(px, py);
+      const wf = clamp(0.35 + gz * 1.6, 0, 1) * cF[3];               // рисунок — на всём, что смотрит вперёд; зад — тёмная кожа
+      const c = lin([0, 1, 2].map(k => cF[k] * wf + ZEL[k] * (1 - wf)));
+      col.set(c, i * 3);
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new T.BufferAttribute(nor, 3));
+    geo.setAttribute('color', new T.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    const group = new T.Group(); group.name = 'zver_golova';
+    const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0, envMapIntensity: 0.3 }); mat.name = 'zver_risunok';
+    const m = new T.Mesh(geo, mat); m.name = 'zver_kozha'; m.castShadow = m.receiveShadow = true; group.add(m);
+    const glaza = {};
+    for (const n of ['eyeL', 'eyeR']) { const ob = new T.Object3D(); ob.name = n; group.add(ob); glaza[n] = ob; }
+    return { group, glaza, stats: { vershin: nv } };
+  }
+
   global.PixelMechZver = {
-    build: (T, o) => ((global.PixelMechZverRisunok && !(o && o.lepka)) ? buildRisunok(T, o || {}, global.PixelMechZverRisunok) : build(T, o)),
+    build: (T, o) => {
+      o = o || {};
+      if (global.PixelMechZverGlubina && o.glubina && !o.lepka) return buildGlubina(T, o, global.PixelMechZverGlubina);
+      return (global.PixelMechZverRisunok && !o.lepka) ? buildRisunok(T, o, global.PixelMechZverRisunok) : build(T, o);
+    },
     buildLepka: build
   };
 })(typeof window !== 'undefined' ? window : globalThis);
