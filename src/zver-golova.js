@@ -397,5 +397,179 @@
     return { group, glaza, stats: { vershin: nv + SP.p.length / 3 + ZB.p.length / 3, shipov: taken.length } };
   }
 
-  global.PixelMechZver = { build };
+  /* ======================================================================================================
+     ФОРМА ИЗ РИСУНКА (по умолчанию, если подключён src/zver-risunok.js): объём строится из самого рисунка —
+     силуэт спереди и силуэт сбоку (поле расстояний до контура), в каждом сечении — суперэллипс по ширине
+     спереди и глубине сбоку; тёмное на рисунке (пасть, складки, глазницы) утоплено внутрь; поверх —
+     проекция рисунка спереди и с боков (профиль зеркалится на левую сторону). Так голова совпадает с листом
+     в обоих видах контур в контур, а штрихи, тени и блики — его собственные.
+     ====================================================================================================== */
+  function dekod(b64) {
+    const s = (typeof atob === 'function') ? atob(b64) : Buffer.from(b64, 'base64').toString('binary');
+    const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    return u;
+  }
+  function vid(v) {
+    const rgba = dekod(v.rgba), sd = new Int8Array(dekod(v.sd).buffer), w = v.w, h = v.h;
+    /* крайние точки силуэта по строкам: пропуски — ближайшей строкой, сглажено по высоте (без ступенек) */
+    let A = new Float32Array(h).fill(NaN), B = new Float32Array(h).fill(NaN);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (sd[y * w + x] < 0) { if (isNaN(A[y])) A[y] = x; B[y] = x; }
+    const est = new Uint8Array(h).map((_, y) => isNaN(A[y]) ? 0 : 1);
+    for (let y = 0; y < h; y++) if (!est[y]) {
+      let d = 1; while (d < h && !((y - d >= 0 && est[y - d]) || (y + d < h && est[y + d]))) d++;
+      const yy = (y - d >= 0 && est[y - d]) ? y - d : y + d; if (yy >= 0 && yy < h) { A[y] = A[yy]; B[y] = B[yy]; }
+    }
+    const gladit = (M, r) => { const o = new Float32Array(h); for (let y = 0; y < h; y++) { let s = 0, n = 0; for (let k = -r; k <= r; k++) { const yy = y + k; if (yy >= 0 && yy < h && !isNaN(M[yy])) { const wk = Math.exp(-(k * k) / (r * r / 2)); s += M[yy] * wk; n += wk; } } o[y] = n ? s / n : NaN; } return o; };
+    A = gladit(A, 4); B = gladit(B, 4);
+    const ryad = py => {                                          // дробная строка → [лево, право] или null
+      const y = clamp(py, 0, h - 1), y0 = Math.floor(y), y1 = Math.min(y0 + 1, h - 1), t = y - y0;
+      if (!est[Math.round(y)]) return null;
+      return [A[y0] * (1 - t) + A[y1] * t, B[y0] * (1 - t) + B[y1] * t];
+    };
+    const sdAt = (px, py) => {                                    // билинейно; за листом — далеко снаружи
+      if (px < 0 || py < 0 || px > w - 1 || py > h - 1) {
+        const dx = Math.max(-px, 0, px - (w - 1)), dy = Math.max(-py, 0, py - (h - 1));
+        return 60 + Math.hypot(dx, dy);
+      }
+      const x0 = Math.floor(px), y0 = Math.floor(py), x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1), fx = px - x0, fy = py - y0;
+      const A = sd[y0 * w + x0], B = sd[y0 * w + x1], C = sd[y1 * w + x0], D = sd[y1 * w + x1];
+      return (A * (1 - fx) + B * fx) * (1 - fy) + (C * (1 - fx) + D * fx) * fy;
+    };
+    const cvet = (px, py) => {                                    // [r,g,b,a] 0..1, билинейно
+      px = clamp(px, 0, w - 1); py = clamp(py, 0, h - 1);
+      const x0 = Math.floor(px), y0 = Math.floor(py), x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1), fx = px - x0, fy = py - y0;
+      const o = [0, 0, 0, 0];
+      for (const [x, y, k] of [[x0, y0, (1 - fx) * (1 - fy)], [x1, y0, fx * (1 - fy)], [x0, y1, (1 - fx) * fy], [x1, y1, fx * fy]]) {
+        const i = (y * w + x) * 4;
+        for (let c = 0; c < 4; c++) o[c] += rgba[i + c] / 255 * k;
+      }
+      return o;
+    };
+    return { w, h, ryad, sdAt, cvet };
+  }
+  /* поверхность поля f на решётке (грубо → точно у поверхности), «surface nets» */
+  function poverhnost(f, X0, Y0, Z0, X1, Y1, Z1, h) {
+    const NX = Math.ceil((X1 - X0) / h) + 1, NY = Math.ceil((Y1 - Y0) / h) + 1, NZ = Math.ceil((Z1 - Z0) / h) + 1;
+    const F = new Float32Array(NX * NY * NZ), I = (i, j, k) => (k * NY + j) * NX + i;
+    const ST = 4, CX = Math.ceil(NX / ST) + 1, CY = Math.ceil(NY / ST) + 1, CZ = Math.ceil(NZ / ST) + 1;
+    const G = new Float32Array(CX * CY * CZ), IG = (i, j, k) => (k * CY + j) * CX + i;
+    for (let k = 0; k < CZ; k++) for (let j = 0; j < CY; j++) for (let i = 0; i < CX; i++) G[IG(i, j, k)] = f(X0 + i * ST * h, Y0 + j * ST * h, Z0 + k * ST * h);
+    const BAND = ST * h * 1.8;
+    for (let k = 0; k < NZ; k++) for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+      const gi = Math.floor(i / ST), gj = Math.floor(j / ST), gk = Math.floor(k / ST);
+      let near = false, sgn = 0;
+      for (let c = 0; c < 8 && !near; c++) { const v = G[IG(gi + (c & 1), gj + ((c >> 1) & 1), gk + (c >> 2))]; if (Math.abs(v) < BAND) near = true; sgn += v; }
+      F[I(i, j, k)] = near ? f(X0 + i * h, Y0 + j * h, Z0 + k * h) : (sgn > 0 ? BAND : -BAND);
+    }
+    const vid = new Int32Array(NX * NY * NZ).fill(-1), pos = [], idx = [];
+    const EDGES = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+    const cr = c => [c & 1, (c >> 1) & 1, c >> 2];
+    const v = new Float32Array(8);
+    for (let k = 0; k < NZ - 1; k++) for (let j = 0; j < NY - 1; j++) for (let i = 0; i < NX - 1; i++) {
+      let inside = 0;
+      for (let c = 0; c < 8; c++) { const [a, b, e] = cr(c); v[c] = F[I(i + a, j + b, k + e)]; if (v[c] < 0) inside++; }
+      if (inside === 0 || inside === 8) continue;
+      let sx = 0, sy = 0, sz = 0, n = 0;
+      for (const [a, b] of EDGES) {
+        if ((v[a] < 0) === (v[b] < 0)) continue;
+        const t = v[a] / (v[a] - v[b]), ca = cr(a), cb = cr(b);
+        sx += ca[0] + (cb[0] - ca[0]) * t; sy += ca[1] + (cb[1] - ca[1]) * t; sz += ca[2] + (cb[2] - ca[2]) * t; n++;
+      }
+      vid[I(i, j, k)] = pos.length / 3;
+      pos.push(X0 + (i + sx / n) * h, Y0 + (j + sy / n) * h, Z0 + (k + sz / n) * h);
+    }
+    for (let k = 1; k < NZ - 1; k++) for (let j = 1; j < NY - 1; j++) for (let i = 1; i < NX - 1; i++) {
+      const f0 = F[I(i, j, k)];
+      for (let ax = 0; ax < 3; ax++) {
+        const f1 = ax === 0 ? F[I(i + 1, j, k)] : ax === 1 ? F[I(i, j + 1, k)] : F[I(i, j, k + 1)];
+        if ((f0 < 0) === (f1 < 0)) continue;
+        let q;
+        if (ax === 0) q = [vid[I(i, j - 1, k - 1)], vid[I(i, j, k - 1)], vid[I(i, j, k)], vid[I(i, j - 1, k)]];
+        else if (ax === 1) q = [vid[I(i - 1, j, k - 1)], vid[I(i - 1, j, k)], vid[I(i, j, k)], vid[I(i, j, k - 1)]];
+        else q = [vid[I(i - 1, j - 1, k)], vid[I(i, j - 1, k)], vid[I(i, j, k)], vid[I(i - 1, j, k)]];
+        if (q.some(x => x < 0)) continue;
+        if (f0 < 0) idx.push(q[0], q[1], q[2], q[0], q[2], q[3]); else idx.push(q[0], q[2], q[1], q[0], q[3], q[2]);
+      }
+    }
+    return { pos, idx };
+  }
+  function buildRisunok(T, o, R) {
+    const lite = !!o.lite;
+    const FR = vid(R.front), SB = vid(R.side);
+    const U = 0.062, KF = R.B.k, ZN = 5.6, YC = -0.3, P = 2.6;
+    const fX = x => R.F.cx + x / U, fY = y => R.F.chin - (y - YC) / U;
+    const sX = z => R.B.nos + (ZN - z) / (U * KF), sY = y => R.B.chin - (y - YC) / (U * KF);
+    const lum = c => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+    function pole(x, y, z) {
+      const fy = fY(y), sy = sY(y);
+      const dF = FR.sdAt(fX(x), fy) * U;
+      const greben = clamp((88 - fy) / 22, 0, 1);                   // гребень: шипы — по силуэту спереди, глубина — по огибающей профиля
+      const dS = SB.sdAt(sX(z), sy) * U * KF - greben * 4;
+      let d = Math.max(dF, dS);
+      const rf = FR.ryad(fy), rs = SB.ryad(sy);
+      if (rf && rs) {                              // сечение — суперэллипс: ширина спереди × глубина сбоку
+        const xl = (rf[0] - R.F.cx) * U, xr = (rf[1] - R.F.cx) * U;
+        const zf = ZN - (rs[0] - R.B.nos) * U * KF, zb = ZN - (rs[1] - R.B.nos) * U * KF;
+        const cx = (xl + xr) / 2, hw = Math.max((xr - xl) / 2, 0.05), cz = (zf + zb) / 2, hd = Math.max((zf - zb) / 2, 0.05);
+        const e = Math.pow(Math.pow(Math.abs(x - cx) / hw, P) + Math.pow(Math.abs(z - cz) / hd, P), 1 / P);
+        d = Math.max(d, (e - 1) * Math.min(hw, hd));
+        if (d < 0.6) {                                             // тёмное на рисунке — вглубь (пасть, складки, глазницы)
+          const wf = clamp((z - cz) / hd, 0, 1);
+          if (wf > 0) {
+            const L = lum(FR.cvet(fX(x), fy));
+            d += wf * wf * (L < 0.3 ? 0.4 * Math.pow((0.3 - L) / 0.3, 0.7) + 0.04 : 0.1 * (0.5 - L));
+          }
+        }
+      }
+      return d;
+    }
+    const h = lite ? 0.14 : 0.07;
+    const { pos, idx } = poverhnost(pole, -5.9, -1.4, -7.6, 5.9, 12.8, 6.2, h);
+    const nv = pos.length / 3, nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), e = 0.04;
+    const ZEL = [0.29, 0.5, 0.17];
+    const lin = c => c.map(v => Math.pow(v, 2.2));                // цвета рисунка — в линейное пространство
+    for (let i = 0; i < nv; i++) {
+      const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+      let gx = pole(x + e, y, z) - pole(x - e, y, z), gy = pole(x, y + e, z) - pole(x, y - e, z), gz = pole(x, y, z + e) - pole(x, y, z - e);
+      const gl = Math.hypot(gx, gy, gz) || 1; gx /= gl; gy /= gl; gz /= gl;
+      nor.set([gx, gy, gz], i * 3);
+      const cF = FR.cvet(fX(x), fY(y)), cS = SB.cvet(sX(z), sY(y));
+      const lico = clamp((z - 1.3) / 1.2, 0, 1);                      // у лица профиль только на чистом боку — глаз профиля ушёл бы на щёку
+      const bok = Math.pow(Math.abs(gx), 4), pered = Math.pow(Math.max(0, gz), 4);
+      const mordaBok = clamp((78 - sX(z)) / 18, 0, 1) * clamp((sY(y) - 70) / 10, 0, 1);   // морда в профиле — не на боковину головы
+      let wf = (pered * (1 + 2 * lico) + 0.06 * mordaBok) * cF[3];
+      let ws = (bok * (1 - lico * (1 - Math.pow(Math.abs(gx), 12))) + 0.3 * Math.max(0, -gz) + 0.2 * Math.max(0, gy)) * cS[3] * (1 - 0.95 * mordaBok);
+      if (wf + ws < 1e-4) { wf = cF[3]; ws = cS[3]; }
+      let c = wf + ws > 1e-4 ? [0, 1, 2].map(k => (cF[k] * wf + cS[k] * ws) / (wf + ws)) : ZEL;
+      c = lin(c);
+      let occ = 0;                                                   // мягкое затенение впадин
+      for (let s = 1; s <= 3; s++) { const dd = s * 0.25; occ += (dd - pole(x + gx * dd, y + gy * dd, z + gz * dd)) / Math.pow(2, s); }
+      const ao = clamp(1 - occ * 0.9, 0.55, 1);
+      col.set([c[0] * ao, c[1] * ao, c[2] * ao], i * 3);
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new T.BufferAttribute(nor, 3));
+    geo.setAttribute('color', new T.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    const group = new T.Group(); group.name = 'zver_golova';
+    const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0, envMapIntensity: 0.35 }); mat.name = 'zver_risunok';
+    const m = new T.Mesh(geo, mat); m.name = 'zver_kozha'; m.castShadow = m.receiveShadow = true; group.add(m);
+    if (!lite) {                                                    // тонкий контур — как обводка рисунка
+      const p = geo.attributes.position, q = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i++) q.set([p.getX(i) + nor[i * 3] * 0.03, p.getY(i) + nor[i * 3 + 1] * 0.03, p.getZ(i) + nor[i * 3 + 2] * 0.03], i * 3);
+      const g2 = new T.BufferGeometry(); g2.setAttribute('position', new T.BufferAttribute(q, 3)); g2.setIndex(geo.index);
+      const mk = new T.MeshBasicMaterial({ color: new T.Color('#141f0b').convertSRGBToLinear(), side: T.BackSide }); mk.name = 'zver_kontur';
+      const k = new T.Mesh(g2, mk); k.name = 'zver_kontur'; group.add(k);
+    }
+    const glaza = {};                                               // глаза нарисованы; для мимики — пустышки
+    for (const n of ['eyeL', 'eyeR']) { const ob = new T.Object3D(); ob.name = n; group.add(ob); glaza[n] = ob; }
+    return { group, glaza, stats: { vershin: nv } };
+  }
+
+  global.PixelMechZver = {
+    build: (T, o) => ((global.PixelMechZverRisunok && !(o && o.lepka)) ? buildRisunok(T, o || {}, global.PixelMechZverRisunok) : build(T, o)),
+    buildLepka: build
+  };
 })(typeof window !== 'undefined' ? window : globalThis);
