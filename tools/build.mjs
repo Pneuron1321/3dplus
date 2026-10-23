@@ -57,6 +57,9 @@ const VIEWS = {
   modhead:  { w: 510, h: 380, yaw: -0.75, pitch: 0.18, target: [-0.6, 25.3, 0], height: 13.2, fov: 22, only: HEAD, floor: false, bg: BG },
   modarm:   { w: 510, h: 340, yaw: 0.75, pitch: 0.2, target: [7.6, 14.6, 0.4], height: 12.2, fov: 22, only: ['rukaR', 'korpus'], floor: false, bg: BG },
   modfoot:  { w: 510, h: 360, yaw: 0.75, pitch: 0.28, target: [4.6, 3.1, 1.0], height: 9.2, fov: 22, only: ['stupnyaR', 'nogaR'], floor: false, bg: BG },
+  /* нога «утка» крупно (--view=nogau,nogas): 3/4 и сбоку */
+  nogau:    { w: 560, h: 700, yaw: 0.75, pitch: 0.2, target: [2.2, 5.4, 0.6], height: 12.5, fov: 22, only: ['stupnyaR', 'nogaR'], floor: false, bg: BG },
+  nogas:    { w: 560, h: 700, yaw: Math.PI / 2, pitch: 0.08, target: [2.2, 5.4, 0.6], height: 12.5, fov: 22, only: ['stupnyaR', 'nogaR'], floor: false, bg: BG },
   /* лист головы (Александр 23.10): спереди, левый бок, сзади, правый бок, 3/4 — только голова с шеей (--view=hlist) */
   hfront:   { w: 600, h: 640, yaw: 0, pitch: 0.06, target: [0, 24.6, 0], height: 13.5, fov: 14, only: HEAD, floor: false, bg: BG, list: 1 },
   hleft:    { w: 600, h: 640, yaw: -Math.PI / 2, pitch: 0.06, target: [0, 24.6, 0], height: 13.5, fov: 14, only: HEAD, floor: false, bg: BG, list: 1 },
