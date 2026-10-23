@@ -36,7 +36,9 @@
     MG3: '#74787e', MG4: '#65696f', DG3: '#343432', BR: '#6a5d55', FG: '#646466',
     /* сапоги «Пикколо»: замша оранжево-красная, неоновая подошва */
     RD1: '#d83a1e', RD2: '#8a160c',
-    SU1: '#e2561c', SU2: '#cf4a14', SU3: '#ec6828', SU4: '#b8400f', NG1: '#8cf52e', NG2: '#6edc1c'
+    SU1: '#e2561c', SU2: '#cf4a14', SU3: '#ec6828', SU4: '#b8400f', NG1: '#8cf52e', NG2: '#6edc1c',
+    /* тапочки «Пикколо» (лист ног 24.10): светло-мятные */
+    MN1: '#a9d68e', MN2: '#93c278'
   };
 
   /* смеси: класс клетки → из чего выбирается цвет каждого кирпича */
@@ -1494,9 +1496,10 @@
        (stopaUtka). Носков нет.
        ============================================================ */
     const UTKA_NOGI = opts.nogi === 'utka';
-    const KNEE_FWD = -(+(opts.koleno || 1.8));                     // колено согнуто назад
-    const ANK_Y = 1.5;
-    const PRISED = UTKA_NOGI ? +(opts.prisest || 2.4) : 0;          // ноги короче, как у уточки: всё выше таза опускается                                                // ось щиколотки: сервопривод на стопе (верх стопы 0.9)
+    const KNEE_FWD = -(+(opts.koleno || 1.3));                     // колено согнуто назад
+    const TAPOK = UTKA_NOGI && global.PixelMechTapok && opts.stopa !== 'plashka' ? global.PixelMechTapok : null;   // стопа в тапочке «Пикколо»
+    const ANK_Y = TAPOK ? 2.1 : 1.5;                                  // ось щиколотки: у ворота тапочки (или на плашке, верх 0.9)
+    const PRISED = UTKA_NOGI ? +(opts.prisest || (TAPOK ? 1.0 : 2.4)) : 0;          // ноги короче, как у уточки: всё выше таза опускается
     function legUtka(s) {
       const name = s < 0 ? 'nogaL' : 'nogaR';
       const HY = 10.75 - PRISED;                                      // ось тазобедренного сервопривода (таз опущен)
@@ -1512,25 +1515,63 @@
         [0, 1, 2, 3].forEach(i => { const a = i * Math.PI / 2 + 0.4;
           axial(pp.bufs.metal, CYL, x + s * 0.1, y + Math.cos(a) * r * 0.72, z + Math.sin(a) * r * 0.72, [s, 0, 0], 0.07, 0.05, LIN.GM); });
       };
-      /* бедро: корпус от таза к колену; снаружи — скруглённая замшевая крышка */
+      /* бедро: корпус от таза к колену; снаружи — скруглённая крышка (по листу ног — белая, у плашки — замша) */
       const bed = subPart(p.g, name + '_bedro', T0, [thA, 0, 0]);
       bevelBox(bed.bufs.plastic, 0, -thL / 2, 0, 0.95, thL / 2 + 0.1, 0.92, 0.12, blk(), 63);
-      bevelBox(bed.bufs.plastic, s * 1.07, -thL / 2 + 0.1, 0, 0.14, thL / 2 + 0.05, 1.15, 0.12, tone('SU1', 0.02), 63);
+      bevelBox(bed.bufs.plastic, s * 1.07, -thL / 2 + 0.25, 0.05, 0.14, thL / 2 - 0.1, 1.12, TAPOK ? 0.13 : 0.12, tone(TAPOK ? 'WH2' : 'SU1', 0.02), 63);
+      if (TAPOK) [[-0.45, 0.5], [0.5, -0.45]].forEach(([y, z]) => axial(bed.bufs.metal, CYL, s * 1.22, -thL / 2 + y, z, [s, 0, 0], 0.09, 0.05, LIN.GM));   // винты крышки
       bed.finish();
       /* колено: сервопривод с фланцем; голень — корпус до сервопривода щиколотки */
       const golen = subPart(p.g, name + '_golen', K, [shA, 0, 0]);
       bevelBox(golen.bufs.plastic, 0, 0, 0, 1.15, 1.05, 1.2, 0.14, blk(), 63);
       rog(golen, s * 1.17, 0, 0, 0.9);
-      bevelBox(golen.bufs.plastic, 0, -shL / 2 - 0.1, 0, 0.92, shL / 2 - 0.1, 0.88, 0.12, blk(), 63);
+      if (TAPOK) {                                                    // голень: сверху серый корпус, снизу жёлтый кронштейн до щиколотки
+        bevelBox(golen.bufs.plastic, 0, -shL * 0.3 - 0.1, 0, 0.92, shL * 0.3 - 0.1, 0.88, 0.12, blk(), 63);
+        bevelBox(golen.bufs.plastic, 0, -shL * 0.72, 0, 0.98, shL * 0.28 + 0.05, 0.8, 0.12, tone('YE', 0.02), 63);
+        [-1, 1].forEach(sx => bevelBox(golen.bufs.plastic, sx * 0.86, -shL + 0.2, 0, 0.14, 0.5, 0.62, 0.1, tone('YE2', 0.02), 63));   // щёки вилки щиколотки
+      } else bevelBox(golen.bufs.plastic, 0, -shL / 2 - 0.1, 0, 0.92, shL / 2 - 0.1, 0.88, 0.12, blk(), 63);
       [-0.6, 0.6].forEach(z => magnet(golen, 0, -shL, z, [0, -1, 0]));
       p.golen = golen.finish();
       [-0.8, 0.8].forEach(z => magnet(p, 0, -0.55, z, [0, 1, 0]));
+      p.finish(); root.add(p.g); parts[name] = p;
+    }
+    /* ТАПОЧКА «ПИККОЛО» (лист ног 24.10): светло-мятная литая тапочка генератора 3D (src/plus-tapok.js) — подошва
+       с волнистым протектором, сверху валики-складки, мягкий ворот. Стопа уточки (сервопривод щиколотки) — внутри,
+       над воротом виден чёрный шарнир с фланцем. Проём ворота — под осью голени. */
+    function tapokUtka(s, name, p, P) {
+      const TG = TAPOK, bin = b64 => { const t = (typeof atob === 'function') ? atob(b64) : Buffer.from(b64, 'base64').toString('binary'); const u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+      const pz = new Float32Array(bin(TG.pos).buffer), ix = new Uint32Array(bin(TG.idx).buffer), n = TG.nv;
+      const KS = +(opts.tapokK || 0.92), ax = s * LEG.hipX;
+      let ymax = 0; for (let i = 0; i < n; i++) ymax = Math.max(ymax, pz[i * 3 + 1]);
+      let ox = 0, oz = 0, on = 0;                                     // проём ворота: верхние вершины
+      for (let i = 0; i < n; i++) if (pz[i * 3 + 1] > ymax * 0.9) { ox += pz[i * 3]; oz += pz[i * 3 + 2]; on++; }
+      ox /= on; oz /= on;
+      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c1 = tone('MN1', 0), c2 = tone('MN2', 0);
+      for (let i = 0; i < n; i++) {
+        const y = pz[i * 3 + 1] * KS;
+        pos[i * 3] = ax + s * (pz[i * 3] - ox) * KS; pos[i * 3 + 1] = y; pos[i * 3 + 2] = (pz[i * 3 + 2] - oz) * KS + (+(opts.tapokZ || 0.5));
+        const c = y < 0.45 * KS ? c2 : c1; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+      }
+      const idx = s > 0 ? ix : ix.slice().map((v, i) => (i % 3 === 1 ? ix[i + 1] : i % 3 === 2 ? ix[i - 1] : v));
+      const geo = new T.BufferGeometry();
+      geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('color', new T.BufferAttribute(col, 3));
+      geo.setIndex(new T.BufferAttribute(idx, 1)); geo.computeVertexNormals();
+      const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0, envMapIntensity: 0.3 }); mat.name = 'tapok';
+      const mesh = new T.Mesh(geo, mat); mesh.name = name + '_tapok'; mesh.castShadow = mesh.receiveShadow = true; p.g.add(mesh);
+      /* стопа уточки спрятана в тапочке; из ворота торчит чёрный сервопривод щиколотки с фланцами */
+      bevelBox(P, ax, ANK_Y, 0, 0.75, 0.55, 0.75, 0.12, tone('DG2', 0.04), 63);
+      [-1, 1].forEach(sx => {
+        axial(p.bufs.metal, CYL_FINE, ax + sx * 1.0, ANK_Y, 0, [sx, 0, 0], 0.5, 0.12, LIN.GM);
+        axial(p.bufs.metal, CYL_FINE, ax + sx * 1.1, ANK_Y, 0, [sx, 0, 0], 0.26, 0.06, LIN.SV);
+      });
+      [-0.8, 0.8].forEach(z => magnet(p, ax, ANK_Y + 0.55, z * 0.5, [0, 1, 0]));
       p.finish(); root.add(p.g); parts[name] = p;
     }
     /* СТОПА «УТКА»: низкая плашка со скруглёнными углами, как у уточки, но в цветах «Пикколо» — неоновая подошва
        с круглым протектором, зелёный бампер под носком, сверху оранжевая замша, по боку фиолетовая полоска.
        На стопе сидит сервопривод щиколотки (фланец снаружи), сзади — замшевое ушко с отверстиями. */
     function stopaUtka(s, name, p, P) {
+      if (TAPOK) return tapokUtka(s, name, p, P);
       const ax = s * LEG.hipX, L = +(opts.stopaL || 5.0), W = L * 0.6, ZH = -1.55, zc = ZH + L / 2;
       const cN = tone('NG1', 0);
       bevelBox(P, ax, 0.17, zc, W / 2 + 0.05, 0.17, L / 2 + 0.05, 0.14, cN, 63);                    // подошва
