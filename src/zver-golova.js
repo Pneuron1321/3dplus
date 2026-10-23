@@ -748,9 +748,59 @@
     return { group, glaza, bezShei: true, stats: { vershin: nv } };
   }
 
+  /* ======================================================================================================
+     ЗВЕРЬ-3 (opts.zver3) — проба: сетка генератора 3D (Hunyuan3D-2) по крупному плану, src/zver-setka.js.
+     Пасть до ушей, зубы рядами, брови, нос, пряди гребня — объёмом, не рисунком. Поворот «в сторону» и наклон —
+     уже в данных (подобраны по силуэту рисунка). Кожа — сам рисунок (текстура) из его камеры. Шея — трапеции,
+     как у «зверя-2», отдельной гладкой сеткой под головой.
+     ====================================================================================================== */
+  function buildZver3(T, o, Z) {
+    const DROP = (o.zniz !== undefined) ? +o.zniz : 0.5;            // челюсть — чуть выше верха груди (y ≈ −1.0)
+    const qp = new Uint16Array(dekod(Z.pos).buffer), qu = new Uint16Array(dekod(Z.uv).buffer);
+    const ten = dekod(Z.ten), idx = new Uint32Array(dekod(Z.idx).buffer), n = Z.n;
+    const pos = new Float32Array(n * 3), uv = new Float32Array(n * 2), col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < 3; k++) pos[i * 3 + k] = Z.lo[k] + qp[i * 3 + k] / 65535 * (Z.hi[k] - Z.lo[k]) - (k === 1 ? DROP : 0);
+      uv[i * 2] = qu[i * 2] / 65535; uv[i * 2 + 1] = qu[i * 2 + 1] / 65535;
+      const t = Math.pow(ten[i] / 255, 2.2); col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = t;
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new T.BufferAttribute(uv, 2));
+    geo.setAttribute('color', new T.BufferAttribute(col, 3));
+    geo.setIndex(new T.BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+    const rgb = dekod(Z.tex), rgba = new Uint8ClampedArray(Z.tw * Z.th * 4);   // Clamped — для выгрузки в GLB (ImageData)
+    for (let i = 0; i < Z.tw * Z.th; i++) { rgba[i * 4] = rgb[i * 3]; rgba[i * 4 + 1] = rgb[i * 3 + 1]; rgba[i * 4 + 2] = rgb[i * 3 + 2]; rgba[i * 4 + 3] = 255; }
+    const tex = new T.DataTexture(rgba, Z.tw, Z.th, T.RGBAFormat);
+    tex.encoding = T.sRGBEncoding; tex.magFilter = T.LinearFilter; tex.minFilter = T.LinearMipmapLinearFilter; tex.generateMipmaps = true;
+    tex.needsUpdate = true; tex.name = 'zver_risunok';
+    const group = new T.Group(); group.name = 'zver_golova';
+    const mat = new T.MeshStandardMaterial({ map: tex, vertexColors: true, roughness: 0.75, metalness: 0, envMapIntensity: 0.3 }); mat.name = 'zver_risunok';
+    const m = new T.Mesh(geo, mat); m.name = 'zver_kozha'; m.castShadow = m.receiveShadow = true; group.add(m);
+    /* шея-трапеции: за челюстью и под затылком, от верха груди вверх в череп, к плечам шире и скатом */
+    const NY0 = -1.4, NY1 = 3.0;
+    const sheya = (x, y, z) => {
+      const t = clamp((y - NY0) / (NY1 - NY0), 0, 1);
+      const hw = 3.9 + 2.7 * (1 - t) * (1 - t), zf = Math.max(1.9 - 2.5 * t, -0.6), zb = -3.2 - 0.9 * t;   // низ спереди закрывает гнездо груди
+      const cz = (zf + zb) / 2, hd = (zf - zb) / 2;
+      const e = Math.pow(Math.pow(Math.abs(x) / hw, 3) + Math.pow(Math.abs(z - cz) / hd, 3), 1 / 3);
+      return Math.max((e - 1) * Math.min(hw, hd), NY0 - y, y - NY1);
+    };
+    const s = poverhnost(sheya, -7.5, NY0 - 0.2, -5, 7.5, NY1 + 0.2, 4, o.lite ? 0.2 : 0.12);
+    const g2 = new T.BufferGeometry();
+    g2.setAttribute('position', new T.Float32BufferAttribute(s.pos, 3)); g2.setIndex(s.idx); g2.computeVertexNormals();
+    const ms = new T.MeshStandardMaterial({ color: new T.Color('#4c6b2c').convertSRGBToLinear(), roughness: 0.8, metalness: 0 }); ms.name = 'zver_sheya';
+    const sh = new T.Mesh(g2, ms); sh.name = 'zver_sheya'; sh.castShadow = sh.receiveShadow = true; group.add(sh);
+    const glaza = {};
+    for (const nm of ['eyeL', 'eyeR']) { const ob = new T.Object3D(); ob.name = nm; group.add(ob); glaza[nm] = ob; }
+    return { group, glaza, bezShei: true, stats: { vershin: n } };
+  }
+
   global.PixelMechZver = {
     build: (T, o) => {
       o = o || {};
+      if (o.zver3 && global.PixelMechZverSetka) return buildZver3(T, o, global.PixelMechZverSetka);
       if (o.zver2 && global.PixelMechZverList && global.PixelMechZverGlubina) return buildZver2(T, o, global.PixelMechZverList, global.PixelMechZverGlubina);
       if (global.PixelMechZverGlubina && o.glubina && !o.lepka) return buildGlubina(T, o, global.PixelMechZverGlubina);
       return (global.PixelMechZverRisunok && !o.lepka) ? buildRisunok(T, o, global.PixelMechZverRisunok) : build(T, o);
