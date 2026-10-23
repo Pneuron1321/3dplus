@@ -143,15 +143,15 @@ object Vizor {
     val LICO_X = PRAVO - 4f - (319f - PLECHI_VBOK) * K
     val LICO_Y = PV.t
     /**
-     * Плюс во весь рост (plus-telo.png 360×576: голова — картинка лица 256 с x = 52, ниже тело в тапочках): на 5 %
+     * Плюс во весь рост (plus-telo.png 360×576: голова — картинка лица 256 с x = 52, ниже тело в тапочках): на 8 %
      * шире картинки (TELO_SHIRE, Александр 24.10), почти во всю ширину правого столбца; стоит справа вверху над чатом.
      */
     const val TELO_W = 360f
     const val TELO_H = 576f
     const val TELO_GOLOVA_X = 52f
-    const val TELO_SHIRE = 1.05f
-    /** Масштаб фигуры: 93 % ширины столбца — с айфоном стоя под ней остаётся место на сообщение чата. */
-    const val KT = 0.93f * (PRAVO - STOLB_X) / (TELO_W * TELO_SHIRE)
+    const val TELO_SHIRE = 1.08f
+    /** Масштаб фигуры (рост — как в 2.7.2, Александру хватает): с айфоном стоя под ней место на сообщение чата. */
+    const val KT = 0.93f * (PRAVO - STOLB_X) / (TELO_W * 1.05f)
     val TELO_X = PRAVO - (PRAVO - STOLB_X) / 2f - TELO_W * KT / 2f
     val TELO_Y = PV.t
     /** Плюс (во весь рост; бюст зверя — внутри) с запасом на покачивание. */

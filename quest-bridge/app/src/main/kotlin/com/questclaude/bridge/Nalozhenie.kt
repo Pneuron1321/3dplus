@@ -636,7 +636,7 @@ class Nalozhenie(
 
     /**
      * Плюс во весь рост (2.7.2, лист тела Александра 24.10; стиль «Визор»): фигура plus-telo.png 360×576 — голова
-     * в точках картинки лица 256 (с x = 52), ниже тело в тапочках; на 5 % шире (Александр: «растяни в стороны»).
+     * в точках картинки лица 256 (с x = 52), ниже тело в тапочках; на 8 % шире при том же росте (Александр 24.10).
      * Мимика — на голове фигуры. Приседания (каждая четвёртая анимация ожидания — 10 раз) — кадры plus-prised-1…4
      * с тем же местом тапочек; в приседе мимики нет, лицо улыбается само. [l], [t] — левый верх фигуры, [kt] — масштаб.
      */
@@ -646,7 +646,7 @@ class Nalozhenie(
         val cx = l + w / 2f
         val sloy = c.saveLayer(0f, 0f, pravo, niz, null)
         c.translate(sin(now / 2600.0).toFloat() * 3f, if (prisedKadr(now) >= 0) 0f else sin(now / 1400.0).toFloat() * 2f)
-        c.scale(Vizor.TELO_SHIRE, 1f, cx, t)                           // на 5 % шире
+        c.scale(Vizor.TELO_SHIRE, 1f, cx, t)                           // на 8 % шире, рост тот же
         val dst = RectF(l, t, l + w, t + Vizor.TELO_H * kt)
         kist.alpha = if (sost == "spit") 110 else 255
         val pk = prisedKadr(now)
