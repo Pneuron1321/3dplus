@@ -657,7 +657,7 @@
       return d * Math.min(1, SX);
     }
     /* шея-трапеции: сечение — суперэллипс, к груди шире и глубже; спереди — за подбородком */
-    const NY0 = -1.4, NY1 = 2.6, DROP = (o.zniz !== undefined) ? +o.zniz : 1.0;   // голова ниже — утоплена в трапеции
+    const NY0 = -1.4, NY1 = 2.0, DROP = (o.zniz !== undefined) ? +o.zniz : 1.0;   // голова ниже — утоплена в трапеции
     function sheya(x, y, z) {
       const t = clamp((y - NY0) / (NY1 - NY0), 0, 1);
       const hw = 4.8 + 2.2 * (1 - t) * (1 - t), zf = 2.9 - 1.0 * t, zb = -3.2 - 0.6 * t;   // трапеции: к плечам — шире, скатом
@@ -675,10 +675,24 @@
     const UX = (eR[0] - eL[0]) / (gR[0] - gL[0]), UY = (glazL[1] - YC) / (G.chin - (gL[1] + gR[1]) / 2);
     const PX0 = (gL[0] + gR[0]) / 2 - ((eL[0] + eR[0]) / 2) / UX;
     const pX = x => PX0 + x / UX, pY = y => G.chin - (y + DROP - YC) / UY;
+    /* перед головы — рельеф крупного плана по глубине (Depth Anything) в камере рисунка: рот до ушей, щёки, брови
+       ложатся на бок головы так, как нарисованы; силуэт спереди — силуэт рисунка; зад и бока — первая форма */
+    const zz = dekod(G.z), GW = G.w, GH = G.h;
+    const zAt = (px, py) => {
+      px = clamp(px, 0, GW - 1); py = clamp(py, 0, GH - 1);
+      const x0 = Math.floor(px), y0 = Math.floor(py), x1 = Math.min(x0 + 1, GW - 1), y1 = Math.min(y0 + 1, GH - 1), fx = px - x0, fy = py - y0;
+      return ((zz[y0 * GW + x0] * (1 - fx) + zz[y0 * GW + x1] * fx) * (1 - fy) + (zz[y1 * GW + x0] * (1 - fx) + zz[y1 * GW + x1] * fx) * fy) / 250;
+    };
+    const GLUB = o.zglub !== '0', DZ = +o.zdz || 6.0, ZF0 = (+o.zfront || 5.4) - DZ, UG = (UX + UY) / 2;
     function pole(x, y, z) {
       const [a, b, c] = vGol(x, y + DROP, z);
       let d = golova(a, b, c);
-      if (d < 1.2) {                                                 // тёмное на крупном плане — вглубь (пасть, глазницы)
+      if (GLUB) {
+        const px = pX(x), py = pY(y), zf = ZF0 + DZ * zAt(px, py);
+        const svob = 3.2 * clamp((z - zf + 3.5) / 3.5, 0, 1);       // у лица первая форма не режет — там правит рисунок
+        const zad = 4.5 * clamp((zf - z - 2.0) / 3.0, 0, 1);         // силуэт рисунка держит перед; затылок и гребень сзади — по первой форме
+        d = Math.max(GR.sdAt(px, py) * UG - zad, z - zf, d - svob);
+      } else if (d < 1.2) {                                          // тёмное на крупном плане — вглубь (пасть, глазницы)
         const cg = GR.cvet(pX(x), pY(y));
         if (cg[3] > 0.5) {
           const wf = clamp((c - 1.2) / 3, 0, 1), L0 = lum(cg);
@@ -700,7 +714,7 @@
       const [a, b, c] = vGol(x, y + DROP, z), [na, , nc] = vGol(gx, gy, gz);
       const cG = GR.cvet(pX(x), pY(y)), cF = FR.cvet(fX(a / SX), fY(b)), cS = SB.cvet(sX(c), sY(b));
       const vSheya = clamp((golova(a, b, c) - 0.05) / 0.5, 0, 1);    // на шее — своя кожа
-      const zad = clamp((0.8 - c) / 1.5, 0, 1);                     // профиль листа — только за ухом: морда профиля не на щеку
+      const zad = GLUB ? clamp((ZF0 + DZ * zAt(pX(x), pY(y)) - z - 1.2) / 1.5, 0, 1) : clamp((0.8 - c) / 1.5, 0, 1);                     // профиль листа — только за ухом: морда профиля не на щеку
       const wg = Math.pow(Math.max(0, gz), 2) * cG[3] * (1 - zad) * 3;   // крупный план — главный спереди и на щеке
       const wf = Math.pow(Math.max(0, nc), 4) * cF[3] * 0.25 * (1 - cG[3]);
       const ws = (Math.pow(Math.abs(na), 2) + 0.4 * Math.max(0, -nc) + 0.3 * Math.max(0, gy)) * cS[3] * zad;
