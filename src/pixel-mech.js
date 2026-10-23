@@ -35,6 +35,7 @@
     /* v5 — тело по листу 2 */
     MG3: '#74787e', MG4: '#65696f', DG3: '#343432', BR: '#6a5d55', FG: '#646466',
     /* сапоги «Пикколо»: замша оранжево-красная, неоновая подошва */
+    RD1: '#d83a1e', RD2: '#8a160c',
     SU1: '#e2561c', SU2: '#cf4a14', SU3: '#ec6828', SU4: '#b8400f', NG1: '#8cf52e', NG2: '#6edc1c'
   };
 
@@ -645,7 +646,8 @@
     const head = new T.Group(); head.name = 'golova'; head.position.set(0, HEAD_Y, 0); root.add(head);
     head.rotation.x = opts.headTilt == null ? 0 : +opts.headTilt;     // наклон головы вперёд (поза)
     const KUB = opts.lico === 'kub' || opts.lico === 'zver';            // прежняя голова-куб (и основа «зверя»)
-    const V7 = opts.golova === 'v7' && !KUB;                           // проба v7 по листу 24.10 (docs/GOLOVA-v7.md)
+    const FORMA_D = (opts.golova === 'list' && !KUB && global.PixelMechForma) || null;   // голова по листу (данные tools/forma)
+    const V7 = (opts.golova === 'v7' || !!FORMA_D) && !KUB;                           // проба v7 по листу 24.10 (docs/GOLOVA-v7.md)
     const FACE_ROW = 0.512, FACE_ROWS = 13, FACE_Y0 = 0.2;
     const CAP_Y = FACE_Y0 + FACE_ROWS * FACE_ROW;            // низ шапки: 6.86 над низом головы
 
@@ -872,8 +874,9 @@
     {
       /* в плане: пологая дуга спереди (радиус RF — зеркальные полосы расходятся к краям, как на листе),
          скругление R у висков, прямые бока назад до ZB */
-      const A = KUB ? 6.2 : (V7 ? 4.85 : 5.35), ZF = 5.56, R = V7 ? 0.35 : 0.95, RF = V7 ? 400 : 20, ZB = V7 ? 2.9 : 1.9;   // v6: виски по шлему; v7: прямой брусок (docs/GOLOVA-v7.md)
-      const YT = W(23.32), YB = W(20.45), YN = W(21.24), YS = W(22.4);
+      const A = KUB ? 6.2 : (FORMA_D ? FORMA_D.visor.a : V7 ? 4.85 : 5.35), ZF = 5.56, R = V7 ? 0.35 : 0.95, RF = V7 ? 400 : 20, ZB = FORMA_D ? FORMA_D.visor.zb : V7 ? 2.9 : 1.9;   // v6: виски по шлему; v7: прямой брусок (docs/GOLOVA-v7.md)
+      const VIS = FORMA_D && FORMA_D.visor;                                // по листу: рамка красного козырька, замер
+      const YT = VIS ? VIS.yt : W(23.32), YB = VIS ? VIS.yb : W(20.45), YN = VIS ? VIS.yb + 0.75 : W(21.24), YS = VIS ? VIS.yb + (VIS.yt - VIS.yb) * 0.68 : W(22.4);
       const P0 = Math.asin((A - R) / (RF - R));
       const Lf = RF * P0, La = R * (Math.PI / 2 - P0);
       const CX0 = RF * Math.sin(P0) - R * Math.sin(P0), CZ0 = ZF - RF * (1 - Math.cos(P0)) - R * Math.cos(P0);
@@ -902,7 +905,7 @@
       const bulge = y => -BUL * Math.pow((y - YM) / HH, 2);
       const bulgeD = y => -2 * BUL * (y - YM) / (HH * HH);
       /* тонировка: тёмный красный (жёлтое под ним → #70…90 красный, чёрное → чёрное), светлее у верхней кромки */
-      const tLow = new T.Color('#720c00').convertSRGBToLinear(), tHigh = new T.Color('#861206').convertSRGBToLinear();
+      const tLow = new T.Color(FORMA_D ? '#e0441a' : '#720c00').convertSRGBToLinear(), tHigh = new T.Color(FORMA_D ? '#ee5a2a' : '#861206').convertSRGBToLinear();   // по листу — светлее: жёлтое лицо под ним рыже-красное
       const tintAt = y => tLow.clone().lerp(tHigh, sm(0.82, 1.0, (y - YB) / (YT - YB)));
       const lens = new MeshBuf(), rim = new MeshBuf();
       const col = new T.Color(1, 1, 1);
@@ -976,7 +979,51 @@
        макушки. Числа формы — таблица SHLEM (замер листа: ширина/высота ≈ 1.3, глубина/ширина ≈ 0.86,
        купол сзади сужается до ~0.6). Прежний куб — opts.lico = 'kub'.
        ============================================================ */
-    if (!KUB) {
+    /* ============================================================
+       ГОЛОВА ПО ЛИСТУ (opts.golova = 'list', проба): объём и цвет сняты с самого листа — оболочка по силуэтам
+       видов спереди и сбоку в сетке шипов, цвет клетки — с вида, куда она смотрит (tools/forma/obolochka.py →
+       src/plus-forma.js). Ни одного числа формы на глаз. Мимика: рот-улыбка поверх (на листе уголки вниз).
+       ============================================================ */
+    const FORMA = FORMA_D;
+    if (FORMA) {
+      const F = global.PixelMechForma;
+      lico.g.children.filter(o => o.isMesh && /_(plastic|metal)$/.test(o.name)).forEach(o => lico.g.remove(o));
+      parts.bokL.g.clear(); parts.bokR.g.clear(); parts.shapka.g.clear();   // козырёк — прозрачная линза по замеру листа
+      const at = (i, j, k) => (i < 0 || j < 0 || k < 0 || i >= F.NX || j >= F.NY || k >= F.NZ) ? '.' : F.cells[(k * F.NY + j) * F.NX + i];
+      const CL = { Y: 'yellow', W: 'head', L: 'LG', M: 'MG', D: 'dark', K: 'BK', P: 'purple', R: 'RD1', r: 'RD2', O: 'O2' };
+      let faceZ = -1e9;
+      for (let k = 0; k < F.NZ; k++) for (let j = 0; j < F.NY; j++) for (let i = 0; i < F.NX; i++)
+        if (at(i, j, k) === 'Y') faceZ = Math.max(faceZ, F.Z0 + (k + 1) * F.S);
+      const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]];
+      const fp = part('forma');
+      new Vox({ cell: [F.S, F.R, F.S], at: [F.X0, F.Y0, F.Z0], maxLen: 3, merge: 0.5, salt: 151, gap: 0.02, bev: 0.034,
+        studs: (c, f) => f === 2 && at(c.x, c.y + 1, c.z) === '.' && 'WLMP'.includes(at(c.x, c.y, c.z)),
+        clip: c => {                                                      // скос открытых рёбер — силуэт круглее ступенек
+          const open = DIRS.filter(([a, b, d]) => at(c.x + a, c.y + b, c.z + d) === '.'), pl = [];
+          for (let p2 = 0; p2 < open.length; p2++) for (let q = p2 + 1; q < open.length; q++) {
+            const A2 = open[p2], B = open[q];
+            if (A2[0] + B[0] === 0 && A2[1] + B[1] === 0 && A2[2] + B[2] === 0) continue;
+            pl.push(...CUT.edge(A2, B, 0.82));
+          }
+          return pl.length ? pl : null;
+        } })
+        .box(0, F.NX, 0, F.NY, 0, F.NZ, (i, j, k) => {
+          const ch = at(i, j, k);
+          if (ch === '.') return null;
+          const y = F.Y0 + (j + 0.5) * F.R, z = F.Z0 + (k + 0.5) * F.S;
+          if (ch === 'K' && y < F.visor.yb && z > faceZ - 1.2) return 'yellow';   // нарисованный рот листа — под улыбку
+          if (ch === 'V' || ch === 'R' || ch === 'r') {                     // козырёк делает линза: впереди лица — пусто, на лице — жёлтое, глаза — чёрные
+            if (z > faceZ + 0.05) return null;
+            return ch === 'r' ? 'BK' : 'yellow';
+          }
+          return CL[ch] || 'dark';
+        })
+        .del(v => !v.cls).build(fp.bufs.plastic);
+      fp.finish(); lico.g.add(fp.g);
+      faceParts.eyeL.visible = faceParts.eyeR.visible = false;              // глаза нарисованы под козырьком
+      ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => { faceParts[n].position.z = faceZ + 0.01; faceParts[n].userData.home && (faceParts[n].userData.home.z = faceZ + 0.01); });
+    }
+    if (!KUB && !FORMA) {
       const strip = g => g.children.filter(o => o.isMesh && /_(plastic|metal)$/.test(o.name)).forEach(o => g.remove(o));
       strip(lico.g); parts.bokL.g.clear(); parts.bokR.g.clear(); parts.shapka.g.clear();
       const SHLEM = V7 ? { a: 4.7, b: 4.75, c: 4.45, yc: 4.85, zc: -0.2, p: 2.5, q: 2.5 }    // v7: почти шар (ш ≈ в ≈ г, лист 24.10)
@@ -1481,6 +1528,55 @@
        След тот же, что у ступни (6 × 10 шипов), ворот — в подгруппе голени, как манжет.
        ============================================================ */
     function sapog(s, name, p, P, NL, NW, bx, X0, Z0, plan, clipOf) {
+      const SG = global.PixelMechSapog;
+      if (SG && SG.pos && !opts.sapogKirpichi) {
+        /* литой сапог: гладкая поверхность генератора в размерах Плюса, цвет по картинке (неон / замша) */
+        const bin = b64 => { const t = (typeof atob === 'function') ? atob(b64) : Buffer.from(b64, 'base64').toString('binary'); const u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+        const pz = new Float32Array(bin(SG.pos).buffer), ix = new Uint32Array(bin(SG.idx).buffer), kl = bin(SG.kls);
+        const cx = X0 + NW * S / 2, n = SG.nv, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+        const cS = [tone('SU1', 0), tone('SU2', 0)], cN = tone('NG1', 0);
+        for (let i = 0; i < n; i++) {
+          pos[i * 3] = cx + s * pz[i * 3]; pos[i * 3 + 1] = pz[i * 3 + 1]; pos[i * 3 + 2] = Z0 + pz[i * 3 + 2];                 // в данных z растёт от пятки к носку
+          const c = kl[i] ? cN : cS[i & 1 ? 0 : 0];
+          col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+        }
+        const idx = s > 0 ? ix : ix.slice().map((v, i) => (i % 3 === 1 ? ix[i + 1] : i % 3 === 2 ? ix[i - 1] : v));   // зеркало — обратный обход
+        const geo = new T.BufferGeometry();
+        geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('color', new T.BufferAttribute(col, 3));
+        geo.setIndex(new T.BufferAttribute(idx, 1)); geo.computeVertexNormals();
+        const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, envMapIntensity: 0.2 }); mat.name = 'sapog_zamsha';
+        const mesh = new T.Mesh(geo, mat); mesh.name = name + '_sapog'; mesh.castShadow = mesh.receiveShadow = true; p.g.add(mesh);
+        const cuff = subPart(p.g, name + '_manzhet', [s * LEG.hipX, HIP_Y + KNEE_Y, 0], [0, 0, s * LEG.shin]);
+        [-0.8, 0.8].forEach(z => magnet(cuff, 0, -4.78, z, [0, 1, 0]));
+        p.manzhet = cuff.finish();
+        p.finish(); root.add(p.g); parts[name] = p;
+        return;
+      }
+      if (SG) {
+        /* по картинке: сетка генератора 3D → кирпичи полшипа (tools/forma/kirpichi.py → src/plus-sapog.js);
+           пятка у z = Z0, носок вперёд; левый — зеркало правого */
+        const at = (i, j, k) => (i < 0 || j < 0 || k < 0 || i >= SG.NX || j >= SG.NY || k >= SG.NZ) ? '.' : SG.cells[((SG.NZ - 1 - k) * SG.NY + j) * SG.NX + i];   // в данных носок у k = 0
+        const xi = i => (s < 0 ? SG.NX - 1 - i : i);
+        const cx = X0 + NW * S / 2;
+        const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0]];
+        new Vox({ cell: [SG.CX, SG.CY, SG.CZ], at: [cx + SG.X0, 0, Z0], maxLen: 6, merge: 0.92, gap: 0.006, salt: 181 + s, bev: 0.06,
+          clip: c => {
+            const open = DIRS.filter(([a2, b2, d2]) => at(xi(c.x + (s < 0 ? -a2 : a2)), c.y + b2, c.z + d2) === '.'), pl = [];
+            for (let i2 = 0; i2 < open.length; i2++) for (let j2 = i2 + 1; j2 < open.length; j2++) {
+              const A2 = open[i2], B2 = open[j2];
+              if (A2[0] + B2[0] === 0 && A2[1] + B2[1] === 0 && A2[2] + B2[2] === 0) continue;
+              pl.push(...CUT.edge(A2, B2, 0.8));
+            }
+            return pl.length ? pl : null;
+          } })
+          .box(0, SG.NX, 0, SG.NY, 0, SG.NZ, (i, j, k) => { const ch = at(xi(i), j, k); return ch === '.' ? null : (ch === 'N' ? 'sole' : 'suede'); })
+          .del(v => !v.cls).build(P);
+        const cuff = subPart(p.g, name + '_manzhet', [s * LEG.hipX, HIP_Y + KNEE_Y, 0], [0, 0, s * LEG.shin]);
+        [-0.8, 0.8].forEach(z => magnet(cuff, 0, -4.78, z, [0, 1, 0]));
+        p.manzhet = cuff.finish();
+        p.finish(); root.add(p.g); parts[name] = p;
+        return;
+      }
       const toe = NL - 1;
       const inShin = c => Math.abs(X0 + (c.x + 0.5) * S - bx) < 1.4 && Math.abs(Z0 + (c.z + 0.5) * S) < 1.4;
       /* подошва 0…0.5: неон, носок и пятка снизу скошены */
