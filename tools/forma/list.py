@@ -24,7 +24,8 @@ d = a - bg
 fg = (d.min(2) > 10) | (d.max(2) < -38) | ((a.max(2) - a.min(2)) > 40)
 fg = nd.binary_opening(fg, iterations=1)
 fg = nd.binary_closing(fg, iterations=2)
-fg[:int(H * 0.16)] = False                                   # подписи видов сверху
+SHAPKA = float(sys.argv[sys.argv.index('--shapka') + 1]) if '--shapka' in sys.argv else 0.16   # доля высоты под подписи сверху (0 — подписей нет)
+fg[:int(H * SHAPKA)] = False                                 # подписи видов сверху
 cols = nd.binary_opening(fg, iterations=1).sum(0)
 runs, s = [], None
 for x, c in enumerate(cols):
@@ -44,7 +45,7 @@ for name, (x0, x1) in zip(names, runs):
         tmp = tempfile.mkdtemp(); Image.fromarray(a[:, max(0, x0 - 4):min(W, x1 + 4)].astype(np.uint8)).save(tmp + '/v.png')
         subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vyrez.py'), NN, tmp + '/v.png', tmp + '/m.png'], check=True)
         m = (np.asarray(Image.open(tmp + '/m.png')) > 128) & m.any(1, keepdims=True) | (np.asarray(Image.open(tmp + '/m.png')) > 128)
-        m[:int(H * 0.16)] = False
+        m[:int(H * SHAPKA)] = False
     m = nd.binary_opening(m, iterations=2)                   # размерные линии и тонкие подписи — прочь
     m = nd.binary_fill_holes(nd.binary_closing(m, iterations=3))
     lab, n = nd.label(m); sz = nd.sum(m, lab, range(1, n + 1)); m = lab == (1 + int(np.argmax(sz)))

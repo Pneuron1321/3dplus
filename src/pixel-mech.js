@@ -1023,7 +1023,32 @@
       faceParts.eyeL.visible = faceParts.eyeR.visible = false;              // глаза нарисованы под козырьком
       ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => { faceParts[n].position.z = faceZ + 0.01; faceParts[n].userData.home && (faceParts[n].userData.home.z = faceZ + 0.01); });
     }
-    if (!KUB && !FORMA) {
+    /* ГОЛОВА-СЕТКА (opts.golova = 'setka', проба): литая голова — сетка генератора 3D по виду 3/4 листа, цвета вершин
+       с видов листа, сведённые к палитре кирпичей (tools/forma/raskraska.py → src/plus-golova-setka.js). */
+    const SETKA = opts.golova === 'setka' && !KUB && global.PixelMechGolovaSetka;
+    if (SETKA) {
+      const G = global.PixelMechGolovaSetka;
+      lico.g.children.filter(o => o.isMesh && /_(plastic|metal)$/.test(o.name)).forEach(o => lico.g.remove(o));
+      parts.bokL.g.clear(); parts.bokR.g.clear(); parts.shapka.g.clear(); ochki.clear();   // козырёк — в самой сетке
+      const bin = b64 => { const t = (typeof atob === 'function') ? atob(b64) : Buffer.from(b64, 'base64').toString('binary'); const u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+      const pz = new Float32Array(bin(G.pos).buffer), ix = new Uint32Array(bin(G.idx).buffer), kl = bin(G.cls);
+      const KEY = { Y: 'YE', W: 'WH', L: 'LG', M: 'MG', D: 'DG', K: 'BK', P: 'PU', R: 'RD1', r: 'RD2', O: 'O2' };
+      const col = new Float32Array(G.nv * 3);
+      let faceZ = -1e9;
+      for (let i = 0; i < G.nv; i++) {
+        const ch = G.kl[kl[i]], c = LIN[KEY[ch] || 'DG'];
+        col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+        if (ch === 'Y' && pz[i * 3 + 1] < 3.2 && Math.abs(pz[i * 3]) < 2.5) faceZ = Math.max(faceZ, pz[i * 3 + 2]);
+      }
+      const zs = FZ - faceZ;                                                // лицо — на месте прежнего (мимика на FZ)
+      const pos = pz.slice(); for (let i = 0; i < G.nv; i++) pos[i * 3 + 2] += zs;
+      const geo = new T.BufferGeometry();
+      geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('color', new T.BufferAttribute(col, 3));
+      geo.setIndex(new T.BufferAttribute(ix, 1)); geo.computeVertexNormals();
+      const mesh = new T.Mesh(geo, MAT.plastic); mesh.name = 'golova_setka'; mesh.castShadow = mesh.receiveShadow = true; lico.g.add(mesh);
+      faceParts.eyeL.visible = faceParts.eyeR.visible = false;              // глаза — на козырьке листа
+    }
+    if (!KUB && !FORMA && !SETKA) {
       const strip = g => g.children.filter(o => o.isMesh && /_(plastic|metal)$/.test(o.name)).forEach(o => g.remove(o));
       strip(lico.g); parts.bokL.g.clear(); parts.bokR.g.clear(); parts.shapka.g.clear();
       const SHLEM = V7 ? { a: 4.7, b: 4.75, c: 4.45, yc: 4.85, zc: -0.2, p: 2.5, q: 2.5 }    // v7: почти шар (ш ≈ в ≈ г, лист 24.10)
