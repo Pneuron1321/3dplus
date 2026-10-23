@@ -153,18 +153,21 @@ object Vizor {
     /** Масштаб фигуры (рост — как в 2.7.2, Александру хватает): с айфоном стоя под ней место на сообщение чата. */
     const val KT = 0.93f * (PRAVO - STOLB_X) / (TELO_W * 1.05f)
     val TELO_X = PRAVO - (PRAVO - STOLB_X) / 2f - TELO_W * KT / 2f
-    val TELO_Y = PV.t
+    /** Фигура — под знаком «++3» (он слева вверху столбца, у пустого угла над плечом). */
+    val TELO_Y = PV.t + 36f
     /** Плюс (во весь рост; бюст зверя — внутри) с запасом на покачивание. */
     val BYUST = Pryam(STOLB_X - 4f, TELO_Y, PRAVO, TELO_Y + TELO_H * KT + 4f)
-    /** Плашка «PLUS co-host» под Плюсом (наибольшая): тапочки чуть заходят за её верх. */
-    val PLASHKA_PLYUSA = Pryam(STOLB_X, BYUST.b - 18f, PRAVO, BYUST.b - 18f + 44f)
+    /** Знак «++3» (2.7.4, вместо плашки «PLUS co-host»): над Плюсом слева. */
+    val PLASHKA_PLYUSA = Pryam(STOLB_X, PV.t, STOLB_X + 96f, PV.t + 52f)
+    /** Цвет знака «++3» — серый, как на картинке Александра (чуть светлее — на тёмной игре). */
+    const val ZNAK = 0xFF8C929A.toInt()
     /** Пилюля налёта — слева от головы, в полосе верха (наибольшая ширина). */
     val NALET_PILYULYA = Pryam(PV.l, VERH, BYUST.l - ZAZOR, VERH + 48f)
 
     // слой "pc" — чат: правый столбец под плашкой Плюса
     const val CW = 240
     const val CH = 600
-    val CHAT_VERH = PLASHKA_PLYUSA.b + ZAZOR
+    val CHAT_VERH = maxOf(PLASHKA_PLYUSA.b, BYUST.b) + ZAZOR
 
     // слой "mz" — «сейчас играет»: правый столбец над окном камеры
     const val MZW = 240

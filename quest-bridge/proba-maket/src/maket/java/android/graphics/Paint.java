@@ -35,6 +35,7 @@ public class Paint {
     public void setColor(int c) { color = c; }
     public int getAlpha() { return color >>> 24; }
     public void setAlpha(int a) { color = (color & 0x00FFFFFF) | ((a & 255) << 24); }
+    public void setShadowLayer(float r, float dx, float dy, int c) { }   // тень на стенде не рисуется
     public Style getStyle() { return style; }
     public void setStyle(Style s) { style = s; }
     public float getStrokeWidth() { return strokeWidth; }

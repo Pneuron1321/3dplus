@@ -433,10 +433,10 @@ class Nalozhenie(
         if (p.nalet) viz.nalet(c, dx, dy, now)
         if (p.lico && Oformlenie.lico == "plus" && telo != null) {
             teloViz(c, sost, now, Vizor.TELO_X - dx, Vizor.TELO_Y - dy, Vizor.KT, Vizor.PV_W.toFloat(), Vizor.PV_H.toFloat())
-            viz.plashkaPlyusa(c, dx, dy, Vizor.TELO_X + Vizor.TELO_W * Vizor.KT / 2f)
+            viz.plashkaPlyusa(c, dx, dy)
         } else if (p.lico) licoPryamoe?.let {
             golova(it, sost, now, c, Vizor.D_LICA, Vizor.LICO_X - dx, Vizor.LICO_Y - dy, Vizor.PV_W.toFloat(), Vizor.PV_H.toFloat())
-            viz.plashkaPlyusa(c, dx, dy, Vizor.LICO_X + Vizor.D_LICA / 2f)
+            viz.plashkaPlyusa(c, dx, dy)
         }
     }
 

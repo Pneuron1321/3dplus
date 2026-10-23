@@ -159,19 +159,23 @@ class VizorPlashki(
         if (zaEfir.isNotEmpty()) c.drawText(kist.vlezet(naletMalo, zaEfir, r.right - 18f - x), x, baza, naletMalo)
     }
 
-    private val plyusK = kist.kist(kist.zagolovki, Vizor.METKA + 4f)
-    private val soveduK = kist.kist(kist.tekst, Vizor.TEKST, Vizor.ZOLOTO)
+    /** Знак «++3» (2.7.4, картинка Александра): маленький «+» сверху слева, крупный «+», «3» внизу справа; серый. */
+    private fun znakK(sz: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = android.graphics.Typeface.DEFAULT_BOLD; textSize = sz; color = Vizor.ZNAK
+        setShadowLayer(3f, 0f, 1f, 0x99000000.toInt())                   // читается и на светлой игре
+    }
+    private val znakMal = znakK(24f)
+    private val znakBol = znakK(50f)
+    private val znakTri = znakK(30f)
 
-    /** Плашка «PLUS co-host» под бюстом, по его середине [cx] (кадр); (dx, dy) — начало слоя в кадре. */
-    fun plashkaPlyusa(c: Canvas, dx: Float, dy: Float, cx: Float) {
+    /** Знак «++3» над Плюсом слева — вместо прежней плашки «PLUS co-host»; (dx, dy) — начало слоя в кадре. */
+    fun plashkaPlyusa(c: Canvas, dx: Float, dy: Float) {
         val m = Vizor.PLASHKA_PLYUSA
-        val a = "PLUS"; val b = "co-host"
-        val w = minOf(m.w, 20f + plyusK.measureText(a) + 10f + soveduK.measureText(b) + 20f)
-        val l = (cx - w / 2).coerceIn(m.l, m.r - w)
-        val r = RectF(l - dx, m.t - dy, l + w - dx, m.b - dy)
-        kist.karta(c, r)
-        c.drawText(a, r.left + 20f, r.centerY() + 10f, plyusK)
-        c.drawText(b, r.left + 20f + plyusK.measureText(a) + 10f, r.centerY() + 10f, soveduK)
+        val l = m.l - dx; val t = m.t - dy
+        c.drawText("+", l, t + 17f, znakMal)
+        val xb = l + znakMal.measureText("+") * 0.75f
+        c.drawText("+", xb, t + 41f, znakBol)
+        c.drawText("3", xb + znakBol.measureText("+") - 1f, t + 46f, znakTri)
     }
 
     // ---------- правый столбец: чат ----------
