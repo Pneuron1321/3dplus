@@ -872,7 +872,7 @@
     {
       /* в плане: пологая дуга спереди (радиус RF — зеркальные полосы расходятся к краям, как на листе),
          скругление R у висков, прямые бока назад до ZB */
-      const A = KUB ? 6.2 : 5.35, ZF = 5.56, R = 0.95, RF = 20, ZB = 1.9;     // v6: виски по шлему (docs/GOLOVA-v6.md)
+      const A = KUB ? 6.2 : (V7 ? 4.85 : 5.35), ZF = 5.56, R = V7 ? 0.35 : 0.95, RF = V7 ? 400 : 20, ZB = V7 ? 2.9 : 1.9;   // v6: виски по шлему; v7: прямой брусок (docs/GOLOVA-v7.md)
       const YT = W(23.32), YB = W(20.45), YN = W(21.24), YS = W(22.4);
       const P0 = Math.asin((A - R) / (RF - R));
       const Lf = RF * P0, La = R * (Math.PI / 2 - P0);
@@ -897,8 +897,8 @@
         return y;
       }
       const top = u => YT - 0.05 * sm(Lf + La, Lt, Math.abs(u));
-      const N = 150, M = 12, TH = 0.055;
-      const YM = (YT + YB) / 2 + 0.2, HH = (YT - YB) / 2, BUL = 0.24;
+      const N = 150, M = 12, TH = V7 ? 0.24 : 0.055;                 // v7: толстый, как кирпичный
+      const YM = (YT + YB) / 2 + 0.2, HH = (YT - YB) / 2, BUL = V7 ? 0.02 : 0.24;
       const bulge = y => -BUL * Math.pow((y - YM) / HH, 2);
       const bulgeD = y => -2 * BUL * (y - YM) / (HH * HH);
       /* тонировка: тёмный красный (жёлтое под ним → #70…90 красный, чёрное → чёрное), светлее у верхней кромки */
@@ -979,21 +979,24 @@
     if (!KUB) {
       const strip = g => g.children.filter(o => o.isMesh && /_(plastic|metal)$/.test(o.name)).forEach(o => g.remove(o));
       strip(lico.g); parts.bokL.g.clear(); parts.bokR.g.clear(); parts.shapka.g.clear();
-      const SHLEM = { a: 5.0, b: 4.45, c: 4.3, yc: 4.3, zc: 0.25, p: 2.4, q: 4.2 };   // полуоси, центр, показатели плана/купола
-      const MASKA = { x: 4.4, z0: 1.6, y1: CAP_Y };                                // жёлтая маска: |x| ≤ 4.4, z ≥ 1.6, ниже шапки
+      const SHLEM = V7 ? { a: 4.7, b: 4.75, c: 4.45, yc: 4.85, zc: -0.2, p: 2.5, q: 2.5 }    // v7: почти шар (ш ≈ в ≈ г, лист 24.10)
+        : { a: 5.0, b: 4.45, c: 4.3, yc: 4.3, zc: 0.25, p: 2.4, q: 4.2 };   // полуоси, центр, показатели плана/купола
+      const MASKA = V7 ? { x: 3.5, z0: 1.4, y1: W(23.32) - 0.1 }                  // v7: плоская плита лица до верха очков, по бокам — борта шлема
+        : { x: 4.4, z0: 1.6, y1: CAP_Y };                                // жёлтая маска: |x| ≤ 4.4, z ≥ 1.6, ниже шапки
       const sq3 = (v, e) => Math.pow(Math.abs(v), e);
       const shlem = (X, Y, Z) => Math.pow(sq3(X / SHLEM.a, SHLEM.p) + sq3((Z - SHLEM.zc) / SHLEM.c, SHLEM.p), SHLEM.q / SHLEM.p)
         + sq3((Y - SHLEM.yc) / SHLEM.b, SHLEM.q) <= 1;
-      const maska = (X, Y, Z) => Math.abs(X) < MASKA.x && Z > MASKA.z0 && Z < FZ && Y > FACE_Y0 && Y < MASKA.y1;
+      const maska = (X, Y, Z) => Math.abs(X) < MASKA.x && Z > MASKA.z0 && Z < FZ && Y > FACE_Y0 && Y < MASKA.y1
+        && !(V7 && Y < FACE_Y0 + 2 * FACE_ROW && Math.abs(X) > MASKA.x - 0.8);       // v7: нижние углы лица скруглены
       const AY = FACE_Y0 + 17 * FACE_ROW;                                          // площадка пришельца
-      const ploshchadka = (X, Y, Z) => Math.abs(X) < 3.2 && Z > -1.6 && Z < 3.2 && Y < AY && Y > CAP_Y;
-      const R6 = FACE_ROW, X0 = -6.4, Z0 = -6.4, NX = 16, NY = 18, NZ = 16;
+      const ploshchadka = (X, Y, Z) => !V7 && Math.abs(X) < 3.2 && Z > -1.6 && Z < 3.2 && Y < AY && Y > CAP_Y;
+      const R6 = FACE_ROW, X0 = -6.4, Z0 = -6.4, NX = 16, NY = V7 ? 19 : 18, NZ = 16;
       const C = (i, j, k) => [X0 + (i + 0.5) * S, FACE_Y0 + (j + 0.5) * R6, Z0 + (k + 0.5) * S];
       const occ = new Map(), key = (i, j, k) => (i * 64 + j) * 64 + k;
       for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) for (let k = 0; k < NZ; k++) {
         const [X, Y, Z] = C(i, j, k);
         if (maska(X, Y, Z)) occ.set(key(i, j, k), 'm');
-        else if (shlem(X, Y, Z) || ploshchadka(X, Y, Z)) occ.set(key(i, j, k), 's');
+        else if ((shlem(X, Y, Z) || ploshchadka(X, Y, Z)) && !(V7 && Math.abs(X) < 2.8 && Y > 7.25 && Z > 1.3)) occ.set(key(i, j, k), 's');   // v7: гнездо пришельца на лбу
       }
       const kind = (i, j, k) => occ.get(key(i, j, k));
       const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]];
@@ -1017,13 +1020,22 @@
           if (kind(i, j, k) !== 's') return null;
           const [X, Y, Z] = C(i, j, k);
           if (j === 0) return 'dark';
+          if (V7) {                                                               // v7: белый купол и затылок, серая полоса через уши
+            if (nearMaska(i, j, k) && Y < MASKA.y1) return 'sideFront';
+            return (Math.abs(X) > 3.2 && Y > 1.2 && Y < 7.4 && Z > -2.6 && Z < 2.4) ? 'side' : 'head';
+          }
           if (nearMaska(i, j, k) && Y < CAP_Y) return 'sideFront';                // тёмная окантовка у маски, как на листе
-          if (Z < -1.6) return (Y > 7.6 || V7) ? 'head' : 'skull';            // v7: затылок белый, как на листе
+          if (Z < -1.6) return Y > 7.6 ? 'head' : 'skull';
           return Y > 6.4 ? 'head' : 'side';
         })
         .del(v => !v.cls)
         .build(sh.bufs.plastic);
-      alienOn(sh.bufs.plastic, AY);
+      if (V7) {                                                                    // v7: пришелец стоит на лбу, откинут назад
+        const pr = subPart(sh.g, 'prishelec', [0, 8.85, 2.35], [1.05, 0, 0]);   // низ — на лбу над белой полосой, верх выше купола
+        pr.g.scale.setScalar(0.66);
+        alienOn(pr.bufs.plastic, -0.52);
+        pr.finish();
+      } else alienOn(sh.bufs.plastic, AY);
       /* крышка-диск на затылке: серый диск, светлое кольцо, тёмная втулка */
       const zB = SHLEM.zc - SHLEM.c + 0.12, yB = SHLEM.yc - 0.2;
       axial(sh.bufs.plastic, CYL, 0, yB, zB, [0, 0, -1], 1.75, 0.34, LIN.MG, true);
@@ -1041,7 +1053,7 @@
         .build(ma.bufs.plastic);
       /* объёмные щёки и подбородок — подкова вокруг рта (как 22.10), под ширину маски 11 столбцов */
       const cheek = (x, y) => x >= 0 && x <= 10 && ((x <= 1 || x >= 9) ? y <= 5 : y <= 2);
-      [[FZ, 0.4, cheek], [FZ + 0.4, 0.2, (x, y) => (x <= 1 || x >= 9) && x >= 0 && x <= 10 && y >= 1 && y <= 4]].forEach(([z0, dz, fn], n) =>
+      (V7 ? [] : [[FZ, 0.4, cheek], [FZ + 0.4, 0.2, (x, y) => (x <= 1 || x >= 9) && x >= 0 && x <= 10 && y >= 1 && y <= 4]].forEach(([z0, dz, fn], n) =>
         new Vox({ cell: [S, R6, dz], at: [-MASKA.x, FACE_Y0, z0], maxLen: 4, merge: 0.55, salt: 70 + n, gap: 0.02, bev: 0.03,
           clip: c => {
             const pl = [];
@@ -1051,16 +1063,16 @@
             if (c.y === 0) pl.push(...CUT.edge([0, -1, 0], [0, 0, 1], 0.6));
             return pl.length ? pl : null;
           } })
-          .box(0, 11, 0, 6, 0, 1, (x, y) => (fn(x, y) ? 'yellow' : null)).del(v => !v.cls).build(ma.bufs.plastic));
+          .box(0, 11, 0, 6, 0, 1, (x, y) => (fn(x, y) ? 'yellow' : null)).del(v => !v.cls).build(ma.bufs.plastic)));
       new Vox({ cell: [S, 0.2, S], at: [-3.2, 0.0, -3.2], maxLen: 4, salt: 5 }).box(0, 8, 0, 1, 0, 8, 'dark').build(ma.bufs.plastic);  // низ к шее
       [[-3.2, -2.4], [3.2, -2.4], [-3.2, 2.4], [3.2, 2.4]].forEach(([x, z]) => magnet(ma, x, 0.02, z, [0, -1, 0]));
       ma.finish(); lico.g.add(ma.g);
       /* наушники: серый диск в оранжевой квадратной рамке, по нормали к шлему; круглые шипы над и под рамкой */
       [-1, 1].forEach(s => {
         const p = part(s < 0 ? 'naushnikL' : 'naushnikR'), P = p.bufs.plastic, d = [s, 0, 0];
-        const ey = 4.55, ez = 0.35;
+        const ey = 4.55, ez = V7 ? -0.2 : 0.35;
         let ex = 0; while (shlem(ex + 0.05, ey, ez)) ex += 0.05;                   // поверхность шлема на высоте уха
-        const RO = 1.35, RI = 0.86, TH = 0.5, x1 = s * (ex - 0.15 + TH / 2);
+        const RO = V7 ? 1.6 : 1.35, RI = V7 ? 1.02 : 0.86, TH = 0.5, x1 = s * (ex - 0.15 + TH / 2);
         const oc = tone('O2', 0.02), oc2 = tone('O1', 0.02);
         [[0, RO - (RO - RI) / 2, RO, (RO - RI) / 2, oc], [0, -(RO - (RO - RI) / 2), RO, (RO - RI) / 2, oc2],
          [RO - (RO - RI) / 2, 0, (RO - RI) / 2, RI, oc], [-(RO - (RO - RI) / 2), 0, (RO - RI) / 2, RI, oc2]].forEach(([dz, dy, hz, hy, col]) => {
@@ -1117,26 +1129,6 @@
         axial(mb, CYL, nx * 1.43, 0.48, 0.1 + nz * 1.43, [nx, 0, nz], 0.16, 0.07, gm.clone().multiplyScalar(1.8));
         axial(mb, HEX, nx * 1.46, 0.48, 0.1 + nz * 1.46, [nx, 0, nz], 0.075, 0.05, dk.clone().multiplyScalar(0.3));
       });
-    }
-    if (V7) {
-      /* v7: воротник под головой, как на листе — тёмное кольцо кирпичей вокруг штыря, по нему круглые чёрные
-         шишки, спереди и сзади светлые плитки; лежит на верху груди (y груди 19.5 → −0.3 здесь) */
-      const pb = sheya.bufs.plastic;
-      new Vox({ cell: [S, 0.4, S], at: [-2.8, -0.3, -2.4], maxLen: 3, merge: 0.5, salt: 140, bev: 0.04,
-        clip: c => ((c.x === 0 || c.x === 6) && (c.z === 0 || c.z === 5) ? CUT.corner(c.x ? 1 : -1, 1, c.z ? 1 : -1, 1.3) : null) })
-        .box(0, 7, 0, 2, 0, 6, (x, y, z) => (x >= 2 && x <= 4 && z >= 1 && z <= 4 ? null : (y ? 'dark' : 'darkBand')))
-        .del(v => !v.cls).build(pb);
-      const knob = (x, z, r) => {
-        axial(pb, CYL_FINE, x, 0.5, z, [0, 1, 0], r, 0.34, LIN.GM.clone().multiplyScalar(1.6), true);
-        axial(pb, CYL_FINE, x, 0.67, z, [0, 1, 0], r * 0.72, 0.1, LIN.DG2.clone().multiplyScalar(0.5), true);
-      };
-      [[-2.25, 1.6], [2.25, 1.6], [-2.25, -1.85], [2.25, -1.85], [-1.0, -1.95], [1.0, -1.95]].forEach(([x, z]) => knob(x, z, 0.42));
-      [-1, 1].forEach(sx => [1.2, -0.6].forEach(z => {                     // круглые чёрные шишки торчат вбок, как на листе
-        axial(pb, CYL_FINE, sx * 2.75, 0.1, z, [sx, 0, 0], 0.55, 0.5, LIN.GM.clone().multiplyScalar(1.6), true);
-        axial(pb, CYL_FINE, sx * 3.2, 0.1, z, [sx, 0, 0], 0.36, 0.1, LIN.DG2.clone().multiplyScalar(0.5), true);
-      }));
-      new Vox({ cell: [0.8, 0.4, 0.3], at: [-0.8, -0.3, 1.95], maxLen: 2, salt: 141, bev: 0.04 }).box(0, 2, 0, 2, 0, 1, 'head').build(pb);   // светлая плитка спереди
-      new Vox({ cell: [0.8, 0.4, 0.3], at: [-0.8, -0.3, -2.25], maxLen: 2, salt: 142, bev: 0.04 }).box(0, 2, 0, 2, 0, 1, 'side').build(pb);
     }
     sheya.finish(); root.add(sheya.g); parts.sheya = sheya;
     if (zverBezShei) sheya.g.visible = false;                              // у «зверя-2» шея — широкая, из самой головы
