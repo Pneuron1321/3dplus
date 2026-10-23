@@ -33,7 +33,9 @@
     PU: '#8656ec', PU2: '#7444dc', PU3: '#9464f0',
     OT1: '#e06c00', OT2: '#cc5e00', OT3: '#ec7a04',
     /* v5 — тело по листу 2 */
-    MG3: '#74787e', MG4: '#65696f', DG3: '#343432', BR: '#6a5d55', FG: '#646466'
+    MG3: '#74787e', MG4: '#65696f', DG3: '#343432', BR: '#6a5d55', FG: '#646466',
+    /* сапоги «Пикколо»: замша оранжево-красная, неоновая подошва */
+    SU1: '#e2561c', SU2: '#cf4a14', SU3: '#ec6828', SU4: '#b8400f', NG1: '#8cf52e', NG2: '#6edc1c'
   };
 
   /* смеси: класс клетки → из чего выбирается цвет каждого кирпича */
@@ -69,7 +71,10 @@
     footBase: [['O4', 0.6], ['O3', 0.4]],
     footMid: [['O1', 0.62], ['O6', 0.2], ['O5', 0.18]],
     footTop: [['OT1', 0.45], ['OT3', 0.3], ['OT2', 0.25]],
-    bracket: [['O2', 0.6], ['O6', 0.4]]
+    bracket: [['O2', 0.6], ['O6', 0.4]],
+    suede: [['SU1', 0.5], ['SU2', 0.25], ['SU3', 0.25]],
+    suedeFold: [['SU2', 0.6], ['SU4', 0.4]],
+    sole: [['NG1', 0.65], ['NG2', 0.35]]
   };
 
   function create(T, opts) {
@@ -640,6 +645,7 @@
     const head = new T.Group(); head.name = 'golova'; head.position.set(0, HEAD_Y, 0); root.add(head);
     head.rotation.x = opts.headTilt == null ? 0 : +opts.headTilt;     // наклон головы вперёд (поза)
     const KUB = opts.lico === 'kub' || opts.lico === 'zver';            // прежняя голова-куб (и основа «зверя»)
+    const V7 = opts.golova === 'v7' && !KUB;                           // проба v7 по листу 24.10 (docs/GOLOVA-v7.md)
     const FACE_ROW = 0.512, FACE_ROWS = 13, FACE_Y0 = 0.2;
     const CAP_Y = FACE_Y0 + FACE_ROWS * FACE_ROW;            // низ шапки: 6.86 над низом головы
 
@@ -848,7 +854,7 @@
     }
     shapka.finish(); head.add(shapka.g); parts.shapka = shapka;
     function alienOn(mb, AY) {
-      const HORN = +(opts.hornH || 1.0);
+      const HORN = +(opts.hornH || (V7 ? 0.42 : 1.0));                 // v7: рожки — низкие ушки, не антенны
       const alien = new Vox({ cell: [S, 0.8, S], at: [-3.2, AY, -1.6], maxLen: 4, merge: 0.8, salt: 23, gap: 0.024 });
       const tiles = new Vox({ cell: [S, 0.24, S], at: [-3.2, AY + 0.8, -1.6], maxLen: 4, merge: 0.85, salt: 24, gap: 0.024, bev: 0.03 });
       const horns = new Vox({ cell: [S, HORN, S], at: [-3.2, AY, -1.6], maxLen: 1, salt: 26, gap: 0.024,
@@ -1012,7 +1018,7 @@
           const [X, Y, Z] = C(i, j, k);
           if (j === 0) return 'dark';
           if (nearMaska(i, j, k) && Y < CAP_Y) return 'sideFront';                // тёмная окантовка у маски, как на листе
-          if (Z < -1.6) return Y > 7.6 ? 'head' : 'skull';
+          if (Z < -1.6) return (Y > 7.6 || V7) ? 'head' : 'skull';            // v7: затылок белый, как на листе
           return Y > 6.4 ? 'head' : 'side';
         })
         .del(v => !v.cls)
@@ -1111,6 +1117,26 @@
         axial(mb, CYL, nx * 1.43, 0.48, 0.1 + nz * 1.43, [nx, 0, nz], 0.16, 0.07, gm.clone().multiplyScalar(1.8));
         axial(mb, HEX, nx * 1.46, 0.48, 0.1 + nz * 1.46, [nx, 0, nz], 0.075, 0.05, dk.clone().multiplyScalar(0.3));
       });
+    }
+    if (V7) {
+      /* v7: воротник под головой, как на листе — тёмное кольцо кирпичей вокруг штыря, по нему круглые чёрные
+         шишки, спереди и сзади светлые плитки; лежит на верху груди (y груди 19.5 → −0.3 здесь) */
+      const pb = sheya.bufs.plastic;
+      new Vox({ cell: [S, 0.4, S], at: [-2.8, -0.3, -2.4], maxLen: 3, merge: 0.5, salt: 140, bev: 0.04,
+        clip: c => ((c.x === 0 || c.x === 6) && (c.z === 0 || c.z === 5) ? CUT.corner(c.x ? 1 : -1, 1, c.z ? 1 : -1, 1.3) : null) })
+        .box(0, 7, 0, 2, 0, 6, (x, y, z) => (x >= 2 && x <= 4 && z >= 1 && z <= 4 ? null : (y ? 'dark' : 'darkBand')))
+        .del(v => !v.cls).build(pb);
+      const knob = (x, z, r) => {
+        axial(pb, CYL_FINE, x, 0.5, z, [0, 1, 0], r, 0.34, LIN.GM.clone().multiplyScalar(1.6), true);
+        axial(pb, CYL_FINE, x, 0.67, z, [0, 1, 0], r * 0.72, 0.1, LIN.DG2.clone().multiplyScalar(0.5), true);
+      };
+      [[-2.25, 1.6], [2.25, 1.6], [-2.25, -1.85], [2.25, -1.85], [-1.0, -1.95], [1.0, -1.95]].forEach(([x, z]) => knob(x, z, 0.42));
+      [-1, 1].forEach(sx => [1.2, -0.6].forEach(z => {                     // круглые чёрные шишки торчат вбок, как на листе
+        axial(pb, CYL_FINE, sx * 2.75, 0.1, z, [sx, 0, 0], 0.55, 0.5, LIN.GM.clone().multiplyScalar(1.6), true);
+        axial(pb, CYL_FINE, sx * 3.2, 0.1, z, [sx, 0, 0], 0.36, 0.1, LIN.DG2.clone().multiplyScalar(0.5), true);
+      }));
+      new Vox({ cell: [0.8, 0.4, 0.3], at: [-0.8, -0.3, 1.95], maxLen: 2, salt: 141, bev: 0.04 }).box(0, 2, 0, 2, 0, 1, 'head').build(pb);   // светлая плитка спереди
+      new Vox({ cell: [0.8, 0.4, 0.3], at: [-0.8, -0.3, -2.25], maxLen: 2, salt: 142, bev: 0.04 }).box(0, 2, 0, 2, 0, 1, 'side').build(pb);
     }
     sheya.finish(); root.add(sheya.g); parts.sheya = sheya;
     if (zverBezShei) sheya.g.visible = false;                              // у «зверя-2» шея — широкая, из самой головы
@@ -1409,6 +1435,7 @@
         return [];
       };
       const clipOf = (inset, extra) => c => { const pl = plan(c, inset).concat((extra && extra(c)) || []); return pl.length ? pl : null; };
+      if (opts.obuv === 'piccolo') return sapog(s, name, p, P, NL, NW, bx, X0, Z0, plan, clipOf);
       /* основание 0…0.9: два ряда высоких кирпичей, у носка снизу скос */
       new Vox({ cell: [S, 0.45, S], at: [X0, 0, Z0], maxLen: 3, merge: 0.5, salt: 71 + s,
         clip: clipOf(0, c => (c.y === 0 && c.z === toe ? CUT.edge([0, -1, 0], [0, 0, 1], 1.1) : (c.y === 0 && c.z === 0 ? CUT.edge([0, -1, 0], [0, 0, -1], 1.3) : null)))
@@ -1451,6 +1478,68 @@
           clip: c => (c.x === 0 || c.x === 4) ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, 0, fz], 0.8) : null
         }).box(0, 5, 0, 1, 0, 1, fz > 0 ? 'footMid' : 'bracket').build(CP);
       });
+      [-0.8, 0.8].forEach(z => magnet(cuff, 0, CB + 0.02, z, [0, 1, 0]));
+      p.manzhet = cuff.finish();
+      p.finish(); root.add(p.g); parts[name] = p;
+    }
+    /* ============================================================
+       САПОГ «ПИККОЛО» (opts.obuv = 'piccolo', проба по картинке Александра 24.10): мягкий замшевый сапожок
+       оранжево-красного цвета на неоновой зелёной подошве с круглым протектором; на голени — толстый
+       подвёрнутый ворот; по боку и на пятке — складки замши; снаружи — фиолетовая полоса (своя, не логотип).
+       След тот же, что у ступни (6 × 10 шипов), ворот — в подгруппе голени, как манжет.
+       ============================================================ */
+    function sapog(s, name, p, P, NL, NW, bx, X0, Z0, plan, clipOf) {
+      const toe = NL - 1;
+      const inShin = c => Math.abs(X0 + (c.x + 0.5) * S - bx) < 1.4 && Math.abs(Z0 + (c.z + 0.5) * S) < 1.4;
+      /* подошва 0…0.5: неон, носок и пятка снизу скошены */
+      new Vox({ cell: [S, 0.5, S], at: [X0, 0, Z0], maxLen: 4, merge: 0.6, salt: 171 + s, bev: 0.05,
+        clip: clipOf(0, c => (c.z === toe ? CUT.edge([0, -1, 0], [0, 0, 1], 1.0) : (c.z === 0 ? CUT.edge([0, -1, 0], [0, 0, -1], 1.1) : null)))
+      }).box(0, NW, 0, 1, 0, NL, 'sole').build(P);
+      /* протектор: круглые шишки по кромке подошвы (бока и носок) */
+      for (let k = 1; k < NL - 1; k++) [-1, 1].forEach(sx => {
+        axial(P, CYL, sx < 0 ? X0 + 0.04 : X0 + NW * S - 0.04, 0.17, Z0 + (k + 0.5) * S, [sx, 0, 0], 0.2, 0.16, LIN.NG2, true);
+      });
+      for (let i = 1; i < NW - 1; i++) axial(P, CYL, X0 + (i + 0.5) * S, 0.17, Z0 + NL * S - 0.04, [0, 0, 1], 0.2, 0.16, LIN.NG2, true);
+      /* замша 0.5…1.5 по всему следу, носок мягко скруглён сверху */
+      new Vox({ cell: [S, 0.5, S], at: [X0, 0.5, Z0], maxLen: 6, merge: 0.92, gap: 0.008, salt: 172 + s, bev: 0.09,
+        clip: clipOf(0, c => (c.y === 1 && c.z === toe ? CUT.edge([0, 1, 0], [0, 0, 1], 0.85) : null))
+      }).box(0, NW, 0, 2, 0, NL, 'suede').build(P);
+      /* 1.5…2.5: подъём к голени — каждый ряд короче, передняя кромка скруглена; проём под голень */
+      const front = y => toe - 2 - y * 2;
+      new Vox({ cell: [S, 0.5, S], at: [X0, 1.5, Z0], maxLen: 6, merge: 0.92, gap: 0.008, salt: 173 + s, bev: 0.1,
+        clip: clipOf(9, c => {
+          if (c.z === front(c.y)) return CUT.edge([0, 1, 0], [0, 0, 1], 0.9);
+          if (c.z === 0) return CUT.edge([0, 1, 0], [0, 0, -1], 1.0);
+          return null;
+        })
+      }).box(0, NW, 0, 2, 0, NL, 'suede').del(c => inShin(c) || c.z > front(c.y)).build(P);
+      /* складки замши: валики по наружному боку у пятки и поперёк пятки */
+      const xo = s > 0 ? X0 + NW * S : X0, zh = Z0;
+      [0.95, 1.3, 1.68, 2.05].forEach((y, i) => {
+        const len = 3.4 - i * 0.35;
+        bevelBox(P, xo + s * 0.06, y, zh + len / 2 + 0.1, 0.09, 0.08, len / 2, 0.05, tone(i & 1 ? 'SU4' : 'SU2', 0.03), 63);
+        bevelBox(P, X0 + NW * S / 2, y, zh - 0.06, NW * S / 2 - 0.35, 0.08, 0.09, 0.05, tone(i & 1 ? 'SU2' : 'SU4', 0.03), 63);
+      });
+      /* фиолетовая полоса снаружи: косая, от носка к пятке вверх (своя форма) */
+      for (let k = 0; k < 6; k++) {
+        const z = Z0 + NL * S - 1.4 - k * 0.62, y = 0.72 + k * 0.1;
+        bevelBox(P, xo + s * 0.05, y, z, 0.06, 0.1, 0.34, 0.03, tone(k > 3 ? 'PU2' : 'PU', 0.02), 63);
+      }
+      /* ворот на голени: подгруппа с наклоном голени — гладкое голенище и толстый подвёрнутый валик сверху */
+      const cuff = subPart(p.g, name + '_manzhet', [s * LEG.hipX, HIP_Y + KNEE_Y, 0], [0, 0, s * LEG.shin]);
+      const CP = cuff.bufs.plastic, CB = -4.8, CT = -3.6;               // низкое голенище — сапожок до щиколотки
+      new Vox({ cell: [0.7, (CT - CB) / 3, 0.7], at: [-2.1, CB, -2.1], maxLen: 6, merge: 0.92, gap: 0.008, salt: 176 + s, bev: 0.09,
+        clip: c => ((c.x === 0 || c.x === 5) && (c.z === 0 || c.z === 5) ? CUT.edge([c.x ? 1 : -1, 0, 0], [0, 0, c.z ? 1 : -1], 0.75) : null)
+      }).box(0, 6, 0, 3, 0, 6, (x, y, z) => (x >= 1 && x <= 4 && z >= 1 && z <= 4 ? null : 'suede')).del(v => !v.cls).build(CP);
+      new Vox({ cell: [0.85, 0.45, 0.85], at: [-2.55, CT - 0.1, -2.55], maxLen: 6, merge: 0.9, gap: 0.008, salt: 178 + s, bev: 0.14,
+        clip: c => {
+          const pl = [], sx = c.x === 0 ? -1 : (c.x === 5 ? 1 : 0), sz = c.z === 0 ? -1 : (c.z === 5 ? 1 : 0);
+          if (sx) pl.push(...CUT.edge([sx, 0, 0], [0, c.y ? 1 : -1, 0], 0.62));
+          if (sz) pl.push(...CUT.edge([0, 0, sz], [0, c.y ? 1 : -1, 0], 0.62));
+          if (sx && sz) pl.push(...CUT.edge([sx, 0, 0], [0, 0, sz], 0.7));
+          return pl.length ? pl : null;
+        }
+      }).box(0, 6, 0, 2, 0, 6, (x, y, z) => (x >= 2 && x <= 3 && z >= 2 && z <= 3 ? null : 'suede')).del(v => !v.cls).build(CP);
       [-0.8, 0.8].forEach(z => magnet(cuff, 0, CB + 0.02, z, [0, 1, 0]));
       p.manzhet = cuff.finish();
       p.finish(); root.add(p.g); parts[name] = p;
