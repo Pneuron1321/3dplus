@@ -1499,7 +1499,7 @@
         return [];
       };
       const clipOf = (inset, extra) => c => { const pl = plan(c, inset).concat((extra && extra(c)) || []); return pl.length ? pl : null; };
-      if (opts.obuv === 'piccolo') return sapog(s, name, p, P, NL, NW, bx, X0, Z0, plan, clipOf);
+      if (opts.obuv === 'piccolo' || opts.obuv === 'utka') return sapog(s, name, p, P, NL, NW, bx, X0, Z0, plan, clipOf);
       /* основание 0…0.9: два ряда высоких кирпичей, у носка снизу скос */
       new Vox({ cell: [S, 0.45, S], at: [X0, 0, Z0], maxLen: 3, merge: 0.5, salt: 71 + s,
         clip: clipOf(0, c => (c.y === 0 && c.z === toe ? CUT.edge([0, -1, 0], [0, 0, 1], 1.1) : (c.y === 0 && c.z === 0 ? CUT.edge([0, -1, 0], [0, 0, -1], 1.3) : null)))
@@ -1560,8 +1560,14 @@
         const pz = new Float32Array(bin(SG.pos).buffer), ix = new Uint32Array(bin(SG.idx).buffer), kl = bin(SG.kls);
         /* посадка: проём ворота (верхние вершины) — на ось голени; размер — множитель obuvK (Плюс коренастый,
            сапог в размер прежней ступни смотрится мелким) */
-        const KS = +(opts.obuvK || 1.35), n = SG.nv, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+        const UTKA = opts.obuv === 'utka', n = SG.nv, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
         let ymax = 0; for (let i = 0; i < n; i++) ymax = Math.max(ymax, pz[i * 3 + 1]);
+        /* «утка»: сапог кончается прямо под шарниром щиколотки — размер из высоты, как у уточки (небольшой) */
+        const KS = UTKA ? (ankle(s)[1] - 0.35) / ymax : +(opts.obuvK || 1.35);
+        /* неоновая подошва — по низу следа, и под загнутым вверх носком тоже: ниже 0.42 от местного низа */
+        const BZ = 0.25, nb = Math.ceil((SG.dlina + 1) / BZ) + 1, niz = new Float32Array(nb).fill(1e9);
+        for (let i = 0; i < n; i++) { const b = Math.max(0, Math.floor(pz[i * 3 + 2] / BZ)); niz[b] = Math.min(niz[b], pz[i * 3 + 1]); }
+        for (let b = 1; b < nb; b++) if (niz[b] > 1e8) niz[b] = niz[b - 1];
         let ox = 0, oz = 0, on = 0;
         for (let i = 0; i < n; i++) if (pz[i * 3 + 1] > ymax * 0.88) { ox += pz[i * 3]; oz += pz[i * 3 + 2]; on++; }
         ox /= on; oz /= on;
@@ -1569,7 +1575,8 @@
         const cS = [tone('SU1', 0), tone('SU2', 0)], cN = tone('NG1', 0);
         for (let i = 0; i < n; i++) {
           pos[i * 3] = cx + s * (pz[i * 3] - ox) * KS; pos[i * 3 + 1] = pz[i * 3 + 1] * KS; pos[i * 3 + 2] = (pz[i * 3 + 2] - oz) * KS;   // в данных z растёт от пятки к носку
-          const c = kl[i] ? cN : cS[i & 1 ? 0 : 0];
+          const neon = UTKA ? pz[i * 3 + 1] - niz[Math.max(0, Math.floor(pz[i * 3 + 2] / BZ))] < 0.42 : kl[i];
+          const c = neon ? cN : cS[0];
           col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
         }
         const idx = s > 0 ? ix : ix.slice().map((v, i) => (i % 3 === 1 ? ix[i + 1] : i % 3 === 2 ? ix[i - 1] : v));   // зеркало — обратный обход
@@ -1579,6 +1586,26 @@
         const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, envMapIntensity: 0.2 }); mat.name = 'sapog_zamsha';
         const mesh = new T.Mesh(geo, mat); mesh.name = name + '_sapog'; mesh.castShadow = mesh.receiveShadow = true; p.g.add(mesh);
         const cuff = subPart(p.g, name + '_manzhet', [s * LEG.hipX, HIP_Y + KNEE_Y, 0], [0, 0, s * LEG.shin]);
+        if (UTKA) {
+          /* белый носок на резинке (как спортивный, без надписи): трубка вокруг голени и шарнира щиколотки,
+             сечение — скруглённый квадрат (накрывает углы голени), продольный рубчик; сверху — резинка шире и мельче */
+          const sock = new MeshBuf(true), NA = 96, wc = tone('WH2', 0), wc2 = tone('WH', 0);
+          const kvad = (t, h) => h / Math.pow(Math.pow(Math.abs(Math.cos(t)), 4) + Math.pow(Math.abs(Math.sin(t)), 4), 1 / 4);
+          const yb = -ANKLE - 2.1, yt = -ANKLE + 0.75, yr = yt - 0.55;          // низ — глубоко в вороте сапога, верх — сразу над шарниром
+          const ring = (y, h, ribs, dep) => { const st = sock.v; for (let a = 0; a <= NA; a++) {
+            const t = a / NA * Math.PI * 2, r = kvad(t, h) * (1 + dep * Math.cos(t * ribs)), nx = Math.cos(t), nz = Math.sin(t);
+            sock.vert(r * nx, y, r * nz, nx, 0, nz, y > yr ? wc : wc2); } return st; };
+          const band = (y0, y1, h0, h1, ribs, dep, rows) => {
+            let prev = ring(y0, h0, ribs, dep);
+            for (let k = 1; k <= rows; k++) { const t = k / rows, cur = ring(y0 + (y1 - y0) * t, h0 + (h1 - h0) * t, ribs, dep);
+              for (let a = 0; a < NA; a++) { sock.tri(prev + a, cur + a, prev + a + 1); sock.tri(cur + a, cur + a + 1, prev + a + 1); } prev = cur; }
+          };
+          band(yb, yr, 1.72, 1.72, 28, 0.022, 6);                              // стопа носка с рубчиком
+          band(yr, yt, 1.8, 1.8, 48, 0.03, 4);                                 // резинка
+          band(yt, yt + 0.06, 1.8, 1.5, 48, 0.02, 1);                          // край резинки внутрь
+          const sm = new T.Mesh(sock.geometry(), new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
+          sm.name = name + '_nosok'; sm.castShadow = sm.receiveShadow = true; cuff.g.add(sm);
+        }
         [-0.8, 0.8].forEach(z => magnet(cuff, 0, -4.78, z, [0, 1, 0]));
         p.manzhet = cuff.finish();
         p.finish(); root.add(p.g); parts[name] = p;
