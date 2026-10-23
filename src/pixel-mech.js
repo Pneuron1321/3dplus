@@ -1317,11 +1317,20 @@
         }
       }).box(0, 3, 0, 2, 0, 3, 'crotch').build(P);
       [-1, 1].forEach(s => {
-        if (opts.nogi === 'utka') {                                   // «утка»: короткие шарниры-проушины снизу у края таза
-          bevelBox(P, s * 2.2, 10.05, 0, 0.62, 0.22, 0.75, 0.06, tone('DG2', 0.02), 63);
-          axial(taz.bufs.metal, CYL_FINE, s * 1.55, 9.75, 0, [1, 0, 0], 0.42, 1.3, LIN.GM);
-          axial(taz.bufs.metal, CYL, s * 2.88, 9.75, 0, [s, 0, 0], 0.2, 0.12, LIN.SV);
-          magnet(taz, s * 2.2, 10.0, 0, [0, -1, 0]);
+        if (opts.nogi === 'utka') {
+          /* «утка»: таз шире за счёт шарниров — по бокам лежат поперечные сервоприводы с фланцем наружу,
+             под их концом короткая проушина с осью, на ней висит бедро */
+          const hx = +(opts.tazX || 3.1);                                // = LEG.hipX у «утки»
+          bevelBox(P, s * (2.0 + (hx - 1.45) / 2), 10.75, 0, (hx - 1.45) / 2 + 0.25, 0.55, 0.85, 0.12, tone('DG2', 0.03), 63);   // сервопривод вбок
+          const fx = s * (hx + 0.55);
+          axial(taz.bufs.metal, CYL_FINE, fx, 10.75, 0, [s, 0, 0], 0.5, 0.1, LIN.SV);                  // фланец
+          axial(taz.bufs.metal, CYL_FINE, fx + s * 0.08, 10.75, 0, [s, 0, 0], 0.22, 0.06, LIN.GM);
+          [0, 1, 2, 3].forEach(i => { const a = i * Math.PI / 2 + 0.4;
+            axial(taz.bufs.metal, CYL, fx + s * 0.08, 10.75 + Math.cos(a) * 0.36, Math.sin(a) * 0.36, [s, 0, 0], 0.055, 0.04, LIN.GM); });
+          bevelBox(P, s * hx, 10.05, 0, 0.62, 0.22, 0.75, 0.06, tone('DG2', 0.02), 63);              // проушина
+          axial(taz.bufs.metal, CYL_FINE, s * (hx - 0.65), 9.75, 0, [1, 0, 0], 0.42, 1.3, LIN.GM);
+          axial(taz.bufs.metal, CYL, s * (hx + 0.68), 9.75, 0, [s, 0, 0], 0.2, 0.12, LIN.SV);
+          magnet(taz, s * hx, 10.0, 0, [0, -1, 0]);
           return;
         }
         balljoint(taz, s * 2.01, HIP_Y, 0, [s, 0, 0], 0.44);                                         // тазобедренный шарнир
@@ -1424,7 +1433,7 @@
        снаружи, тёмный узел с болтом внутрь), тёмное колено с осью и оранжевым кольцом,
        голень — подгруппа у колена, отведена наружу (ступни шире бёдер, как на листе 2)
        ============================================================ */
-    const LEG = Object.assign(opts.nogi === 'utka' ? { hipX: 2.2, shin: 0, toeOut: 0 } : { hipX: 4.0, shin: 0.08, toeOut: 0.25 }, opts.legPose || {});   // «утка»: ноги под краем таза, как у людей
+    const LEG = Object.assign(opts.nogi === 'utka' ? { hipX: +(opts.tazX || 3.1), shin: 0, toeOut: 0 } : { hipX: 4.0, shin: 0.08, toeOut: 0.25 }, opts.legPose || {});   // «утка»: ноги на боковых шарнирах таза
     const KNEE_Y = -3.9;
     const ANKLE = 2.9;                                         // ось голеностопа ниже колена
     const ankle = s => [s * (LEG.hipX + Math.sin(LEG.shin) * ANKLE), HIP_Y + KNEE_Y - Math.cos(LEG.shin) * ANKLE];
@@ -1653,14 +1662,14 @@
         let ymax = 0; for (let i = 0; i < n; i++) ymax = Math.max(ymax, pz[i * 3 + 1]);
         /* у «утки» — стопа «Пикколо» под шарниром щиколотки: длина и ширина как у сапога, высота ниже —
            ворот кончается под осью, над ним виден шарнир в носке */
-        const KS = +(opts.obuvK || (UTKA ? 1.0 : 1.35)), KY = UTKA ? +(opts.obuvKY || (ankle(s)[1] - 1.05) / ymax) : KS;
+        const KS = +(opts.obuvK || (UTKA ? 0.78 : 1.35)), KY = UTKA ? +(opts.obuvKY || (ankle(s)[1] - 1.3) / ymax) : KS;
         let ox = 0, oz = 0, on = 0;
         for (let i = 0; i < n; i++) if (pz[i * 3 + 1] > ymax * 0.88) { ox += pz[i * 3]; oz += pz[i * 3 + 2]; on++; }
         ox /= on; oz /= on;
         const cx = bx;
         const cS = [tone('SU1', 0), tone('SU2', 0)], cN = tone('NG1', 0);
         for (let i = 0; i < n; i++) {
-          pos[i * 3] = cx + s * (pz[i * 3] - ox) * KS; pos[i * 3 + 1] = pz[i * 3 + 1] * KY; pos[i * 3 + 2] = (pz[i * 3 + 2] - oz) * KS + (UTKA ? +(opts.obuvZ || 0.8) : 0);   // в данных z растёт от пятки к носку
+          pos[i * 3] = cx + s * (pz[i * 3] - ox) * KS; pos[i * 3 + 1] = pz[i * 3 + 1] * KY; pos[i * 3 + 2] = (pz[i * 3 + 2] - oz) * KS + (UTKA ? +(opts.obuvZ || 0.95 * KS) : 0);   // в данных z растёт от пятки к носку
           const c = kl[i] ? cN : cS[0];
           col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
         }
@@ -1696,7 +1705,7 @@
             /* носок в обтяжку по голени (голень 0.98 × 0.92): от ворота сапога до резинки над щиколоткой;
                у оси щиколотки ткань чуть вздута — под ней шарнир, снаружи — его фланцы */
             const Y0 = -ANKLE - 2.5, Y1 = -ANKLE + 1.1, Y2 = -ANKLE + 1.45, NR = 22;
-            const prof = y => 1.17 + 0.1 * Math.exp(-Math.pow((y + ANKLE) / 0.55, 2)) - 0.25 * Math.min(1, Math.max(0, -(y + ANKLE) / 1.0));   // к вороту сужается
+            const prof = y => 1.17 + 0.1 * Math.exp(-Math.pow((y + ANKLE) / 0.55, 2)) - 0.4 * Math.min(1, Math.max(0, -(y + ANKLE) / 1.0));   // к вороту сужается
             let prev = null;
             for (let k = 0; k <= NR; k++) { const y = Y0 + (Y1 - Y0) * k / NR, cur = ring(y, prof(y), 28, 0.018);
               if (prev !== null) for (let a = 0; a < NA; a++) { sock.tri(prev + a, cur + a, prev + a + 1); sock.tri(cur + a, cur + a + 1, prev + a + 1); } prev = cur; }
@@ -1712,7 +1721,7 @@
           if (UTKA_NOGI) {
             /* шарнир щиколотки, как у уточки: по бокам носка — серебряные фланцы на оси, от них в ворот сапога
                уходят тёмные щёки U-кронштейна стопы */
-            const [ax, ay] = ankle(s), top = ay - 1.05;                     // верх ворота сапога
+            const [ax, ay] = ankle(s), top = ay - 1.3;                     // верх ворота сапога
             [-1, 1].forEach(sx => {
               const xf = ax + sx * 1.3;
               axial(p.bufs.metal, CYL_FINE, xf - sx * 0.05, ay, 0, [sx, 0, 0], 0.62, 0.08, LIN.GM);
