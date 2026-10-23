@@ -1560,14 +1560,49 @@
         const pz = new Float32Array(bin(SG.pos).buffer), ix = new Uint32Array(bin(SG.idx).buffer), kl = bin(SG.kls);
         /* посадка: проём ворота (верхние вершины) — на ось голени; размер — множитель obuvK (Плюс коренастый,
            сапог в размер прежней ступни смотрится мелким) */
-        const UTKA = opts.obuv === 'utka', n = SG.nv, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+        const UTKA = opts.obuv === 'utka';
+        if (UTKA) {
+          /* СТОПА «УТКА» (форма как у уточки MicroDuck, низ как у «Пикколо»): клин — высокая пятка под шарниром
+             щиколотки, верх скатом к скруглённому носку; в плане — скруглённый прямоугольник ~0,55 длины.
+             Низ: неоновый протектор с круглыми шишками по всей кромке (и под носком), над ним оранжевый рант
+             чуть шире, выше — замша. Пятка — под осью голени; голень и шарнир закрывает белый носок. */
+          const H = ankle(s)[1] - 0.8, L = +(opts.stopaL || H / 0.42), Wd = L * 0.55, ZB = -L * 0.24;
+          const NZ = 56, NA = 64, P = 6, mb = new MeshBuf(true);
+          const cN = tone('NG1', 0), cR = tone('SU4', 0), cU = tone('SU1', 0);
+          const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+          const plan = t => Math.pow(Math.max(0, 1 - Math.pow(Math.abs(2 * t - 1), 5)), 1 / 5);       // скругление носка и пятки
+          const verh = t => H * (1 - 0.62 * sm(0.3, 1.0, t)) * Math.pow(plan(t), 0.35);               // клин: пятка высокая, носок низкий
+          const sg = (v, e) => Math.sign(v) * Math.pow(Math.abs(v), e);
+          for (let k = 0; k <= NZ; k++) {
+            const t = k / NZ, z = ZB + t * L, hw = Wd / 2 * plan(t), ht = verh(t);
+            for (let a = 0; a <= NA; a++) {
+              const th = a / NA * Math.PI * 2, cx_ = sg(Math.cos(th), 2 / P), cy_ = sg(Math.sin(th), 2 / P);
+              let y = ht * (0.5 + 0.5 * cy_), x = hw * cx_;
+              const rant = y > 0.36 && y < 0.86 ? 1.06 : 1;                                        // рант чуть шире
+              x *= rant;
+              const c = y < 0.36 ? cN : (y < 0.86 ? cR : cU);
+              mb.vert(bx + x, Math.max(0, y), z, 0, 1, 0, c);
+            }
+          }
+          for (let k = 0; k < NZ; k++) for (let a = 0; a < NA; a++) {
+            const i0 = k * (NA + 1) + a, i1 = i0 + NA + 1;
+            if (s > 0) { mb.tri(i0, i0 + 1, i1); mb.tri(i1, i0 + 1, i1 + 1); } else { mb.tri(i0, i1, i0 + 1); mb.tri(i1, i1 + 1, i0 + 1); }
+          }
+          const geo = mb.geometry(); geo.computeVertexNormals();
+          const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, envMapIntensity: 0.2, side: T.DoubleSide }); mat.name = 'stopa_utka';
+          const mesh = new T.Mesh(geo, mat); mesh.name = name + '_stopa'; mesh.castShadow = mesh.receiveShadow = true; p.g.add(mesh);
+          /* протектор: круглые неоновые шишки по кромке подошвы, и под носком */
+          const lug = new MeshBuf(true);
+          for (let k = 1; k < NZ; k += 2) {
+            const t = k / NZ, z = ZB + t * L, hw = Wd / 2 * plan(t) * 0.97;
+            [-1, 1].forEach(sx => axial(lug, CYL, bx + sx * hw, 0.13, z, [sx, -0.35, 0], 0.17, 0.14, cN, true));
+          }
+          for (let a = -3; a <= 3; a++) axial(lug, CYL, bx + a * Wd * 0.12, 0.13, ZB + L * 0.985, [0, -0.35, 1], 0.17, 0.14, cN, true);
+          const lm = new T.Mesh(lug.geometry(), mat); lm.name = name + '_protektor'; p.g.add(lm);
+        } else {
+        const n = SG.nv, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
         let ymax = 0; for (let i = 0; i < n; i++) ymax = Math.max(ymax, pz[i * 3 + 1]);
-        /* «утка»: сапог кончается прямо под шарниром щиколотки — размер из высоты, как у уточки (небольшой) */
-        const KS = UTKA ? (ankle(s)[1] - 0.35) / ymax : +(opts.obuvK || 1.35);
-        /* неоновая подошва — по низу следа, и под загнутым вверх носком тоже: ниже 0.42 от местного низа */
-        const BZ = 0.25, nb = Math.ceil((SG.dlina + 1) / BZ) + 1, niz = new Float32Array(nb).fill(1e9);
-        for (let i = 0; i < n; i++) { const b = Math.max(0, Math.floor(pz[i * 3 + 2] / BZ)); niz[b] = Math.min(niz[b], pz[i * 3 + 1]); }
-        for (let b = 1; b < nb; b++) if (niz[b] > 1e8) niz[b] = niz[b - 1];
+        const KS = +(opts.obuvK || 1.35);
         let ox = 0, oz = 0, on = 0;
         for (let i = 0; i < n; i++) if (pz[i * 3 + 1] > ymax * 0.88) { ox += pz[i * 3]; oz += pz[i * 3 + 2]; on++; }
         ox /= on; oz /= on;
@@ -1575,8 +1610,7 @@
         const cS = [tone('SU1', 0), tone('SU2', 0)], cN = tone('NG1', 0);
         for (let i = 0; i < n; i++) {
           pos[i * 3] = cx + s * (pz[i * 3] - ox) * KS; pos[i * 3 + 1] = pz[i * 3 + 1] * KS; pos[i * 3 + 2] = (pz[i * 3 + 2] - oz) * KS;   // в данных z растёт от пятки к носку
-          const neon = UTKA ? pz[i * 3 + 1] - niz[Math.max(0, Math.floor(pz[i * 3 + 2] / BZ))] < 0.42 : kl[i];
-          const c = neon ? cN : cS[0];
+          const c = kl[i] ? cN : cS[0];
           col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
         }
         const idx = s > 0 ? ix : ix.slice().map((v, i) => (i % 3 === 1 ? ix[i + 1] : i % 3 === 2 ? ix[i - 1] : v));   // зеркало — обратный обход
@@ -1585,6 +1619,7 @@
         geo.setIndex(new T.BufferAttribute(idx, 1)); geo.computeVertexNormals();
         const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, envMapIntensity: 0.2 }); mat.name = 'sapog_zamsha';
         const mesh = new T.Mesh(geo, mat); mesh.name = name + '_sapog'; mesh.castShadow = mesh.receiveShadow = true; p.g.add(mesh);
+        }
         const cuff = subPart(p.g, name + '_manzhet', [s * LEG.hipX, HIP_Y + KNEE_Y, 0], [0, 0, s * LEG.shin]);
         if (UTKA) {
           /* белый носок на резинке (как спортивный, без надписи): трубка вокруг голени и шарнира щиколотки,
