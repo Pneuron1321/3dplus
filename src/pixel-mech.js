@@ -1533,10 +1533,17 @@
         /* литой сапог: гладкая поверхность генератора в размерах Плюса, цвет по картинке (неон / замша) */
         const bin = b64 => { const t = (typeof atob === 'function') ? atob(b64) : Buffer.from(b64, 'base64').toString('binary'); const u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
         const pz = new Float32Array(bin(SG.pos).buffer), ix = new Uint32Array(bin(SG.idx).buffer), kl = bin(SG.kls);
-        const cx = X0 + NW * S / 2, n = SG.nv, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+        /* посадка: проём ворота (верхние вершины) — на ось голени; размер — множитель obuvK (Плюс коренастый,
+           сапог в размер прежней ступни смотрится мелким) */
+        const KS = +(opts.obuvK || 1.35), n = SG.nv, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+        let ymax = 0; for (let i = 0; i < n; i++) ymax = Math.max(ymax, pz[i * 3 + 1]);
+        let ox = 0, oz = 0, on = 0;
+        for (let i = 0; i < n; i++) if (pz[i * 3 + 1] > ymax * 0.88) { ox += pz[i * 3]; oz += pz[i * 3 + 2]; on++; }
+        ox /= on; oz /= on;
+        const cx = bx;
         const cS = [tone('SU1', 0), tone('SU2', 0)], cN = tone('NG1', 0);
         for (let i = 0; i < n; i++) {
-          pos[i * 3] = cx + s * pz[i * 3]; pos[i * 3 + 1] = pz[i * 3 + 1]; pos[i * 3 + 2] = Z0 + pz[i * 3 + 2];                 // в данных z растёт от пятки к носку
+          pos[i * 3] = cx + s * (pz[i * 3] - ox) * KS; pos[i * 3 + 1] = pz[i * 3 + 1] * KS; pos[i * 3 + 2] = (pz[i * 3 + 2] - oz) * KS;   // в данных z растёт от пятки к носку
           const c = kl[i] ? cN : cS[i & 1 ? 0 : 0];
           col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
         }
