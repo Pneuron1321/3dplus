@@ -797,9 +797,65 @@
     return { group, glaza, bezShei: true, stats: { vershin: n } };
   }
 
+  /* ======================================================================================================
+     ЗВЕРЬ-4 (opts.zver4) — проба: та же сетка, что у «зверя-3», облегчённая для Quest, с кожей целиком
+     (src/zver-kozha.js, tools/zver/kozha.py). Атлас: лицо — рисунок, затылок и бока — кожа из кусочков рисунка.
+     Шея-трапеции — той же кожей (плитка с повтором), не однотонная. Картинки раскрываются заранее (d.gotov).
+     ====================================================================================================== */
+  function tekstura(T, d, k, povtor) {
+    const t = new T.DataTexture(new Uint8ClampedArray(d[k + 'RGBA']), d[k + 'W'], d[k + 'H'], T.RGBAFormat);
+    t.encoding = T.sRGBEncoding; t.magFilter = T.LinearFilter; t.minFilter = T.LinearMipmapLinearFilter; t.generateMipmaps = true;
+    if (povtor) t.wrapS = t.wrapT = T.RepeatWrapping;
+    t.needsUpdate = true; t.name = 'zver_' + k; return t;
+  }
+  function buildZver4(T, o, Z) {
+    const DROP = (o.zniz !== undefined) ? +o.zniz : 0.5;
+    const qp = new Uint16Array(dekod(Z.pos).buffer), qu = new Uint16Array(dekod(Z.uv).buffer);
+    const idx = new Uint32Array(dekod(Z.idx).buffer), n = Z.n;
+    const pos = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < 3; k++) pos[i * 3 + k] = Z.lo[k] + qp[i * 3 + k] / 65535 * (Z.hi[k] - Z.lo[k]) - (k === 1 ? DROP : 0);
+      uv[i * 2] = qu[i * 2] / 65535; uv[i * 2 + 1] = qu[i * 2 + 1] / 65535;
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new T.BufferAttribute(uv, 2));
+    geo.setIndex(new T.BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+    const group = new T.Group(); group.name = 'zver_golova';
+    const mat = new T.MeshStandardMaterial({ map: tekstura(T, Z, 'atlas'), roughness: 0.75, metalness: 0, envMapIntensity: 0.3 }); mat.name = 'zver_kozha';
+    const m = new T.Mesh(geo, mat); m.name = 'zver_kozha'; m.castShadow = m.receiveShadow = true; group.add(m);
+    /* шея-трапеции, как у «зверя-3»; развёртка: x — вдоль ширины, на боках добавляется z (бока не тянутся) */
+    const NY0 = -1.4, NY1 = 3.0;
+    const sheya = (x, y, z) => {
+      const t = clamp((y - NY0) / (NY1 - NY0), 0, 1);
+      const hw = 3.9 + 2.7 * (1 - t) * (1 - t), zf = Math.max(1.9 - 2.5 * t, -0.6), zb = -3.2 - 0.9 * t;
+      const cz = (zf + zb) / 2, hd = (zf - zb) / 2;
+      const e = Math.pow(Math.pow(Math.abs(x) / hw, 3) + Math.pow(Math.abs(z - cz) / hd, 3), 1 / 3);
+      return Math.max((e - 1) * Math.min(hw, hd), NY0 - y, y - NY1);
+    };
+    const s = poverhnost(sheya, -7.5, NY0 - 0.2, -5, 7.5, NY1 + 0.2, 4, o.lite ? 0.2 : 0.12);
+    const ed = Z.plitkaEd, su = new Float32Array(s.pos.length / 3 * 2);
+    for (let i = 0; i < su.length / 2; i++) {
+      const x = s.pos[i * 3], y = s.pos[i * 3 + 1], z = s.pos[i * 3 + 2];
+      su[i * 2] = (x + z * Math.tanh(x / 1.5)) / ed; su[i * 2 + 1] = y / ed;
+    }
+    const g2 = new T.BufferGeometry();
+    g2.setAttribute('position', new T.Float32BufferAttribute(s.pos, 3)); g2.setAttribute('uv', new T.BufferAttribute(su, 2));
+    g2.setIndex(s.idx); g2.computeVertexNormals();
+    const tn = Z.ton.map(c => Math.min(1, c * 0.6));                 // тон кожи головы у шва; шея в тени головы — темнее
+    const ms = new T.MeshStandardMaterial({ map: tekstura(T, Z, 'plitka', true), color: new T.Color(tn[0], tn[1], tn[2]), roughness: 0.8, metalness: 0 });
+    ms.name = 'zver_sheya';
+    const sh = new T.Mesh(g2, ms); sh.name = 'zver_sheya'; sh.castShadow = sh.receiveShadow = true; group.add(sh);
+    const glaza = {};
+    for (const nm of ['eyeL', 'eyeR']) { const ob = new T.Object3D(); ob.name = nm; group.add(ob); glaza[nm] = ob; }
+    return { group, glaza, bezShei: true, stats: { vershin: n } };
+  }
+
   global.PixelMechZver = {
     build: (T, o) => {
       o = o || {};
+      if (o.zver4 && global.PixelMechZverKozha && global.PixelMechZverKozha.atlasRGBA) return buildZver4(T, o, global.PixelMechZverKozha);
       if (o.zver3 && global.PixelMechZverSetka) return buildZver3(T, o, global.PixelMechZverSetka);
       if (o.zver2 && global.PixelMechZverList && global.PixelMechZverGlubina) return buildZver2(T, o, global.PixelMechZverList, global.PixelMechZverGlubina);
       if (global.PixelMechZverGlubina && o.glubina && !o.lepka) return buildGlubina(T, o, global.PixelMechZverGlubina);

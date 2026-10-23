@@ -13,10 +13,13 @@
 <script src="../src/zver-glubina.js"></script>
 <script src="../src/zver-list.js"></script>
 <script src="../src/zver-setka.js"></script>
+<script src="../src/zver-kozha.js"></script>
 <script src="../src/zver-golova.js"></script>
 <script src="../src/pixel-mech.js"></script>
 <script>
 'use strict';
+(async () => {
+if (window.PixelMechZverKozha) await PixelMechZverKozha.gotov;   // JPEG кожи зверя раскрываются до сборки
 /* Студийный рендер для листа и экспорт GLB. Управляется из tools/build.mjs. */
 const T = THREE;
 const cv = document.getElementById('c');
@@ -105,6 +108,7 @@ window.exportRigGLB = lite => new Promise((res, rej) => {
 });
 window.brickManifest = () => JSON.stringify(PixelMech.brickManifest(T, PixelMech.create(T, { manifest: true, noAO: true, lensEnv: studio.lensEnv })));
 window.ready = true;
+})();
 </script>
 </body>
 </html>

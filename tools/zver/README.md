@@ -42,5 +42,13 @@ pip install onnxruntime scipy pillow numpy
 3. `dannye.py S src/zver-risunok.js` собирает данные для `buildRisunok`. Переменные окружения: `ZV_FRONT`,
    `ZV_CX`, `ZV_CHIN`, `ZV_EYECHIN`, `ZV_U`.
 
+## Сетка генератора (Hunyuan3D-2) и кожа целиком
+
+1. `hy-setka.py S вход.glb src/zver-setka.js` — сетка генератора → «Зверь-3» (кожа — рисунок из его камеры).
+2. `kozha.py S src/zver-setka.js src/zver-kozha.js [треугольников=50000] [атлас=2048]` — «Зверь-4»: облегчение,
+   атлас (xatlas), лицо — рисунок, затылок и бока — кожа из кусочков рисунка; плитка кожи — для шеи.
+   Нужно: `pip install fast_simplification xatlas trimesh scipy pillow`, а также `S/zv2/glubina.npy` (`glubina.py`).
+3. `glb-vid.mjs вход.glb выход.png [ракурсы] [размер]` — осмотр GLB со всех сторон.
+
 Результаты (голова по умолчанию, рендеры в `renders/`, GLB) меняются только после «одобряю» Александра.
 Пробы лежат в `docs/zver/proba/`.
