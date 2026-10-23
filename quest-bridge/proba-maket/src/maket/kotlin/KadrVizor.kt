@@ -12,7 +12,8 @@ import java.io.File
  */
 class VizVaryant(val imya: String, val vid: Okno.Vid, val muzyka: Boolean = true, val sotnya: Boolean = false,
                  val niz: List<Triple<String, String, String>> = emptyList(), val lico: String = "plus",
-                 val sost: String = "obychno", val morgaet: Boolean = false, val t: Long = 0L)
+                 val sost: String = "obychno", val morgaet: Boolean = false, val t: Long = 0L,
+                 val prisedT: Long = -1L)
 
 fun kadryVizor(out: File) {
     val ya = Okno.Vid("ugol", "pn", 0.25f, 90, true, 4f)                // айфон стоя, снизу вплотную (как у Александра)
@@ -29,6 +30,11 @@ fun kadryVizor(out: File) {
             Triple("plus", "Саша, слева полиция — сверни во двор", "Sasha, police on the left — turn into the yard"))),
         VizVaryant("zver-govorit", ya, lico = "zver", sost = "govorit", t = 90L * 5),
         VizVaryant("zver-morgaet", ya, lico = "zver", morgaet = true),
+        // 2.7.2: Плюс во весь рост — речь, моргает, приседания (кадры 2 и нижняя точка)
+        VizVaryant("plus-govorit", ya, sost = "govorit", t = 90L * 5),
+        VizVaryant("plus-morgaet", ya, morgaet = true),
+        VizVaryant("plus-prised-2", ya, prisedT = 130L),
+        VizVaryant("plus-prised-niz", ya, prisedT = 400L),
     )
     for (v in varyanty) {
         val f = File(out, v.imya + ".png")
@@ -93,6 +99,7 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     Oformlenie.licoUpr(v.lico)
     if (v.morgaet) pole(n, "morgaet", true)
     val tt = if (v.t != 0L) v.t else now
+    if (v.prisedT >= 0) pole(n, "prisedS", tt - v.prisedT)
     zvat(n, "risovatViz", Nalozhenie.Pokaz(), v.sost, tt)
     Oformlenie.licoUpr("plus")
     val pv = zvat(n, "getPvV") as ABitmap

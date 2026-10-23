@@ -57,6 +57,7 @@ public class Canvas {
     public void restoreToCount(int n) { c.restoreToCount(n); }
     public void translate(float dx, float dy) { c.translate(dx, dy); }
     public void scale(float sx, float sy) { c.scale(sx, sy); }
+    public void scale(float sx, float sy, float px, float py) { c.translate(px, py); c.scale(sx, sy); c.translate(-px, -py); }
     public void rotate(float deg) { c.rotate(deg); }
     public void rotate(float deg, float px, float py) { c.translate(px, py); c.rotate(deg); c.translate(-px, -py); }
     public boolean clipRect(float l, float t, float r, float b) { c.clipRect(org.jetbrains.skia.Rect.Companion.makeLTRB(l, t, r, b)); return true; }

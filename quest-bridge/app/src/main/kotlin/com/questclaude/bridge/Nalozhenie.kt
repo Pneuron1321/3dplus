@@ -124,6 +124,8 @@ class Nalozhenie(
     // стиль «Визор» (2.7.0): свои картинки слоёв — только когда стиль включён (старый стиль их не трогает)
     private val viz by lazy { VizorPlashki(ctx, VizorKist(ctx), cel, top, igra, chat, nalet, itogi) { imyaGolosa(it) } }
     private val licoPryamoe = kartinka(ctx, "plus-lico-pryamoe.png") ?: lico   // щёки прямые, подбородок плоский
+    private val telo by lazy { kartinka(ctx, "plus-telo.png") }      // 2.7.2: Плюс во весь рост (визор)
+    private val prised by lazy { (1..4).map { kartinka(ctx, "plus-prised-$it.png") } }
     private val zver by lazy { ZverLico(kartinka(ctx, "zver-lico.png"), kartinka(ctx, "zver-chelyust.png")) }   // vid lico zver
     private val pvV by lazy { Bitmap.createBitmap(Vizor.PV_W, Vizor.PV_H, Bitmap.Config.ARGB_8888) }
     private val cV by lazy { Canvas(pvV) }
@@ -139,6 +141,8 @@ class Nalozhenie(
     private var morgDo = 0L
     private var ulybkaS = 0L
     private var ulybkaDo = 0L
+    private var ozhidanij = 0                                     // сколько было анимаций ожидания (каждая 4-я — присед)
+    private var prisedS = 0L                                      // начало приседаний; 0 — не приседает
     private var otvetNa = 0L                                      // на какой вызов Ава уже ответила
 
     private val kist = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
@@ -222,7 +226,8 @@ class Nalozhenie(
                 val sost = sostoyanie(now)
                 val razgovor = sost == "govorit" || sost == "slushaet" || sost == "dumaet"
                 val tesnoIgre = Hub.dispetcher.igre                   // тесно игре — бридж сбрасывает своё
-                mimika(now, sost == "govorit")
+                mimika(now, sost == "govorit", sost == "obychno",
+                    v && Oformlenie.lico == "plus" && telo != null && !tesnoIgre && pokaz().lico)
                 shag("глаза") {                                       // глаза Плюса: в разговоре — реже
                     val g = if ((razgovor || tesnoIgre) && now - Hub.lastWakeMs !in 0L..2_000L) GLAZA_RAZGOVOR else GLAZA_EFIR
                     if (g != glazaBylo) { glaza(g); glazaBylo = g }
@@ -240,7 +245,7 @@ class Nalozhenie(
                 shag("лицо") {
                     if (!p.lico && !p.nalet && (v || !cel.vidna)) { if (bylo != "net") razvilka.plashka(null); bylo = "net" }
                     else {
-                        val mim = "$morgaet $ulybka ${Oformlenie.lico}"
+                        val mim = "$morgaet $ulybka ${Oformlenie.lico} ${prisedKadr(now)}"
                         val shagMs = when {
                             tesnoIgre -> if (sost == "govorit") 100L else 200L
                             sost == "govorit" -> 0L
@@ -426,7 +431,10 @@ class Nalozhenie(
         val dx = Vizor.PV.l
         val dy = Vizor.PV.t
         if (p.nalet) viz.nalet(c, dx, dy, now)
-        if (p.lico) licoPryamoe?.let {
+        if (p.lico && Oformlenie.lico == "plus" && telo != null) {
+            teloViz(c, sost, now, Vizor.TELO_X - dx, Vizor.TELO_Y - dy, Vizor.KT, Vizor.PV_W.toFloat(), Vizor.PV_H.toFloat())
+            viz.plashkaPlyusa(c, dx, dy, Vizor.TELO_X + Vizor.TELO_W * Vizor.KT / 2f)
+        } else if (p.lico) licoPryamoe?.let {
             golova(it, sost, now, c, Vizor.D_LICA, Vizor.LICO_X - dx, Vizor.LICO_Y - dy, Vizor.PV_W.toFloat(), Vizor.PV_H.toFloat())
             viz.plashkaPlyusa(c, dx, dy, Vizor.LICO_X + Vizor.D_LICA / 2f)
         }
@@ -524,12 +532,19 @@ class Nalozhenie(
     private var morgaet = false
     private var ulybka = false
 
-    private fun mimika(now: Long, govorit: Boolean) {
+    private fun mimika(now: Long, govorit: Boolean, pokoj: Boolean = !govorit, mozhnoPrisest: Boolean = false) {
+        if (!pokoj) prisedS = 0L                                       // позвали, говорит — приседания прочь
         // моргание: раз в 3–6 с, 140 мс — как в студии
         if (now > morgDo + 140) morgDo = now + 3000 + rnd.nextInt(3000)
-        morgaet = morgDo - now in 1L..140L
-        // улыбка: часто — раз в 5–12 с на 1,8 с; в речи рот занят
-        if (now > ulybkaDo) { ulybkaS = now + 5000 + rnd.nextInt(7000); ulybkaDo = ulybkaS + 1800 }
+        morgaet = morgDo - now in 1L..140L && prisedKadr(now) < 0
+        // анимация ожидания: раз в 5–12 с — улыбка на 1,8 с (в речи рот занят); каждая четвёртая — 10 приседаний
+        if (now > ulybkaDo && prisedKadr(now) < 0) {
+            ulybkaS = now + 5000 + rnd.nextInt(7000); ulybkaDo = ulybkaS + 1800
+            ozhidanij++
+            if (ozhidanij % 4 == 0 && pokoj && mozhnoPrisest) {         // вместо улыбки — приседания
+                prisedS = ulybkaS; ulybkaDo = ulybkaS + PRISED_RAZ * PRISED_KRUG; ulybkaS = ulybkaDo
+            }
+        }
         ulybka = !govorit && now in ulybkaS..ulybkaDo
     }
 
@@ -573,29 +588,7 @@ class Nalozhenie(
                 c.drawBitmap(it, null, dst, kist)
             }
             kist.alpha = 255
-            fun pr(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) =
-                c.drawRect(dst.left + x0 * k, dst.top + y0 * k, dst.left + x1 * k, dst.top + y1 * k, p)
-            if (morgaet || sost == "dumaet") {                             // закрыть глаза стеклом
-                pr(92f, 129f, 117f, 150f, steklo); pr(148f, 129f, 169f, 150f, steklo)
-            }
-            when {
-                morgaet -> { pr(92f, 138f, 117f, 141f, glaz); pr(148f, 138f, 169f, 141f, glaz) }      // веки
-                sost == "dumaet" -> { pr(100f, 129f, 122f, 150f, glaz); pr(156f, 129f, 175f, 150f, glaz) } // взгляд вбок
-            }
-            val r = ROT                                                    // рот (2.2.6) — на ряд кирпичей ниже
-            when {
-                govorit -> {
-                    pr(85f, 170f + r, 91f, 181f + r, zhelt); pr(164f, 170f + r, 171f, 181f + r, zhelt)  // уголки прочь
-                    val otkryt = if (sin(now / 90.0) > 0) 14f else 6f                                 // как в студии
-                    pr(90f, 181f + r, 166f, 189f + r + otkryt, chern)
-                }
-                ulybka -> {
-                    pr(80f, 165f + r, 87f, 182f + r, chern); pr(169f, 165f + r, 176f, 182f + r, chern)  // уголки вверх
-                    pr(86f, 175f + r, 170f, 197f + r, chern)                       // губы: верхняя = нижняя (7 точек, 11.10)
-                    pr(91f, 182f + r, 165f, 190f + r, zuby)
-                    for (x in listOf(103f, 116f, 128f, 140f, 153f)) pr(x, 182f + r, x + 1.6f, 190f + r, chern)  // зубы
-                }
-            }
+            mimikaLica(c, dst, sost, now)
         }
         c.restore()
         // строчная развёртка: 2 точки линия, 2 — нет; только на пикселях головы и плеч (рисунок зверя — без неё)
@@ -607,6 +600,81 @@ class Nalozhenie(
             tochki.alpha = if ((now / 300) % 3 == i.toLong()) 255 else 110
             c.drawCircle(cx + (i - 1) * 22f * m, top + 26 * k, 6f * m, tochki)
         }
+    }
+
+    /**
+     * Мимика поверх картинки лица в [dst] (точки картинки 256: глаза за очками 92–117 и 148–169 × 129–150, рот —
+     * полоса 90–166 × 181–189 со сдвигом ROT): моргание, взгляд вбок, рот в речи, улыбка.
+     */
+    private fun mimikaLica(c: Canvas, dst: RectF, sost: String, now: Long) {
+        val k = dst.width() / 256f
+        fun pr(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) =
+            c.drawRect(dst.left + x0 * k, dst.top + y0 * k, dst.left + x1 * k, dst.top + y1 * k, p)
+        if (morgaet || sost == "dumaet") {                             // закрыть глаза стеклом
+            pr(92f, 129f, 117f, 150f, steklo); pr(148f, 129f, 169f, 150f, steklo)
+        }
+        when {
+            morgaet -> { pr(92f, 138f, 117f, 141f, glaz); pr(148f, 138f, 169f, 141f, glaz) }      // веки
+            sost == "dumaet" -> { pr(100f, 129f, 122f, 150f, glaz); pr(156f, 129f, 175f, 150f, glaz) } // взгляд вбок
+        }
+        val r = ROT                                                    // рот (2.2.6) — на ряд кирпичей ниже
+        val govorit = sost == "govorit"
+        when {
+            govorit -> {
+                pr(85f, 170f + r, 91f, 181f + r, zhelt); pr(164f, 170f + r, 171f, 181f + r, zhelt)  // уголки прочь
+                val otkryt = if (sin(now / 90.0) > 0) 14f else 6f                         // как в студии
+                pr(90f, 181f + r, 166f, 189f + r + otkryt, chern)
+            }
+            ulybka -> {
+                pr(80f, 165f + r, 87f, 182f + r, chern); pr(169f, 165f + r, 176f, 182f + r, chern)  // уголки вверх
+                pr(86f, 175f + r, 170f, 197f + r, chern)                       // губы: верхняя = нижняя (7 точек, 11.10)
+                pr(91f, 182f + r, 165f, 190f + r, zuby)
+                for (x in listOf(103f, 116f, 128f, 140f, 153f)) pr(x, 182f + r, x + 1.6f, 190f + r, chern)  // зубы
+            }
+        }
+    }
+
+    /**
+     * Плюс во весь рост (2.7.2, лист тела Александра 24.10; стиль «Визор»): фигура plus-telo.png 360×576 — голова
+     * в точках картинки лица 256 (с x = 52), ниже тело в тапочках; на 5 % шире (Александр: «растяни в стороны»).
+     * Мимика — на голове фигуры. Приседания (каждая четвёртая анимация ожидания — 10 раз) — кадры plus-prised-1…4
+     * с тем же местом тапочек; в приседе мимики нет, лицо улыбается само. [l], [t] — левый верх фигуры, [kt] — масштаб.
+     */
+    private fun teloViz(c: Canvas, sost: String, now: Long, l: Float, t: Float, kt: Float, pravo: Float, niz: Float) {
+        val f = telo ?: return
+        val w = Vizor.TELO_W * kt
+        val cx = l + w / 2f
+        val sloy = c.saveLayer(0f, 0f, pravo, niz, null)
+        c.translate(sin(now / 2600.0).toFloat() * 3f, if (prisedKadr(now) >= 0) 0f else sin(now / 1400.0).toFloat() * 2f)
+        c.scale(Vizor.TELO_SHIRE, 1f, cx, t)                           // на 5 % шире
+        val dst = RectF(l, t, l + w, t + Vizor.TELO_H * kt)
+        kist.alpha = if (sost == "spit") 110 else 255
+        val pk = prisedKadr(now)
+        val pb = if (pk >= 0) prised.getOrNull(pk) else null
+        if (pb != null) c.drawBitmap(pb, null, dst, kist)
+        else {
+            c.drawBitmap(f, null, dst, kist)
+            kist.alpha = 255
+            mimikaLica(c, RectF(l + Vizor.TELO_GOLOVA_X * kt, t, l + (Vizor.TELO_GOLOVA_X + 256) * kt, t + 256 * kt), sost, now)
+        }
+        kist.alpha = 255
+        var y = 0f
+        while (y < niz) { c.drawRect(0f, y, pravo, y + 2f, razvyortka); y += 4f }   // строчная развёртка — только на Плюсе
+        c.restoreToCount(sloy)
+        if (sost == "dumaet") for (i in 0..2) {                       // «…» над головой, по очереди
+            tochki.alpha = if ((now / 300) % 3 == i.toLong()) 255 else 110
+            c.drawCircle(cx + (i - 1) * 22f * kt * 1.35f, t + 18f * kt, 6f * kt * 1.35f, tochki)
+        }
+    }
+
+    /** Кадр приседания сейчас (0…3, plus-prised-1…4) или −1 — не приседает. Круг ~1 с: вниз, пауза внизу, вверх. */
+    private fun prisedKadr(now: Long): Int {
+        if (prisedS == 0L || now < prisedS) return -1
+        val t = now - prisedS
+        if (t >= PRISED_RAZ * PRISED_KRUG) { prisedS = 0L; return -1 }
+        var m = t % PRISED_KRUG
+        for ((k, d) in PRISED_KADRY) { if (m < d) return k; m -= d }
+        return 0
     }
 
     /**
@@ -1111,6 +1179,10 @@ class Nalozhenie(
         const val MR = 8f
         /** Рот в plus-lico.png опущен на ряд кирпичей (9 точек из 256) — подбородок меньше; мимика — за ним. */
         const val ROT = 9f
+        /** Приседания: 10 раз, круг 1 с — кадры (номер, мс): вниз, внизу дольше, вверх. */
+        const val PRISED_RAZ = 10
+        val PRISED_KADRY = listOf(0 to 120L, 1 to 120L, 2 to 120L, 3 to 280L, 2 to 120L, 1 to 120L, 0 to 120L)
+        val PRISED_KRUG = PRISED_KADRY.sumOf { it.second }
         /** На сколько плечи модели выходят за картинку головы с каждой стороны (точки картинки 256). */
         const val PLECHI_VBOK = 31.5f
         /** Субтитры (низ по центру): картинка TW×TH, кегль TSZ, строка TLH, не больше TSTROK строк. */

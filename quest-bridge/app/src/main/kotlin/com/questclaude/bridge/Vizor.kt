@@ -130,9 +130,9 @@ object Vizor {
     const val TABLO_STROKA = 38f
     fun tabloH(strok: Int) = POLE + TABLO_STROKA * strok.coerceIn(1, 3) + 10f
 
-    // слой "pv" — правый верх: налёт пилюлей, бюст Плюса, плашка «PLUS co-host»
+    // слой "pv" — правый верх: налёт пилюлей, Плюс во весь рост (2.7.2; зверь — бюстом), плашка «PLUS co-host»
     const val PV_W = 760
-    const val PV_H = 256
+    const val PV_H = 430
     val PV = Pryam(PRAVO - PV_W, 40f, PRAVO, 40f + PV_H)
     /** Сторона картинки лица (точки картинки 256 → кадр): крупнее старого (162). */
     const val D_LICA = 188f
@@ -142,11 +142,22 @@ object Vizor {
     /** Левый край картинки лица и её верх (кадр): плечи (319 точек, −31,5 за голову) — у правого края. */
     val LICO_X = PRAVO - 4f - (319f - PLECHI_VBOK) * K
     val LICO_Y = PV.t
-    /** Бюст (голова и плечи) с запасом на покачивание и кивок. */
-    val BYUST = Pryam(LICO_X - PLECHI_VBOK * K, LICO_Y + 24f * K, LICO_X + (319f - PLECHI_VBOK) * K,
-        LICO_Y + (218.2f + 80f) * K).shire(4f)
-    /** Плашка «PLUS co-host» под бюстом (наибольшая). */
-    val PLASHKA_PLYUSA = Pryam(STOLB_X, BYUST.b - 16f, PRAVO, BYUST.b - 16f + 44f)
+    /**
+     * Плюс во весь рост (plus-telo.png 360×576: голова — картинка лица 256 с x = 52, ниже тело в тапочках): на 5 %
+     * шире картинки (TELO_SHIRE, Александр 24.10), почти во всю ширину правого столбца; стоит справа вверху над чатом.
+     */
+    const val TELO_W = 360f
+    const val TELO_H = 576f
+    const val TELO_GOLOVA_X = 52f
+    const val TELO_SHIRE = 1.05f
+    /** Масштаб фигуры: 93 % ширины столбца — с айфоном стоя под ней остаётся место на сообщение чата. */
+    const val KT = 0.93f * (PRAVO - STOLB_X) / (TELO_W * TELO_SHIRE)
+    val TELO_X = PRAVO - (PRAVO - STOLB_X) / 2f - TELO_W * KT / 2f
+    val TELO_Y = PV.t
+    /** Плюс (во весь рост; бюст зверя — внутри) с запасом на покачивание. */
+    val BYUST = Pryam(STOLB_X - 4f, TELO_Y, PRAVO, TELO_Y + TELO_H * KT + 4f)
+    /** Плашка «PLUS co-host» под Плюсом (наибольшая): тапочки чуть заходят за её верх. */
+    val PLASHKA_PLYUSA = Pryam(STOLB_X, BYUST.b - 18f, PRAVO, BYUST.b - 18f + 44f)
     /** Пилюля налёта — слева от головы, в полосе верха (наибольшая ширина). */
     val NALET_PILYULYA = Pryam(PV.l, VERH, BYUST.l - ZAZOR, VERH + 48f)
 
