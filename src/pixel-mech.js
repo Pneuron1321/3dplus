@@ -1317,6 +1317,13 @@
         }
       }).box(0, 3, 0, 2, 0, 3, 'crotch').build(P);
       [-1, 1].forEach(s => {
+        if (opts.nogi === 'utka') {                                   // «утка»: короткие шарниры-проушины снизу у края таза
+          bevelBox(P, s * 2.2, 10.05, 0, 0.62, 0.22, 0.75, 0.06, tone('DG2', 0.02), 63);
+          axial(taz.bufs.metal, CYL_FINE, s * 1.55, 9.75, 0, [1, 0, 0], 0.42, 1.3, LIN.GM);
+          axial(taz.bufs.metal, CYL, s * 2.88, 9.75, 0, [s, 0, 0], 0.2, 0.12, LIN.SV);
+          magnet(taz, s * 2.2, 10.0, 0, [0, -1, 0]);
+          return;
+        }
         balljoint(taz, s * 2.01, HIP_Y, 0, [s, 0, 0], 0.44);                                         // тазобедренный шарнир
         magnet(taz, s * 2.01, HIP_Y + 0.7, 1.2, [s, 0, 0]);
       });
@@ -1417,7 +1424,7 @@
        снаружи, тёмный узел с болтом внутрь), тёмное колено с осью и оранжевым кольцом,
        голень — подгруппа у колена, отведена наружу (ступни шире бёдер, как на листе 2)
        ============================================================ */
-    const LEG = Object.assign({ hipX: 4.0, shin: 0.08, toeOut: 0.25 }, opts.legPose || {});
+    const LEG = Object.assign(opts.nogi === 'utka' ? { hipX: 2.2, shin: 0, toeOut: 0 } : { hipX: 4.0, shin: 0.08, toeOut: 0.25 }, opts.legPose || {});   // «утка»: ноги под краем таза, как у людей
     const KNEE_Y = -3.9;
     const ANKLE = 2.9;                                         // ось голеностопа ниже колена
     const ankle = s => [s * (LEG.hipX + Math.sin(LEG.shin) * ANKLE), HIP_Y + KNEE_Y - Math.cos(LEG.shin) * ANKLE];
@@ -1481,39 +1488,39 @@
        там же, где у прежней ноги (стопа и носок встают как были).
        ============================================================ */
     const UTKA_NOGI = opts.nogi === 'utka';
-    const KNEE_FWD = +(opts.koleno || 1.35);
+    const KNEE_FWD = -(+(opts.koleno || 1.4));                     // колено согнуто назад
+    const LEGU = { shA: 0 };                                          // наклон голени — для носка у щиколотки
     function legUtka(s) {
       const name = s < 0 ? 'nogaL' : 'nogaR';
-      const p = part(name, [s * LEG.hipX, HIP_Y, 0]);
+      const HY = 9.75;                                                // ось шарнира под тазом
+      const p = part(name, [s * LEG.hipX, HY, 0]);
       const [ax, ay] = ankle(s);
-      const K = [0, KNEE_Y + 0.3, KNEE_FWD];                         // колено (в координатах тазобедренного узла)
-      const thL = Math.hypot(K[1], K[2]), thA = -Math.atan2(K[2], -K[1]);
-      const A = [ax - s * LEG.hipX, ay - HIP_Y, 0];
-      const shV = [A[0] - K[0], A[1] - K[1], A[2] - K[2]], shL = Math.hypot(...shV), shA = Math.atan2(-shV[2], -shV[1]);
-      const blk = () => tone('DG2', 0.04), wht = () => tone('WH', 0.02);
-      const rog = (pp, x, y, z, r) => {                               // фланец сервопривода: диск, кольцо, винты
+      const A = [ax - s * LEG.hipX, ay - HY, 0];                      // щиколотка в координатах шарнира
+      const T0 = [0, -1.25, 0], K = [0, (T0[1] + A[1]) / 2 + 0.2, KNEE_FWD];   // колено — посредине, назад
+      const tv = [K[0] - T0[0], K[1] - T0[1], K[2] - T0[2]], thL = Math.hypot(...tv), thA = Math.atan2(-tv[2], -tv[1]);
+      const sv = [A[0] - K[0], A[1] - K[1], A[2] - K[2]], shL = Math.hypot(...sv), shA = Math.atan2(-sv[2], -sv[1]);
+      const blk = () => tone('DG2', 0.04);
+      const rog = (pp, x, y, z, r) => {                               // фланец сервопривода: диск, ступица, винты
         axial(pp.bufs.metal, CYL_FINE, x, y, z, [s, 0, 0], r, 0.12, LIN.SV);
         axial(pp.bufs.metal, CYL_FINE, x + s * 0.1, y, z, [s, 0, 0], r * 0.45, 0.06, LIN.GM);
         [0, 1, 2, 3].forEach(i => { const a = i * Math.PI / 2 + 0.4;
           axial(pp.bufs.metal, CYL, x + s * 0.1, y + Math.cos(a) * r * 0.72, z + Math.sin(a) * r * 0.72, [s, 0, 0], 0.07, 0.05, LIN.GM); });
       };
-      /* тазобедренный сервопривод: чёрный корпус под тазом, фланец снаружи */
-      bevelBox(p.bufs.plastic, 0, -0.2, 0, 1.3, 1.3, 1.6, 0.14, blk(), 63);
-      rog(p, s * 1.32, -0.2, 0, 1.0);
-      /* бедро: подгруппа, повёрнутая к колену; белые пластины-щёки и чёрный сервопривод колена */
-      const bed = subPart(p.g, name + '_bedro', [0, -0.2, 0], [thA, 0, 0]);
-      [-1, 1].forEach(side => bevelBox(bed.bufs.plastic, side * 1.22, -thL / 2 + 0.2, 0, 0.14, thL / 2, 0.85, 0.06, wht(), 63));
-      bevelBox(bed.bufs.plastic, 0, -thL * 0.45, 0.0, 1.08, thL * 0.3, 1.0, 0.12, blk(), 63);      // корпус в бедре
+      /* тазобедренный сервопривод висит на коротком шарнире таза */
+      bevelBox(p.bufs.plastic, 0, -0.7, 0, 1.15, 0.85, 1.3, 0.14, blk(), 63);
+      rog(p, s * 1.17, -0.55, 0, 0.82);
+      /* бедро: корпус вдоль бедра, к колену (колено согнуто назад) */
+      const bed = subPart(p.g, name + '_bedro', T0, [thA, 0, 0]);
+      bevelBox(bed.bufs.plastic, 0, -thL / 2, 0, 0.98, thL / 2 + 0.15, 0.95, 0.12, blk(), 63);
       bed.finish();
-      /* голень: от колена к щиколотке — сервопривод колена сверху, белый кронштейн вниз */
-      const golen = subPart(p.g, name + '_golen', [K[0], K[1] - 0.2, K[2]], [shA, 0, 0]);
-      bevelBox(golen.bufs.plastic, 0, 0, 0, 1.25, 1.25, 1.35, 0.14, blk(), 63);                    // сервопривод колена
-      rog(golen, s * 1.27, 0, 0, 0.95);
-      bevelBox(golen.bufs.plastic, 0, -shL * 0.55, 0, 1.1, shL * 0.32, 0.95, 0.12, blk(), 63);      // корпус в голени
-      [-1, 1].forEach(side => bevelBox(golen.bufs.plastic, side * 1.16, -shL / 2 - 0.3, 0, 0.12, shL / 2 - 0.2, 0.75, 0.05, wht(), 63));
+      /* колено: сервопривод с фланцем; голень — корпус к щиколотке */
+      const golen = subPart(p.g, name + '_golen', K, [shA, 0, 0]);
+      bevelBox(golen.bufs.plastic, 0, 0, 0, 1.2, 1.1, 1.25, 0.14, blk(), 63);
+      rog(golen, s * 1.22, 0, 0, 0.95);
+      bevelBox(golen.bufs.plastic, 0, -shL / 2 - 0.2, 0, 0.98, shL / 2, 0.92, 0.12, blk(), 63);
       [-0.6, 0.6].forEach(z => magnet(golen, 0, -shL - 0.4, z, [0, -1, 0]));
-      p.golen = golen.finish();
-      [-0.8, 0.8].forEach(z => magnet(p, 0, 0.95, z, [0, 1, 0]));
+      p.golen = golen.finish(); LEGU.shA = shA;
+      [-0.8, 0.8].forEach(z => magnet(p, 0, 0.05, z, [0, 1, 0]));
       p.finish(); root.add(p.g); parts[name] = p;
     }
     if (UTKA_NOGI) { legUtka(-1); legUtka(1); } else { leg(-1); leg(1); }
@@ -1669,7 +1676,7 @@
           const sock = new MeshBuf(true), NA = 96, wc = tone('WH2', 0), wc2 = tone('WH', 0);
           const kvad = (t, h) => h / Math.pow(Math.pow(Math.abs(Math.cos(t)), 4) + Math.pow(Math.abs(Math.sin(t)), 4), 1 / 4);
           const yb = -ANKLE - 2.1, yt = -ANKLE + 0.75, yr = yt - 0.55;          // низ — глубоко в вороте сапога, верх — сразу над шарниром
-          const ng = UTKA_NOGI ? subPart(p.g, name + '_nosok', [ankle(s)[0], ankle(s)[1], 0], [0.42, 0, 0]) : null;   // у ног «утка» — по наклону голени
+          const ng = UTKA_NOGI ? subPart(p.g, name + '_nosok', [ankle(s)[0], ankle(s)[1], 0], [LEGU.shA, 0, 0]) : null;   // у ног «утка» — по наклону голени
           const ring = (y, h, ribs, dep) => { const st = sock.v; for (let a = 0; a <= NA; a++) {
             const t = a / NA * Math.PI * 2, r = kvad(t, h) * (1 + dep * Math.cos(t * ribs)), nx = Math.cos(t), nz = Math.sin(t);
             sock.vert(r * nx, y, r * nz, nx, 0, nz, y > yr ? wc : wc2); } return st; };
