@@ -497,7 +497,7 @@
   function buildRisunok(T, o, R) {
     const lite = !!o.lite;
     const FR = vid(R.front), SB = vid(R.side);
-    const U = 0.062, KF = R.B.k, ZN = 5.6, YC = -0.3, P = 2.6;
+    const U = R.U || 0.062, KF = R.B.k, ZN = 5.6, YC = -0.3, P = 2.6;
     const fX = x => R.F.cx + x / U, fY = y => R.F.chin - (y - YC) / U;
     const sX = z => R.B.nos + (ZN - z) / (U * KF), sY = y => R.B.chin - (y - YC) / (U * KF);
     const lum = c => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
@@ -525,7 +525,8 @@
       return d;
     }
     const h = lite ? 0.14 : 0.07;
-    const { pos, idx } = poverhnost(pole, -5.9, -1.4, -7.6, 5.9, 12.8, 6.2, h);
+    const XL = -R.F.cx * U - 0.4, XR = (FR.w - R.F.cx) * U + 0.4, YT = YC + R.F.chin * U + 0.4, YB = YC - (FR.h - R.F.chin) * U - 0.4;
+    const { pos, idx } = poverhnost(pole, XL, YB, -7.6, XR, YT, 6.2, h);
     const nv = pos.length / 3, nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), e = 0.04;
     const ZEL = [0.29, 0.5, 0.17];
     const lin = c => c.map(v => Math.pow(v, 2.2));                // цвета рисунка — в линейное пространство
