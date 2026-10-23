@@ -124,6 +124,7 @@ class Nalozhenie(
     // стиль «Визор» (2.7.0): свои картинки слоёв — только когда стиль включён (старый стиль их не трогает)
     private val viz by lazy { VizorPlashki(ctx, VizorKist(ctx), cel, top, igra, chat, nalet, itogi) { imyaGolosa(it) } }
     private val licoPryamoe = kartinka(ctx, "plus-lico-pryamoe.png") ?: lico   // щёки прямые, подбородок плоский
+    private val zver by lazy { ZverLico(kartinka(ctx, "zver-lico.png"), kartinka(ctx, "zver-chelyust.png")) }   // vid lico zver
     private val pvV by lazy { Bitmap.createBitmap(Vizor.PV_W, Vizor.PV_H, Bitmap.Config.ARGB_8888) }
     private val cV by lazy { Canvas(pvV) }
     private val lvV by lazy { Bitmap.createBitmap(Vizor.LV_W, Vizor.LV_H, Bitmap.Config.ARGB_8888) }
@@ -239,7 +240,7 @@ class Nalozhenie(
                 shag("лицо") {
                     if (!p.lico && !p.nalet && (v || !cel.vidna)) { if (bylo != "net") razvilka.plashka(null); bylo = "net" }
                     else {
-                        val mim = "$morgaet $ulybka"
+                        val mim = "$morgaet $ulybka ${Oformlenie.lico}"
                         val shagMs = when {
                             tesnoIgre -> if (sost == "govorit") 100L else 200L
                             sost == "govorit" -> 0L
@@ -437,7 +438,9 @@ class Nalozhenie(
         val m = d / 256f
         pod.color = Color.argb(40, 242, 194, 48)
         k.drawCircle(r.centerX(), r.top + d * 0.6f, d * 0.62f, pod)
-        licoPryamoe?.let { k.drawBitmap(it, null, RectF(r.left, r.top, r.left + d, r.top + d), kist) }
+        val zv = if (Oformlenie.lico == "zver") zver.takeIf { it.gotov } else null
+        if (zv != null) zv.risovat(k, RectF(r.left, r.top, r.left + d, r.top + d), "obychno", System.currentTimeMillis(), false)
+        else licoPryamoe?.let { k.drawBitmap(it, null, RectF(r.left, r.top, r.left + d, r.top + d), kist) }
         plechiImg?.let {
             k.drawBitmap(it, null, RectF(r.left - PLECHI_VBOK * m, r.top + 218.2f * m, r.left + (319 - PLECHI_VBOK) * m,
                 r.top + (218.2f + 80) * m), kist)
@@ -555,40 +558,49 @@ class Nalozhenie(
         if (sost == "dumaet") naklon += 4f                             // голова чуть набок
         c.rotate(naklon, cx, podborodok)
         val dst = RectF(left, top, left + d, top + d)
-        kist.alpha = if (sost == "spit") 110 else 255
-        c.drawBitmap(f, null, dst, kist)
-        if (sost == "slushaet") svet?.let {
-            kist.alpha = (150 + 105 * sin(now / 380.0)).toInt().coerceIn(0, 255)
-            c.drawBitmap(it, null, dst, kist)
+        val zv = if (Oformlenie.lico == "zver") zver.takeIf { it.gotov } else null
+        if (zv != null) {                                              // живой рисунок зверя: он уже голова Плюса — крупнее от подбородка
+            val m = ZverLico.MASSHTAB
+            val zd = RectF(cx - (cx - dst.left) * m, podborodok - (podborodok - dst.top) * m,
+                cx + (dst.right - cx) * m, podborodok + (dst.bottom - podborodok) * m)
+            zv.risovat(c, zd, sost, now, morgaet, if (sost == "spit") 110 else 255)
         }
-        kist.alpha = 255
-        fun pr(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) =
-            c.drawRect(dst.left + x0 * k, dst.top + y0 * k, dst.left + x1 * k, dst.top + y1 * k, p)
-        if (morgaet || sost == "dumaet") {                             // закрыть глаза стеклом
-            pr(92f, 129f, 117f, 150f, steklo); pr(148f, 129f, 169f, 150f, steklo)
-        }
-        when {
-            morgaet -> { pr(92f, 138f, 117f, 141f, glaz); pr(148f, 138f, 169f, 141f, glaz) }      // веки
-            sost == "dumaet" -> { pr(100f, 129f, 122f, 150f, glaz); pr(156f, 129f, 175f, 150f, glaz) } // взгляд вбок
-        }
-        val r = ROT                                                    // рот (2.2.6) — на ряд кирпичей ниже
-        when {
-            govorit -> {
-                pr(85f, 170f + r, 91f, 181f + r, zhelt); pr(164f, 170f + r, 171f, 181f + r, zhelt)  // уголки прочь
-                val otkryt = if (sin(now / 90.0) > 0) 14f else 6f                                 // как в студии
-                pr(90f, 181f + r, 166f, 189f + r + otkryt, chern)
+        else {
+            kist.alpha = if (sost == "spit") 110 else 255
+            c.drawBitmap(f, null, dst, kist)
+            if (sost == "slushaet") svet?.let {
+                kist.alpha = (150 + 105 * sin(now / 380.0)).toInt().coerceIn(0, 255)
+                c.drawBitmap(it, null, dst, kist)
             }
-            ulybka -> {
-                pr(80f, 165f + r, 87f, 182f + r, chern); pr(169f, 165f + r, 176f, 182f + r, chern)  // уголки вверх
-                pr(86f, 175f + r, 170f, 197f + r, chern)                       // губы: верхняя = нижняя (7 точек, 11.10)
-                pr(91f, 182f + r, 165f, 190f + r, zuby)
-                for (x in listOf(103f, 116f, 128f, 140f, 153f)) pr(x, 182f + r, x + 1.6f, 190f + r, chern)  // зубы
+            kist.alpha = 255
+            fun pr(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) =
+                c.drawRect(dst.left + x0 * k, dst.top + y0 * k, dst.left + x1 * k, dst.top + y1 * k, p)
+            if (morgaet || sost == "dumaet") {                             // закрыть глаза стеклом
+                pr(92f, 129f, 117f, 150f, steklo); pr(148f, 129f, 169f, 150f, steklo)
+            }
+            when {
+                morgaet -> { pr(92f, 138f, 117f, 141f, glaz); pr(148f, 138f, 169f, 141f, glaz) }      // веки
+                sost == "dumaet" -> { pr(100f, 129f, 122f, 150f, glaz); pr(156f, 129f, 175f, 150f, glaz) } // взгляд вбок
+            }
+            val r = ROT                                                    // рот (2.2.6) — на ряд кирпичей ниже
+            when {
+                govorit -> {
+                    pr(85f, 170f + r, 91f, 181f + r, zhelt); pr(164f, 170f + r, 171f, 181f + r, zhelt)  // уголки прочь
+                    val otkryt = if (sin(now / 90.0) > 0) 14f else 6f                                 // как в студии
+                    pr(90f, 181f + r, 166f, 189f + r + otkryt, chern)
+                }
+                ulybka -> {
+                    pr(80f, 165f + r, 87f, 182f + r, chern); pr(169f, 165f + r, 176f, 182f + r, chern)  // уголки вверх
+                    pr(86f, 175f + r, 170f, 197f + r, chern)                       // губы: верхняя = нижняя (7 точек, 11.10)
+                    pr(91f, 182f + r, 165f, 190f + r, zuby)
+                    for (x in listOf(103f, 116f, 128f, 140f, 153f)) pr(x, 182f + r, x + 1.6f, 190f + r, chern)  // зубы
+                }
             }
         }
         c.restore()
-        // строчная развёртка: 2 точки линия, 2 — нет; только на пикселях головы и плеч
+        // строчная развёртка: 2 точки линия, 2 — нет; только на пикселях головы и плеч (рисунок зверя — без неё)
         var y = 0f
-        while (y < niz) { c.drawRect(levo, y, pravo, y + 2f, razvyortka); y += 4f }
+        if (zv == null) while (y < niz) { c.drawRect(levo, y, pravo, y + 2f, razvyortka); y += 4f }
         c.restoreToCount(sloy)
         if (sost == "dumaet") for (i in 0..2) {                       // «…» над головой, по очереди
             val m = d / 190f

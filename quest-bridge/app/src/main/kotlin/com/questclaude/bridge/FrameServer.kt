@@ -53,6 +53,7 @@ import kotlin.concurrent.thread
  *   GET /efir/scena?s=skoro&min=5&t=…|otoshyol[&min=]|konec|net -> сцена во весь кадр эфира (2.7.0, визор);
  *                              без s — состояние {"stil","scena","tajmer","ostalos_sek","fraza"}
  *   GET /efir/stil?v=viz|staryj -> стиль плашек эфира (приложение запоминает; по умолчанию viz)
+ *   GET /efir/lico?v=plus|zver -> лицо в эфире: Плюс или живой рисунок зверя (приложение запоминает)
  *   GET /pamyat[?n=N]        -> хвост замера памяти (свободно у шлема, сколько держит приложение)
  *   GET /kamera              -> камера телефона: {"state":"vykl|zhdu|idyot", razmer, fps, kbps, v_efire, vid, gde,
  *                              dolya, povorot, vplotnuyu, sboku, adres (без ключа), oshibka}
@@ -383,6 +384,8 @@ class FrameServer(
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.scenaUpr(query).toByteArray(Charsets.UTF_8))
             "/efir/stil" ->                        // визор: стиль плашек viz | staryj
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.stilUpr(query["v"]).toByteArray(Charsets.UTF_8))
+            "/efir/lico" ->                        // лицо в эфире: plus | zver (живой рисунок зверя)
+                reply(out, 200, "application/json; charset=utf-8", Oformlenie.licoUpr(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir/osnova" ->                      // Струны: основа эфира — igra (Мост 3) или shlem
                 reply(out, 200, "application/json; charset=utf-8", Struny.ustanovit(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir", "/efir/start", "/efir/stop", "/efir/mic", "/efir/nastroyki", "/efir/adres" -> {

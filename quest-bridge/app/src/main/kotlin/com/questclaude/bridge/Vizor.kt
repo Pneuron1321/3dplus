@@ -228,7 +228,10 @@ object Vizor {
  */
 object Oformlenie {
     private const val FAJL = "efir-stil"
+    private const val FAJL_LICO = "efir-lico"
     val STILI = setOf("viz", "staryj")
+    /** Лицо в эфире: plus — Плюс; zver — живой рисунок зверя (ZverLico). */
+    val LICA = setOf("plus", "zver")
     val SCENY = setOf("skoro", "otoshyol", "konec")
     /** Дольше суток отсчёт не ставим. */
     const val MAKS_MIN = 24 * 60
@@ -237,6 +240,8 @@ object Oformlenie {
     @Volatile var stil = "viz"
         private set
     val viz: Boolean get() = stil == "viz"
+    @Volatile var lico = "plus"
+        private set
     /** Сцена: "" — нет, skoro, otoshyol, konec. */
     @Volatile var scena = ""
         private set
@@ -254,6 +259,7 @@ object Oformlenie {
     fun zagruzit(d: File) {
         dir = d
         stil = try { File(d, FAJL).readText().trim().takeIf { it in STILI } ?: "viz" } catch (e: Exception) { "viz" }
+        lico = try { File(d, FAJL_LICO).readText().trim().takeIf { it in LICA } ?: "plus" } catch (e: Exception) { "plus" }
         versiya++
     }
 
@@ -263,6 +269,16 @@ object Oformlenie {
             stil = v
             versiya++
             dir?.let { try { File(it, FAJL).writeText(v) } catch (e: Exception) { } }
+        }
+        return status()
+    }
+
+    /** /efir/lico?v=plus|zver (без v — только состояние); мост запоминает. */
+    fun licoUpr(v: String?): String {
+        if (v != null && v in LICA && v != lico) {
+            lico = v
+            versiya++
+            dir?.let { try { File(it, FAJL_LICO).writeText(v) } catch (e: Exception) { } }
         }
         return status()
     }
@@ -291,7 +307,7 @@ object Oformlenie {
     fun ostalosMs(now: Long = System.currentTimeMillis()) = if (doMs == 0L) 0L else (doMs - now).coerceAtLeast(0L)
 
     fun status(now: Long = System.currentTimeMillis()): String =
-        "{\"stil\":\"$stil\",\"scena\":\"${scena.ifEmpty { "net" }}\",\"tajmer\":${doMs != 0L}," +
+        "{\"stil\":\"$stil\",\"lico\":\"$lico\",\"scena\":\"${scena.ifEmpty { "net" }}\",\"tajmer\":${doMs != 0L}," +
             "\"ostalos_sek\":${(ostalosMs(now) + 999) / 1000},\"fraza\":${json(fraza)}}"
 
     private fun json(s: String): String = buildString {

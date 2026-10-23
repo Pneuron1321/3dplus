@@ -11,7 +11,8 @@ import java.io.File
  * Сверка с docs/maket/vizor-1080.png и zastavka-1080.png.
  */
 class VizVaryant(val imya: String, val vid: Okno.Vid, val muzyka: Boolean = true, val sotnya: Boolean = false,
-                 val niz: List<Triple<String, String, String>> = emptyList())
+                 val niz: List<Triple<String, String, String>> = emptyList(), val lico: String = "plus",
+                 val sost: String = "obychno", val morgaet: Boolean = false, val t: Long = 0L)
 
 fun kadryVizor(out: File) {
     val ya = Okno.Vid("ugol", "pn", 0.25f, 90, true, 4f)                // айфон стоя, снизу вплотную (как у Александра)
@@ -23,6 +24,11 @@ fun kadryVizor(out: File) {
         VizVaryant("vizor-efir-bokom", bokom, muzyka = false, sotnya = true, niz = listOf(
             Triple("ya", "Макс, прикрой слева, я захожу на крышу, а ты держи вертолёт подальше от нас",
                 "Max, cover the left, I'm going up to the roof, keep the chopper away from us"))),
+        // «Плюс-зверь» (vid lico zver): живой рисунок — покой, речь (пасть открыта), моргает
+        VizVaryant("zver-efir", ya, lico = "zver", niz = listOf(
+            Triple("plus", "Саша, слева полиция — сверни во двор", "Sasha, police on the left — turn into the yard"))),
+        VizVaryant("zver-govorit", ya, lico = "zver", sost = "govorit", t = 90L * 5),
+        VizVaryant("zver-morgaet", ya, lico = "zver", morgaet = true),
     )
     for (v in varyanty) {
         val f = File(out, v.imya + ".png")
@@ -84,7 +90,11 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     val vv = ABitmap.createBitmap(W, Vizor.RAMKA_H, ABitmap.Config.ARGB_8888)
     val vn = ABitmap.createBitmap(W, Vizor.RAMKA_H, ABitmap.Config.ARGB_8888)
     viz.ramka(vv, vn)
-    zvat(n, "risovatViz", Nalozhenie.Pokaz(), "obychno", now)
+    Oformlenie.licoUpr(v.lico)
+    if (v.morgaet) pole(n, "morgaet", true)
+    val tt = if (v.t != 0L) v.t else now
+    zvat(n, "risovatViz", Nalozhenie.Pokaz(), v.sost, tt)
+    Oformlenie.licoUpr("plus")
     val pv = zvat(n, "getPvV") as ABitmap
     zvat(n, "radar", now + 7_000)
     val lv = zvat(n, "getLvV") as ABitmap

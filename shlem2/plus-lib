@@ -1052,14 +1052,27 @@ def vid(a):
         put = '/efir/stil'
     elif a[0] == 'stil' and len(a) > 1 and a[1] in ('viz', 'staryj'):
         put = '/efir/stil?v=' + a[1]
+    elif a[0] == 'lico' and len(a) > 1 and a[1] in ('zver', 'plus'):
+        put = '/efir/lico?v=' + a[1]
+    elif a == ['lico']:
+        put = '/efir/lico'
     else:
-        return 1, ['vid stil viz — стиль «Визор» (по умолчанию); vid stil staryj — старые плашки; vid — какой сейчас.'], None
+        return 1, ['vid stil viz — стиль «Визор» (по умолчанию); vid stil staryj — старые плашки; vid lico zver — в эфире '
+                   'вместо лица Плюса живой рисунок зверя; vid lico plus — снова Плюс; vid — какой сейчас.'], None
     r = zapros(U, put, 5)
     if r is None:
         return 1, [MOLCHIT], None
     if r[0] == 404:
-        return 1, ['Стиль эфира: нужен мост 2.7.0 (обнови приложение).'], None
+        return 1, [('Лицо зверя в эфире: нужен мост 2.7.1' if put.startswith('/efir/lico') else
+                    'Стиль эфира: нужен мост 2.7.0') + ' (обнови приложение).'], None
     d = razobrat(r[1]) or {}
+    if put.startswith('/efir/lico'):
+        if d.get('lico') == 'zver':
+            return 0, ['В эфире вместо лица Плюса — зверь: живой рисунок, пасть ходит под голос, глаза светятся '
+                       '(мост запомнил). Вернуть Плюса — vid lico plus.'], None
+        if d.get('lico') == 'plus':
+            return 0, ['В эфире снова лицо Плюса (мост запомнил).'], None
+        return 1, ['Лицо в эфире: непонятный ответ моста.'], None
     if d.get('stil') == 'viz':
         return 0, ['Стиль эфира — визор: золотые скобы по углам, карточки графит с золотом, шрифты Unbounded и Manrope '
                    '(мост запомнил).'], None
