@@ -1079,6 +1079,7 @@
        Не из деталей Плюса: органическая лепка — src/zver-golova.js (поле расстояний → гладкая сетка; зубы, глаза,
        шипы гребня — отдельная геометрия). Голова Плюса здесь убрана, тело то же; глаза моргают.
        ============================================================ */
+    let zverBezShei = false;
     if (opts.lico === 'zver') {
       ['shapka', 'bokL', 'bokR', 'lico'].forEach(n => parts[n].g.clear());
       ochki.clear();
@@ -1086,6 +1087,7 @@
       if (!ZV) throw new Error('lico=zver: подключи src/zver-golova.js перед pixel-mech.js');
       const zg = ZV.build(T, Object.assign({}, opts, { lite: !!opts.lite, bezShipov: !!opts.bezShipov, lepka: !!opts.lepka }));
       lico.g.add(zg.group);
+      zverBezShei = !!zg.bezShei;
       Object.assign(faceParts, zg.glaza);                                   // глаза моргают (масштаб по y)
       /* мимика обычного лица — пустышки (рта-улыбки у зверя нет) */
       ['mouthBar', 'mouthCornerL', 'mouthCornerR', 'mouthLegL', 'mouthLegR', 'teeth'].forEach(n => {
@@ -1111,6 +1113,7 @@
       });
     }
     sheya.finish(); root.add(sheya.g); parts.sheya = sheya;
+    if (zverBezShei) sheya.g.visible = false;                              // у «зверя-2» шея — широкая, из самой головы
 
     /* ============================================================
        КОРПУС v5 (лист 2, «атлетичный»): грудь ±4.75 × 15.1…19.5 × ±3.0 — белая кладка

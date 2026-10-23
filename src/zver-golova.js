@@ -625,9 +625,119 @@
     return { group, glaza, stats: { vershin: nv } };
   }
 
+  /* ======================================================================================================
+     ЗВЕРЬ-2 (opts.zver2) — проба: ФОРМА — первая (силуэты листа HEAD DETAIL спереди и сбоку, src/zver-list.js),
+     шире ×1.25 и повёрнута «в сторону», как на крупном плане; ЛИЦО — крупный план из комикса (src/zver-glubina.js),
+     спроецирован спереди по точкам: глаза и подбородок. ШЕЯ — не штырь: широкая масса трапеций от затылка и из-под
+     челюсти до верха груди (на листе шея шириной с голову и прячется в её форму), слита с головой одной сеткой.
+     Координаты — головы (голова на HEAD_Y, верх груди на y ≈ −1.0).
+     ====================================================================================================== */
+  function buildZver2(T, o, L, G) {
+    const lite = !!o.lite;
+    const FR = vid(L.front), SB = vid(L.side), GR = vid(G);
+    const U = 0.062, KF = L.B.k, ZN = 5.6, YC = -0.3, P = 2.6;
+    const SX = +o.zs || 1.25, TH = (o.zyaw !== undefined) ? +o.zyaw : -0.45;     // шире; поворот (минус — к зрителю слева)
+    const cT = Math.cos(TH), sT = Math.sin(TH);
+    const fX = x => L.F.cx + x / U, fY = y => L.F.chin - (y - YC) / U;
+    const sX = z => L.B.nos + (ZN - z) / (U * KF), sY = y => L.B.chin - (y - YC) / (U * KF);
+    const lum = c => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+    function golova(x, y, z) {                                       // первая форма (без рельефа по яркости)
+      x /= SX;
+      const fy = fY(y), sy = sY(y);
+      const greben = clamp((88 - fy) / 22, 0, 1);
+      let d = Math.max(FR.sdAt(fX(x), fy) * U, SB.sdAt(sX(z), sy) * U * KF - greben * 4);
+      const rf = FR.ryad(fy), rs = SB.ryad(sy);
+      if (rf && rs) {
+        const xl = (rf[0] - L.F.cx) * U, xr = (rf[1] - L.F.cx) * U;
+        const zf = ZN - (rs[0] - L.B.nos) * U * KF, zb = ZN - (rs[1] - L.B.nos) * U * KF;
+        const cx = (xl + xr) / 2, hw = Math.max((xr - xl) / 2, 0.05), cz = (zf + zb) / 2, hd = Math.max((zf - zb) / 2, 0.05);
+        const e = Math.pow(Math.pow(Math.abs(x - cx) / hw, P) + Math.pow(Math.abs(z - cz) / hd, P), 1 / P);
+        d = Math.max(d, (e - 1) * Math.min(hw, hd));
+      }
+      return d * Math.min(1, SX);
+    }
+    /* шея-трапеции: сечение — суперэллипс, к груди шире и глубже; спереди — за подбородком */
+    const NY0 = -1.4, NY1 = 2.6, DROP = (o.zniz !== undefined) ? +o.zniz : 1.0;   // голова ниже — утоплена в трапеции
+    function sheya(x, y, z) {
+      const t = clamp((y - NY0) / (NY1 - NY0), 0, 1);
+      const hw = 4.8 + 2.2 * (1 - t) * (1 - t), zf = 2.9 - 1.0 * t, zb = -3.2 - 0.6 * t;   // трапеции: к плечам — шире, скатом
+      const cz = (zf + zb) / 2, hd = (zf - zb) / 2;
+      const e = Math.pow(Math.pow(Math.abs(x) / hw, 3) + Math.pow(Math.abs(z - cz) / hd, 3), 1 / 3);
+      return Math.max((e - 1) * Math.min(hw, hd), NY0 - y, y - NY1);
+    }
+    const vGol = (x, y, z) => [x * cT - z * sT, y, x * sT + z * cT];   // тело → голова (поворот на −TH)
+    const vTel = (x, y, z) => [x * cT + z * sT, y, -x * sT + z * cT];  // голова → тело
+    /* привязка лица крупного плана: глаза и подбородок → точки первой формы после поворота */
+    const glazL = [(74.5 - L.F.cx) * U * SX, YC + (L.F.chin - 111) * U], glazR = [(131.7 - L.F.cx) * U * SX, glazL[1]];
+    const zGlaza = (() => { let z = ZN + 1; const gx = (glazL[0] + glazR[0]) / 2; while (z > 0 && golova(gx, glazL[1], z) > 0) z -= 0.02; return z - 0.3; })();
+    const eL = vTel(glazL[0], glazL[1], zGlaza), eR = vTel(glazR[0], glazR[1], zGlaza);
+    const gL = [46.8, 199.2], gR = [178.0, 204.5];                   // глаза на крупном плане (точки данных)
+    const UX = (eR[0] - eL[0]) / (gR[0] - gL[0]), UY = (glazL[1] - YC) / (G.chin - (gL[1] + gR[1]) / 2);
+    const PX0 = (gL[0] + gR[0]) / 2 - ((eL[0] + eR[0]) / 2) / UX;
+    const pX = x => PX0 + x / UX, pY = y => G.chin - (y + DROP - YC) / UY;
+    function pole(x, y, z) {
+      const [a, b, c] = vGol(x, y + DROP, z);
+      let d = golova(a, b, c);
+      if (d < 1.2) {                                                 // тёмное на крупном плане — вглубь (пасть, глазницы)
+        const cg = GR.cvet(pX(x), pY(y));
+        if (cg[3] > 0.5) {
+          const wf = clamp((c - 1.2) / 3, 0, 1), L0 = lum(cg);
+          d += wf * wf * (L0 < 0.3 ? 0.45 * Math.pow((0.3 - L0) / 0.3, 0.7) + 0.04 : 0.08 * (0.5 - L0));
+        }
+      }
+      return smin(d, sheya(x, y, z), 1.5);
+    }
+    const h = lite ? 0.14 : 0.07;
+    const { pos, idx } = poverhnost(pole, -9, NY0 - 0.3, -8.5, 9, YC + L.F.chin * U + 0.6 - DROP, 8.2, h);
+    const nv = pos.length / 3, nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), e = 0.04;
+    const ZEL = [0.3, 0.45, 0.2];
+    const lin = c => c.map(v => Math.pow(v, 2.2));
+    for (let i = 0; i < nv; i++) {
+      const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+      let gx = pole(x + e, y, z) - pole(x - e, y, z), gy = pole(x, y + e, z) - pole(x, y - e, z), gz = pole(x, y, z + e) - pole(x, y, z - e);
+      const gl = Math.hypot(gx, gy, gz) || 1; gx /= gl; gy /= gl; gz /= gl;
+      nor.set([gx, gy, gz], i * 3);
+      const [a, b, c] = vGol(x, y + DROP, z), [na, , nc] = vGol(gx, gy, gz);
+      const cG = GR.cvet(pX(x), pY(y)), cF = FR.cvet(fX(a / SX), fY(b)), cS = SB.cvet(sX(c), sY(b));
+      const vSheya = clamp((golova(a, b, c) - 0.05) / 0.5, 0, 1);    // на шее — своя кожа
+      const zad = clamp((0.8 - c) / 1.5, 0, 1);                     // профиль листа — только за ухом: морда профиля не на щеку
+      const wg = Math.pow(Math.max(0, gz), 2) * cG[3] * (1 - zad) * 3;   // крупный план — главный спереди и на щеке
+      const wf = Math.pow(Math.max(0, nc), 4) * cF[3] * 0.25 * (1 - cG[3]);
+      const ws = (Math.pow(Math.abs(na), 2) + 0.4 * Math.max(0, -nc) + 0.3 * Math.max(0, gy)) * cS[3] * zad;
+      let cc = wg + wf + ws > 1e-4 ? [0, 1, 2].map(k => (cG[k] * wg + cF[k] * wf + cS[k] * ws) / (wg + wf + ws)) : ZEL;
+      const kozha = [0, 1, 2].map(k => ZEL[k] * (0.7 + 0.3 * clamp((y - NY0) / 3, 0, 1)));
+      const tG = Math.max(0, gz) * 0.6;                              // шея спереди — тело с крупного плана (тени, складки)
+      cc = cc.map((v, k) => v * (1 - vSheya) + (cG[k] * tG + kozha[k] * (1 - tG)) * vSheya);
+      cc = lin(cc);
+      let occ = 0;
+      for (let s = 1; s <= 3; s++) { const dd = s * 0.25; occ += (dd - pole(x + gx * dd, y + gy * dd, z + gz * dd)) / Math.pow(2, s); }
+      const ao = clamp(1 - occ * 0.9, 0.55, 1);
+      col.set([cc[0] * ao, cc[1] * ao, cc[2] * ao], i * 3);
+    }
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new T.BufferAttribute(nor, 3));
+    geo.setAttribute('color', new T.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    const group = new T.Group(); group.name = 'zver_golova';
+    const mat = new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0, envMapIntensity: 0.35 }); mat.name = 'zver_risunok';
+    const m = new T.Mesh(geo, mat); m.name = 'zver_kozha'; m.castShadow = m.receiveShadow = true; group.add(m);
+    if (!lite) {
+      const p = geo.attributes.position, q = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i++) q.set([p.getX(i) + nor[i * 3] * 0.03, p.getY(i) + nor[i * 3 + 1] * 0.03, p.getZ(i) + nor[i * 3 + 2] * 0.03], i * 3);
+      const g2 = new T.BufferGeometry(); g2.setAttribute('position', new T.BufferAttribute(q, 3)); g2.setIndex(geo.index);
+      const mk = new T.MeshBasicMaterial({ color: new T.Color('#141f0b').convertSRGBToLinear(), side: T.BackSide }); mk.name = 'zver_kontur';
+      const k = new T.Mesh(g2, mk); k.name = 'zver_kontur'; group.add(k);
+    }
+    const glaza = {};
+    for (const n of ['eyeL', 'eyeR']) { const ob = new T.Object3D(); ob.name = n; group.add(ob); glaza[n] = ob; }
+    return { group, glaza, bezShei: true, stats: { vershin: nv } };
+  }
+
   global.PixelMechZver = {
     build: (T, o) => {
       o = o || {};
+      if (o.zver2 && global.PixelMechZverList && global.PixelMechZverGlubina) return buildZver2(T, o, global.PixelMechZverList, global.PixelMechZverGlubina);
       if (global.PixelMechZverGlubina && o.glubina && !o.lepka) return buildGlubina(T, o, global.PixelMechZverGlubina);
       return (global.PixelMechZverRisunok && !o.lepka) ? buildRisunok(T, o, global.PixelMechZverRisunok) : build(T, o);
     },
