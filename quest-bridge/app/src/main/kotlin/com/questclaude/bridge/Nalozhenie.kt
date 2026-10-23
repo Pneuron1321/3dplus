@@ -606,7 +606,7 @@ class Nalozhenie(
      * Мимика поверх картинки лица в [dst] (точки картинки 256: глаза за очками 92–117 и 148–169 × 129–150, рот —
      * полоса 90–166 × 181–189 со сдвигом ROT): моргание, взгляд вбок, рот в речи, улыбка.
      */
-    private fun mimikaLica(c: Canvas, dst: RectF, sost: String, now: Long) {
+    private fun mimikaLica(c: Canvas, dst: RectF, sost: String, now: Long, uzhe: Boolean = false) {
         val k = dst.width() / 256f
         fun pr(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) =
             c.drawRect(dst.left + x0 * k, dst.top + y0 * k, dst.left + x1 * k, dst.top + y1 * k, p)
@@ -618,24 +618,28 @@ class Nalozhenie(
             sost == "dumaet" -> { pr(100f, 129f, 122f, 150f, glaz); pr(156f, 129f, 175f, 150f, glaz) } // взгляд вбок
         }
         val r = ROT                                                    // рот (2.2.6) — на ряд кирпичей ниже
+        // у фигуры (2.7.5) рот на 15 % уже и по середине лица (между глаз — x 131,5), лицо ниже глаз на 15 % короче
+        fun rx(v: Float) = if (uzhe) ROT_CX + (v - 128f) * ROT_UZHE else v
+        fun ry(v: Float) = if (uzhe) GLAZA_Y + (v - GLAZA_Y) * LICO_KOROCHE else v
+        fun rot(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) = pr(rx(x0), ry(y0), rx(x1), ry(y1), p)
         val govorit = sost == "govorit"
         when {
             govorit -> {
-                pr(85f, 170f + r, 91f, 181f + r, zhelt); pr(164f, 170f + r, 171f, 181f + r, zhelt)  // уголки прочь
+                rot(85f, 170f + r, 91f, 181f + r, zhelt); rot(164f, 170f + r, 171f, 181f + r, zhelt)  // уголки прочь
                 val otkryt = if (sin(now / 90.0) > 0) 14f else 6f                         // как в студии
-                pr(90f, 181f + r, 166f, 189f + r + otkryt, chern)
+                rot(90f, 181f + r, 166f, 189f + r + otkryt, chern)
             }
             ulybka -> {
-                pr(80f, 165f + r, 87f, 182f + r, chern); pr(169f, 165f + r, 176f, 182f + r, chern)  // уголки вверх
-                pr(86f, 175f + r, 170f, 197f + r, chern)                       // губы: верхняя = нижняя (7 точек, 11.10)
-                pr(91f, 182f + r, 165f, 190f + r, zuby)
-                for (x in listOf(103f, 116f, 128f, 140f, 153f)) pr(x, 182f + r, x + 1.6f, 190f + r, chern)  // зубы
+                rot(80f, 165f + r, 87f, 182f + r, chern); rot(169f, 165f + r, 176f, 182f + r, chern)  // уголки вверх
+                rot(86f, 175f + r, 170f, 197f + r, chern)                       // губы: верхняя = нижняя (7 точек, 11.10)
+                rot(91f, 182f + r, 165f, 190f + r, zuby)
+                for (z in listOf(103f, 116f, 128f, 140f, 153f)) rot(z, 182f + r, z + 1.6f, 190f + r, chern)  // зубы
             }
         }
     }
 
     /**
-     * Плюс во весь рост (2.7.2, лист тела Александра 24.10; стиль «Визор»): фигура plus-telo.png 360×576 — голова
+     * Плюс во весь рост (2.7.2, лист тела Александра 24.10; стиль «Визор»): фигура plus-telo.png 360×563 — голова
      * в точках картинки лица 256 (с x = 52), ниже тело в тапочках; на 8 % шире при том же росте (Александр 24.10).
      * Мимика — на голове фигуры. Приседания (каждая четвёртая анимация ожидания — 10 раз) — кадры plus-prised-1…4
      * с тем же местом тапочек; в приседе мимики нет, лицо улыбается само. [l], [t] — левый верх фигуры, [kt] — масштаб.
@@ -655,7 +659,7 @@ class Nalozhenie(
         else {
             c.drawBitmap(f, null, dst, kist)
             kist.alpha = 255
-            mimikaLica(c, RectF(l + Vizor.TELO_GOLOVA_X * kt, t, l + (Vizor.TELO_GOLOVA_X + 256) * kt, t + 256 * kt), sost, now)
+            mimikaLica(c, RectF(l + Vizor.TELO_GOLOVA_X * kt, t, l + (Vizor.TELO_GOLOVA_X + 256) * kt, t + 256 * kt), sost, now, uzhe = true)
         }
         kist.alpha = 255
         var y = 0f
@@ -1179,6 +1183,12 @@ class Nalozhenie(
         const val MR = 8f
         /** Рот в plus-lico.png опущен на ряд кирпичей (9 точек из 256) — подбородок меньше; мимика — за ним. */
         const val ROT = 9f
+        /** Рот фигуры (2.7.4): середина и сужение — Александр «уже на 15 % и по центру». */
+        const val ROT_CX = 131.5f
+        const val ROT_UZHE = 0.85f
+        /** Лицо фигуры ниже глаз (середина глаз — y 139,5) на 15 % короче: рот и подбородок выше (Александр 24.10). */
+        const val GLAZA_Y = 139.5f
+        const val LICO_KOROCHE = 0.85f
         /** Приседания: 10 раз, круг 1 с — кадры (номер, мс): вниз, внизу дольше, вверх. */
         const val PRISED_RAZ = 10
         val PRISED_KADRY = listOf(0 to 120L, 1 to 120L, 2 to 120L, 3 to 280L, 2 to 120L, 1 to 120L, 0 to 120L)

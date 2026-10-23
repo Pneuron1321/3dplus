@@ -23,8 +23,8 @@ class VizorTest {
             "налёт" to Vizor.NALET_PILYULYA,
             "бюст Плюса" to Vizor.BYUST,
             "плашка Плюса" to Vizor.PLASHKA_PLYUSA,
-            "чат" to Vizor.Pryam(Vizor.STOLB_X, Vizor.CHAT_VERH, Vizor.PRAVO, Vizor.NIZ - Vizor.MZH - Vizor.ZAZOR),
-            "сейчас играет" to Vizor.Pryam(Vizor.STOLB_X, Vizor.NIZ - Vizor.MZH, Vizor.PRAVO, Vizor.NIZ),
+            "чат" to Vizor.Pryam(Vizor.STOLB_X, Vizor.CHAT_VERH, Vizor.PRAVO, Vizor.NIZ),
+            "сейчас играет" to Vizor.MUZ,
             "роза" to Vizor.ROZA,
         )
         // субтитры — при любом месте окна камеры справа (и без него)
@@ -68,7 +68,12 @@ class VizorTest {
         assertTrue(Vizor.NALET_PILYULYA.r <= Vizor.BYUST.l)
         assertTrue(Vizor.CHAT_VERH >= Vizor.PLASHKA_PLYUSA.b)
         // субтитры не наезжают на розу
-        for ((imya, r) in karty().filterKeys { it.startsWith("субтитры") }) assertFalse(imya, r.peresekaet(Vizor.ROZA))
+        for ((imya, r) in karty().filterKeys { it.startsWith("субтитры") }) {
+            assertFalse(imya, r.peresekaet(Vizor.ROZA)); assertFalse(imya, r.peresekaet(Vizor.MUZ))
+        }
+        // музыка — под розой (2.7.5); субтитры при айфоне лёжа (окно с 1363) не заходят на камеру
+        assertTrue(Vizor.MUZ.t >= Vizor.ROZA.b)
+        assertTrue(Vizor.titryX(1363f) + Vizor.TW <= 1363f)
         // левый верх не доходит до налёта
         assertTrue(Vizor.LV.r <= Vizor.NALET_PILYULYA.l)
     }

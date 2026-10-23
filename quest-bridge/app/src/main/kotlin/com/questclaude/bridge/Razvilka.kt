@@ -563,7 +563,7 @@ class Razvilka(private val w: Int, private val h: Int) {
 
     /**
      * Место слоя в стиле «Визор» (Vizor, точки 1080p от верха → GL от низа): в x0Viz, y0Viz. false — не рисовать
-     * (чату нет места). Чат — правый столбец между плашкой Плюса и «сейчас играет»/окном камеры.
+     * (чату нет места). Чат — правый столбец между Плюсом и окном камеры; «сейчас играет» — слева под розой.
      */
     private fun mestoViz(o: Out, ugol: String, sl: Sloy, w: Int, h: Int): Boolean {
         val s = o.h / 1080f
@@ -579,15 +579,11 @@ class Razvilka(private val w: Int, private val h: Int) {
             "nc" -> { x = (titryLevo(o) * s).toInt(); y = gl(Vizor.TITRY_VERH) }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
-            "mz" -> {                        // над окном камеры справа внизу; без камеры — в самом низу столбца
-                val zazor = (Vizor.ZAZOR * s).toInt()
-                y = kameraVerh(o)?.let { it + zazor } ?: (o.h - (Vizor.NIZ * s).toInt())
-            }
+            "mz" -> { x = (Vizor.MUZ.l * s).toInt(); y = gl(Vizor.MUZ.t) }   // слева внизу под розой (2.7.5)
             "pc" -> {
                 val zazor = (Vizor.ZAZOR * s).toInt()
                 val verh = o.h - (Vizor.CHAT_VERH * s).toInt()
-                val mz = sloi["mz"]?.takeIf { it.w > 0 }?.let { (it.h * s).toInt() + zazor } ?: 0
-                val niz = (kameraVerh(o)?.let { it + zazor } ?: (o.h - (Vizor.NIZ * s).toInt())) + mz
+                val niz = kameraVerh(o)?.let { it + zazor } ?: (o.h - (Vizor.NIZ * s).toInt())   // музыка — не в столбце
                 chatMesto = ((verh - niz) / s).toInt().coerceIn(0, Vizor.CH)
                 if (verh - niz < (60 * s).toInt()) return false
                 y = niz

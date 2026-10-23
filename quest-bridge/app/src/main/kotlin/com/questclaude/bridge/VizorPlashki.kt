@@ -159,23 +159,29 @@ class VizorPlashki(
         if (zaEfir.isNotEmpty()) c.drawText(kist.vlezet(naletMalo, zaEfir, r.right - 18f - x), x, baza, naletMalo)
     }
 
-    /** Знак «++3» (2.7.4, картинка Александра): маленький «+» сверху слева, крупный «+», «3» внизу справа; серый. */
-    private fun znakK(sz: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = android.graphics.Typeface.DEFAULT_BOLD; textSize = sz; color = Vizor.ZNAK
-        setShadowLayer(3f, 0f, 1f, 0x99000000.toInt())                   // читается и на светлой игре
+    /** Знак «++3» (картинка Александра): маленький «+» сверху слева, крупный «+», «3» внизу справа; фиолетовый
+     *  (наш, Vizor.ZNAK) с тонким чёрным контуром (Александр 24.10). */
+    private fun znakK(sz: Float, kontur: Boolean) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = android.graphics.Typeface.DEFAULT_BOLD; textSize = sz
+        if (kontur) { style = Paint.Style.STROKE; strokeWidth = 2.5f; strokeJoin = Paint.Join.ROUND; color = Color.BLACK }
+        else color = Vizor.ZNAK
     }
-    private val znakMal = znakK(24f)
-    private val znakBol = znakK(50f)
-    private val znakTri = znakK(30f)
+    private val znakMal = znakK(24f, false)
+    private val znakBol = znakK(50f, false)
+    private val znakTri = znakK(30f, false)
+    private val konturMal = znakK(24f, true)
+    private val konturBol = znakK(50f, true)
+    private val konturTri = znakK(30f, true)
 
     /** Знак «++3» над Плюсом слева — вместо прежней плашки «PLUS co-host»; (dx, dy) — начало слоя в кадре. */
     fun plashkaPlyusa(c: Canvas, dx: Float, dy: Float) {
         val m = Vizor.PLASHKA_PLYUSA
         val l = m.l - dx; val t = m.t - dy
-        c.drawText("+", l, t + 17f, znakMal)
         val xb = l + znakMal.measureText("+") * 0.75f
-        c.drawText("+", xb, t + 41f, znakBol)
-        c.drawText("3", xb + znakBol.measureText("+") - 1f, t + 46f, znakTri)
+        val x3 = xb + znakBol.measureText("+") - 1f
+        c.drawText("+", l, t + 17f, konturMal); c.drawText("+", l, t + 17f, znakMal)          // контур, поверх — цвет
+        c.drawText("+", xb, t + 41f, konturBol); c.drawText("+", xb, t + 41f, znakBol)
+        c.drawText("3", x3, t + 46f, konturTri); c.drawText("3", x3, t + 46f, znakTri)
     }
 
     // ---------- правый столбец: чат ----------

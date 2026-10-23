@@ -13,7 +13,7 @@ import java.io.File
 class VizVaryant(val imya: String, val vid: Okno.Vid, val muzyka: Boolean = true, val sotnya: Boolean = false,
                  val niz: List<Triple<String, String, String>> = emptyList(), val lico: String = "plus",
                  val sost: String = "obychno", val morgaet: Boolean = false, val t: Long = 0L,
-                 val prisedT: Long = -1L)
+                 val prisedT: Long = -1L, val ulybka: Boolean = false)
 
 fun kadryVizor(out: File) {
     val ya = Okno.Vid("ugol", "pn", 0.25f, 90, true, 4f)                // айфон стоя, снизу вплотную (как у Александра)
@@ -33,6 +33,7 @@ fun kadryVizor(out: File) {
         // 2.7.2: Плюс во весь рост — речь, моргает, приседания (кадры 2 и нижняя точка)
         VizVaryant("plus-govorit", ya, sost = "govorit", t = 90L * 5),
         VizVaryant("plus-morgaet", ya, morgaet = true),
+        VizVaryant("plus-ulybka", ya, ulybka = true),
         VizVaryant("plus-prised-2", ya, prisedT = 130L),
         VizVaryant("plus-prised-niz", ya, prisedT = 400L),
     )
@@ -87,8 +88,7 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     val kamTop = H - r[1] - r[3]
     val kameraVerhGl = r[1] + r[3] + maxOf(2, H / 360)
     val zazor = Vizor.ZAZOR.toInt()
-    val mzVerh = H - kameraVerhGl - zazor - Vizor.MZH
-    val chatNiz = H - kameraVerhGl - zazor - (if (v.muzyka) Vizor.MZH + zazor else 0)
+    val chatNiz = H - kameraVerhGl - zazor                                                      // музыка — слева под розой
     val chatVerh = Vizor.CHAT_VERH.toInt()
     s.rz.chatMesto = (chatNiz - chatVerh).coerceIn(0, Vizor.CH)
 
@@ -98,6 +98,7 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     viz.ramka(vv, vn)
     Oformlenie.licoUpr(v.lico)
     if (v.morgaet) pole(n, "morgaet", true)
+    if (v.ulybka) pole(n, "ulybka", true)
     val tt = if (v.t != 0L) v.t else now
     if (v.prisedT >= 0) pole(n, "prisedS", tt - v.prisedT)
     zvat(n, "risovatViz", Nalozhenie.Pokaz(), v.sost, tt)
@@ -141,7 +142,7 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
         kc.drawBitmap(chatB, Vizor.STOLB_X, (chatNiz - Vizor.CH).toFloat(), null)
         kc.restore()
     }
-    if (v.muzyka) kc.drawBitmap(mzB, Vizor.STOLB_X, mzVerh.toFloat(), null)                   // mz
+    if (v.muzyka) kc.drawBitmap(mzB, Vizor.MUZ.l, Vizor.MUZ.t, null)                   // mz
     return kadr
 }
 
