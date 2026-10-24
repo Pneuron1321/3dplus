@@ -29,7 +29,7 @@ const png = await page.evaluate(async ({ b64, yaws, sz }) => {
   const gl = await new Promise((ok, err) => new THREE.GLTFLoader().parse(bin, '', ok, err));
   const obj = gl.scene, box = new THREE.Box3().setFromObject(obj), c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
   obj.position.sub(c);
-  obj.traverse(o => { if (!o.isMesh) return; if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals(); if (!(o.material && o.material.map)) o.material = new THREE.MeshStandardMaterial({ color: 0x8fa86a, roughness: 0.8, side: THREE.DoubleSide }); });
+  obj.traverse(o => { if (!o.isMesh) return; if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals(); if (o.geometry.attributes.color) o.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, side: THREE.DoubleSide }); else if (!(o.material && o.material.map)) o.material = new THREE.MeshStandardMaterial({ color: 0x8fa86a, roughness: 0.8, side: THREE.DoubleSide }); });
   const R = Math.max(s.x, s.y, s.z);
   const sc = new THREE.Scene(); sc.add(obj); sc.add(new THREE.HemisphereLight(0xffffff, 0x445533, 0.7));
   const d = new THREE.DirectionalLight(0xffffff, 0.9); d.position.set(1, 2, 3); sc.add(d);

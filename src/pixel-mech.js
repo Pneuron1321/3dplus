@@ -1884,6 +1884,35 @@
       root.children.forEach(o => { if (!nogi.has(o) && o.type !== 'Mesh') o.position.y -= PRISED; });
     }
 
+    /* ============================================================
+       ПЛЮС ЦЕЛИКОМ-СЕТКА (opts.telo = 'setka', проба по листу тела Александра 24.10): вся фигура — одна литая сетка
+       генератора 3D по виду 3/4 листа, цвет вершин — с видов листа, сведённый к палитре (tools/forma/telo_raskraska.py
+       → src/plus-telo-setka.js). Прежние детали прячутся; улыбка — отдельной чёрной деталью по рамке лица.
+       ============================================================ */
+    const TELO = opts.telo === 'setka' && global.PixelMechTeloSetka;
+    if (TELO) {
+      const G = global.PixelMechTeloSetka;
+      root.traverse(q => { if (q.isMesh || q.isLine || q.isPoints) q.visible = false; });   // прежние детали — не видны (группы нужны раскладке)
+      Object.values(faceParts).forEach(o => o.traverse(q => { if (q.isMesh) q.scale.setScalar(1e-4); }));   // мимика прежней головы сама включает рот — сжать в точку
+      const bin = b64 => { const t = (typeof atob === 'function') ? atob(b64) : Buffer.from(b64, 'base64').toString('binary'); const u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+      const pos = new Float32Array(bin(G.pos).buffer), ix = new Uint32Array(bin(G.idx).buffer), kl = bin(G.cls);
+      const col = new Float32Array(G.nv * 3);
+      for (let i = 0; i < G.nv; i++) { const c = LIN[G.klassy[kl[i]]] || LIN.DG; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      const geo = new T.BufferGeometry();
+      geo.setAttribute('position', new T.BufferAttribute(pos, 3)); geo.setAttribute('color', new T.BufferAttribute(col, 3));
+      geo.setIndex(new T.BufferAttribute(ix, 1)); geo.computeVertexNormals();
+      const tg = new T.Group(); tg.name = 'telo_setka';
+      const mesh = new T.Mesh(geo, MAT.plastic); mesh.name = 'telo_setka_plastic'; mesh.castShadow = mesh.receiveShadow = true; tg.add(mesh);
+      if (G.lico) {                                                    // улыбка: полоса и уголки вверх, по середине лица
+        const [x0, x1, y0, y1, zf] = G.lico, fw = x1 - x0, fh = y1 - y0, cx = (x0 + x1) / 2, t = fh * 0.1, mb = new MeshBuf(true);
+        const ch = LIN.BK, yU = y0 + fh * 0.38;
+        bevelBox(mb, cx, yU, zf + 0.04, fw * 0.2 + t / 2, t / 2, 0.06, 0.02, ch, 63);
+        [-1, 1].forEach(sx => bevelBox(mb, cx + sx * fw * 0.2, yU + t * 0.8, zf + 0.04, t / 2, t * 1.3, 0.06, 0.02, ch, 63));
+        const um = new T.Mesh(mb.geometry(), MAT.plastic); um.name = 'telo_setka_ulybka'; tg.add(um);
+      }
+      root.add(tg); parts.teloSetka = { g: tg, name: 'teloSetka' };
+    }
+
     /* ---------- разлёт (разобранный вид) — снизу вверх, как на листе ---------- */
     const EXPLODE = {
       shapka: [0, 6.2, 0], ochki: [0, 5.3, 1.5], lico: [0, 0, 0], bokL: [-5.4, 0, 0], bokR: [5.4, 0, 0],
