@@ -33,12 +33,14 @@ class Mikser(
     private inner class Kanal(val id: Int) {
         val dec = OpusDecoder(RATE, 1)
         var enc: OpusEncoder? = null
-        val miks = Bufer(RATE, RATE)
-        val efir = Bufer(RATE, RATE, tsel0Ms = 80, minTselMs = 60)
+        // 2.7.7: запас гостя не больше 200 мс и лишнее сверх цели — сразу прочь (было до ~550 мс задержки)
+        val miks = Bufer(RATE, RATE, maksTselMs = 200, dogonMs = 120)
+        val efir = Bufer(RATE, RATE, tsel0Ms = 80, minTselMs = 60, maksTselMs = 250, dogonMs = 150)
         val pcm = ShortArray(KADR)
         val kadr = ShortArray(KADR)
         var zvuchit = false                               // в этом такте пришёл звук
         var urovenDb = -90f
+        var usil = 1f                                     // выравнивание голоса (2.7.7): тихий микрофон — громче
         var govoritDo = 0L
         var seqVyhod = 0
         var paketov = 0L
@@ -64,7 +66,7 @@ class Mikser(
     private var zvuchaliMs = 0L
     private var aleksandrMs = -ALEKSANDR_MS                // когда Александр последний раз говорил громче эха гостей
 
-    /** Громкость гостей в шлеме (0–1,5) и в эфире (0–2). */
+    /** Громкость гостей в шлеме (0–3; 2.7.7: было до 1,5) и в эфире (0–2). */
     @Volatile var gromkostShlem = 0.8f
     @Volatile var gromkostEfir = 1f
     /** Заслонка эха: порог (доля громкости гостей в шлеме; 0 — выключена) и сколько глушить, дБ. */
@@ -125,7 +127,14 @@ class Mikser(
             if (!k.zvuchit) { k.urovenDb = -90f } else {
                 k.urovenDb = db(k.kadr)
                 zvuchat += k
-                for (i in 0 until KADR) shlemF[i] += k.kadr[i].toFloat()
+                // 2.7.7 (эфир 25.10: «голос гостя в шлеме тихий даже на 150 %» — микрофон айфона в Safari с
+                // шумодавом даёт речь около −40 дБ): пока гость говорит, усиление плавно ведём к речи CEL_DB,
+                // не больше USIL_MAKS; молчит — усиление стоит (шум между словами не раздувается).
+                if (k.urovenDb > GOVORIT_DB) {
+                    val cel = Math.pow(10.0, ((CEL_DB - k.urovenDb) / 20).toDouble()).toFloat().coerceIn(1f, USIL_MAKS)
+                    k.usil += (cel - k.usil) * (if (cel < k.usil) 0.2f else 0.04f)
+                }
+                for (i in 0 until KADR) shlemF[i] += k.kadr[i] * k.usil
                 if (u.golos.isNotEmpty()) { vniz16(k.kadr); rech(u.golos, r16, r16.size) }
             }
             val bylo = u.govorit
@@ -161,7 +170,7 @@ class Mikser(
             val k = kanaly.getOrPut(u.id) { Kanal(u.id) }
             val e = k.enc ?: noviyKoder().also { k.enc = it }
             for (i in 0 until KADR) smes[i] = fonKadr[i] * u.igra + golosKadr[i] + micKadr[i] * MIC_USIL * micUsil
-            for (o in zvuchat) if (o.id != u.id) for (i in 0 until KADR) smes[i] += o.kadr[i].toFloat()
+            for (o in zvuchat) if (o.id != u.id) for (i in 0 until KADR) smes[i] += o.kadr[i] * o.usil
             for (i in 0 until KADR) izMiks[i] = myagko(smes[i])
             val t0 = System.nanoTime()
             val n = try { e.encode(izMiks, 0, KADR, k.vyhod, 0, k.vyhod.size) } catch (x: Exception) { k.oshibok++; 0 }
@@ -179,8 +188,9 @@ class Mikser(
         for (u in komnata.slyshno()) {
             val k = kanaly[u.id] ?: continue
             if (!k.efir.vzyat(izEfira, 0, frames)) continue
+            val gk = g * k.usil
             for (j in 0 until frames) {
-                val v = Mikrofon.myagko((izEfira[j] * g).toInt())
+                val v = Mikrofon.myagko((izEfira[j] * gk).toInt())
                 out[2 * j] = (out[2 * j] + v).coerceIn(-32768, 32767).toShort()
                 out[2 * j + 1] = (out[2 * j + 1] + v).coerceIn(-32768, 32767).toShort()
             }
@@ -196,7 +206,7 @@ class Mikser(
         val ks = kanaly.values.joinToString(",") { k ->
             "{\"id\":${k.id},\"paketov\":${k.paketov},\"oshibok\":${k.oshibok},\"bufer_ms\":${k.miks.estMs}," +
                 "\"tsel_ms\":${k.miks.tselMs},\"propuski\":${k.miks.propuski},\"sbrosy\":${k.miks.sbrosy}," +
-                "\"uroven_db\":${k.urovenDb.toInt()}}"
+                "\"uroven_db\":${k.urovenDb.toInt()},\"usil\":${String.format(java.util.Locale.ROOT, "%.1f", k.usil)}}"
         }
         val sek = taktov * KADR / RATE.toDouble()
         val dolya = if (sek > 0) kodNs / 1e9 / sek * 100 else 0.0
@@ -224,6 +234,9 @@ class Mikser(
         /** Микрофон ушей пишется без усиления — гостям, как в эфире, громче. */
         const val MIC_USIL = 3f
         const val GOVORIT_DB = -42f
+        /** Куда выравнивать речь гостя (RMS кадра, дБ) и во сколько раз можно усилить (×6 ≈ +16 дБ). */
+        const val CEL_DB = -22f
+        const val USIL_MAKS = 6f
         const val GOVORIT_DERZHAT_MS = 600L
         const val ZVUCHALI_MS = 1200L
         /** Александр говорил громче эха гостей за столько мс — уши его слушают, даже если гость тоже говорит. */

@@ -173,6 +173,9 @@ class Ploshchadki(
         val s = spisok
         return s.firstNotNullOfOrNull { p -> p.otpravka?.oshibka?.let { if (s.size > 1) "${p.pl}: $it" else it } }
     }
+    /** Очередь отправки какой-то идущей площадки заполнена больше чем наполовину — сеть не успевает прямо сейчас. */
+    val ocheredPolna: Boolean get() = spisok.any { p -> p.otpravka?.let { it.state == "efir" && it.ochered > it.predel / 2 } == true }
+
     val tesnoSet: Boolean get() = spisok.any { it.otpravka?.state == "efir" && it.tesno }
 
     /** Совет, если сеть не успевает (эфир идёт через мобильный интернет айфона). */

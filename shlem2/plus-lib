@@ -227,6 +227,9 @@ def efir_skazat(U):
                       d.get('mic'), d.get('drops')))
         if d.get('mic_propuski') is not None:
             out.append('Голос: микропауз %s, сбросов %s (норма — 0).' % (d.get('mic_propuski'), d.get('mic_sbrosy', 0)))
+        ks, kt = d.get('kbps_seychas'), d.get('tsel_kbps')
+        if ks and kt and ks < kt:
+            out.append('Сеть не тянет — поток сам снижен до %s кбит/с (выбрано %s), вернётся сам, когда сеть успокоится.' % (ks, kt))
         if d.get('avto30'):
             out.append('Шлему тесно — эфир сейчас на 30 кадрах (выбрано %s), вернётся сам через минуту спокойствия.' % d.get('fps_vybor'))
         r2 = zapros(U, '/efir/osnova', 3)               # 2.6.9: откуда кадр эфира — от этого зависят его кадры

@@ -16,7 +16,7 @@
   gosti novaya            — новая ссылка гостя (старая перестанет работать)
   gosti vpusk avto | ruchnoy — впускать сами или ждать модератора / Александра
   gosti mest 1|2|3        — мест в кадре (по умолчанию 2)
-  gosti gromkost 80       — гости в шлеме, % (0–150)
+  gosti gromkost 80       — гости в шлеме, % (0–300; тихий голос гостя мост и так выравнивает сам)
   gosti efir 100          — гости в эфире, % (0–200)
   gosti kartinka vkl | vykl — картинка эфира гостям (выкл — только звук: раздача тесная)
   gosti eho 0.25          — заслонка эха (0 — выкл), gosti eho db 10 — насколько глушить
@@ -360,8 +360,9 @@ def status():
     z = r.get('zvuk') or {}
     kan = z.get('kanaly') or []
     if kan:
-        print('Звук: Opus %s%% ядра; буферы гостей %s мс; пропусков %d.' % (
-            z.get('opus_proc'), '/'.join(str(x['bufer_ms']) for x in kan), sum(x['propuski'] for x in kan)))
+        print('Звук: Opus %s%% ядра; буферы гостей %s мс; пропусков %d; выравнивание голоса ×%s.' % (
+            z.get('opus_proc'), '/'.join(str(x['bufer_ms']) for x in kan), sum(x['propuski'] for x in kan),
+            '/'.join(str(x.get('usil', 1)) for x in kan)))
     s = r.get('set') or {}
     if s.get('prinyato'):
         print('Сеть: принято %.1f МБ, отправлено %.1f МБ, выброшено кадров %d.' % (
@@ -445,7 +446,7 @@ def main(a):
         return upr('mest', dop=ost[0])
     if c in ('gromkost', 'efir') and ost and ost[0].isdigit():
         g = int(ost[0]) / 100
-        return nastroyka(**({'shlem': min(g, 1.5)} if c == 'gromkost' else {'efir': min(g, 2.0)}))
+        return nastroyka(**({'shlem': min(g, 3.0)} if c == 'gromkost' else {'efir': min(g, 2.0)}))
     if c == 'kartinka' and ost and ost[0] in ('vkl', 'vykl'):
         return nastroyka(kartinka='1' if ost[0] == 'vkl' else '0')
     if c == 'eho' and ost:

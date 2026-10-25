@@ -126,6 +126,22 @@ try {
   const o3 = await otpr(); await new Promise((r) => setTimeout(r, 2000)); const o4 = await otpr();
   if (o4 - o3 < 10 || !(await kamU())) throw new Error('камера не вернулась: кадров за 2 с ' + (o4 - o3));
   shag('Android: камера снова в эфире (' + (o4 - o3) + ' кадров за 2 с), кодек ' + (await a.evaluate(() => window.__plus.S.vencCfg && window.__plus.S.vencCfg.codec)));
+  // 2.7.7: свернул браузер (как Safari на iPhone) — камера умерла молча; развернул — вернулась сама, шлем знает
+  await a.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await m.waitForFunction(() => { const u = window.__plus.S.lyudi.find((x) => x.imya === 'Pixel'); return u && u.kamera === false; }, null, { timeout: 5000 });
+  await a.evaluate(() => {
+    window.__plus.S.stream.getVideoTracks()[0].stop();              // iOS гасит камеру в фоне (без события ended)
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await m.waitForFunction(() => { const u = window.__plus.S.lyudi.find((x) => x.imya === 'Pixel'); return u && u.kamera === true; }, null, { timeout: 8000 });
+  const o5 = await otpr(); await new Promise((r) => setTimeout(r, 2000)); const o6 = await otpr();
+  const zhiva = await a.evaluate(() => { const t = window.__plus.S.stream.getVideoTracks()[0]; return !!t && t.readyState === 'live'; });
+  if (o6 - o5 < 10 || !zhiva) throw new Error('после фона камера не вернулась: кадров за 2 с ' + (o6 - o5) + ', дорожка ' + zhiva);
+  shag('свернул и развернул браузер: пока свёрнут — модератор видит «камера выкл», после — камера сама вернулась (' + (o6 - o5) + ' кадров за 2 с)');
   await a.screenshot({ path: out + '/android-v-efire.png' });
   // модератор: камера и микрофон гостя (выкл — гаснет у гостя, своя кнопка не включает; вкл — камера вернулась сама)
   const ryad = () => m.locator('#pultLyudi .pultKto', { hasText: 'Pixel' });

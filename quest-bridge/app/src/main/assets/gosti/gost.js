@@ -32,6 +32,7 @@
     kamVyklK: '📷 выкл', kamVklK: '📷 вкл',
     mikPropal: 'Микрофон пропал (звонок? другое приложение?) — поднимаю…', mikNet: 'Микрофон не вернулся: проверь, не занят ли он звонком, и обнови страницу.',
     mikZanyat: 'Микрофон занят (звонок?) — вернётся сам, когда освободится.',
+    izFona: 'Пока Safari был свёрнут, iPhone выключал камеру и звук — тебя не было слышно. Вернула всё. Не сворачивай во время эфира.',
     kamPropala: 'Камера пропала — поднимаю…', kamNet2: 'Камера не вернулась: не занята ли она другим приложением? Голос в эфире идёт.',
     naushnikiSmena: '🎧 Наушники отключились — включила «🔇 Только голоса», чтобы эфир не услышал эхо твоего динамика.',
     tolkoZvuk: 'Камера недоступна — входишь только со звуком.',
@@ -77,6 +78,7 @@
     kamVyklK: '📷 off', kamVklK: '📷 on',
     mikPropal: 'Microphone lost (a call? another app?) — restoring…', mikNet: 'The microphone did not come back: is a call using it? Reload the page.',
     mikZanyat: 'Microphone busy (a call?) — it comes back by itself.',
+    izFona: 'While Safari was in the background, the iPhone paused your camera and sound — nobody heard you. Restored. Keep the page open during the stream.',
     kamPropala: 'Camera lost — restoring…', kamNet2: 'The camera did not come back: is another app using it? Your voice is still on stream.',
     naushnikiSmena: '🎧 Headphones unplugged — “🔇 Voices only” is on so the stream won’t hear your speaker as an echo.',
     tolkoZvuk: 'Camera unavailable — joining with audio only.',
@@ -284,6 +286,26 @@
       if (popytki[kind] < 3) podnyat(kind);
       else { zametka(kind === 'audio' ? T.mikNet : T.kamNet2); if (kind === 'video') { S.kamera = false; pokazatSebya(); otpravitSam(); } }
     }
+  }
+
+  // 2.7.7 (эфир 25.10: Максим свернул Safari — после возврата звук был, а камеры нет, «M» вместо картинки, помогло
+  // только открыть ссылку заново). На возврате проверяем дорожки сами: умерла или онемела — поднимаем заново,
+  // кодировщик камеры — с ключевого кадра, картинку эфира — просим ключевой; шлему — что камера снова есть.
+  function izFona() {
+    if (document.hidden || !S.stream || S.ushel || !S.vnutri) return;
+    const dolgo = S.skrytoMs && Date.now() - S.skrytoMs > 1500;
+    const at = S.stream.getAudioTracks()[0];
+    let chinim = false;
+    if (!at || at.readyState === 'ended' || at.muted) { chinim = true; podnyat('audio'); }
+    const vt = S.stream.getVideoTracks()[0];
+    if (S.kamera && !S.kameraZapret && (!vt || vt.readyState === 'ended' || vt.muted)) { chinim = true; podnyat('video'); }
+    if (S.venc && S.venc.state === 'closed') S.venc = null;
+    S.nuzhenKlyuch = true;
+    if (S.kodek) prositKlyuch();
+    pokazatSebya();
+    otpravitSam();
+    if (dolgo && /iPhone|iPad|iPod/.test(navigator.userAgent || '')) zametka(T.izFona);
+    else if (!chinim) sostoyanie();
   }
 
   async function mediaVkl() {
@@ -881,11 +903,17 @@
     // Уроки студии: iOS усыпляет звук и роняет Wake Lock в фоне, а сокет может умереть молча — на возврате
     // будим всё; был в фоне дольше 8 с — пинг, и если сервер не ответил за 2,5 с — переподключаемся сами.
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { S.skrytoMs = Date.now(); govorit(false); return; }
+      if (document.hidden) {
+        S.skrytoMs = Date.now(); govorit(false);
+        // 2.7.7 (эфир 25.10): в фоне iPhone останавливает камеру и звук — плитка не должна делать вид, что гость тут
+        if (S.vnutri) otpravitSam({ kamera: false });
+        return;
+      }
       budit();
       if (S.ctx && S.ctx.state === 'suspended') S.ctx.resume();
       if (!S.vnutri) return;
       S.lock = null; budilnik();
+      setTimeout(izFona, 700);
       const ws = S.ws;
       if (ws && ws.readyState === 1 && S.skrytoMs && Date.now() - S.skrytoMs > 8000) {
         const t0 = Date.now();

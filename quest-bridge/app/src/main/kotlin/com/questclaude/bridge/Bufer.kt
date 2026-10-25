@@ -18,7 +18,11 @@ class Bufer(
     tsel0Ms: Int = 60,
     private val minTselMs: Int = 40,
     private val maksTselMs: Int = 250,
+    /** Запас больше цели на столько — догоняем сразу, выбросив лишнее (2.7.7: гостям — 120 мс, было 300 у всех). */
+    private val dogonMs: Int = 300,
 ) {
+    private val tsel0 = vhod * tsel0Ms / 1000
+    private var pustoS = 0L                                   // отсчётов выхода подряд без звука (буфер пуст)
     private val a = ShortArray(cap)
     private var r = 0
     private var w = 0
@@ -54,15 +58,22 @@ class Bufer(
      * (буфер набирает запас или пуст).
      */
     @Synchronized fun vzyat(out: ShortArray, off: Int = 0, n: Int = out.size - off): Boolean {
-        if (size > tsel + ms(300)) {                          // сильно отстали — догоняем сразу
+        if (size > tsel + ms(dogonMs)) {                          // сильно отстали — догоняем сразу
             val drop = size - tsel
             r = (r + drop) % cap
             size -= drop
             sbrosy++
         }
         if (!igraet) {
-            if (size < maxOf(2, tsel)) { java.util.Arrays.fill(out, off, off + n, 0); return false }
+            if (size < maxOf(2, tsel)) {
+                // 2.7.7: долго пусто (гость свернул Safari, сеть стояла) — это не дрожание сети: запас — снова
+                // начальный, иначе после каждого перерыва задержка только росла (эфир 25.10: 142 → 504 мс)
+                pustoS += n
+                if (pustoS > vyhod && tsel > tsel0) tsel = tsel0
+                java.util.Arrays.fill(out, off, off + n, 0); return false
+            }
             igraet = true
+            pustoS = 0
         }
         val shag = if (size > tsel + ms(60)) shag0 * 1.02 else shag0
         var j = 0

@@ -47,6 +47,8 @@ class Efir(
             const val KBPS = 6000
             /** Поток: до 12 Мбит/с (Александр 22.10: «9–12 мегабит»; Twitch советует до 6–8 — выше на свой риск). */
             const val KBPS_MAKS = 12000
+            /** Ниже этого сама сеть поток не опускает (2.7.7): 1080p ещё смотрится. */
+            const val KBPS_SET_MIN = 2500
             /** Тесно шлему — эфир сам на столько кадров. */
             const val FPS_TESNO = 30
 
@@ -83,6 +85,11 @@ class Efir(
         private set
     @Volatile private var spokojnoS = 0L
     @Volatile private var tesnoS = 0L
+    /** Поток сейчас (2.7.7): сеть не тянет — кодировщик сам ниже celKbps, спокойно — обратно. */
+    @Volatile var kbpsSeychas = o.kbps
+        private set
+    @Volatile private var setSpokojnoS = 0L
+    @Volatile private var snizilMs = 0L
 
     private var venc: MediaCodec? = null
     private var vsurf: Surface? = null
@@ -141,7 +148,33 @@ class Efir(
         Opts.fps(fps)?.let { celFps = it; if (tesnoS == 0L) postavitFps(it) }
         Opts.kbps(kbps)?.let { k ->
             celKbps = k
-            try { venc?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, k * 1000) }) } catch (e: Exception) { }
+            postavitKbps(k)
+        }
+    }
+
+    private fun postavitKbps(k: Int) {
+        kbpsSeychas = k
+        try { venc?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, k * 1000) }) } catch (e: Exception) { }
+    }
+
+    /**
+     * Сеть (2.7.7, эфир 25.10 через раздачу айфона: Twitch терял по ~400 кадров разом — очередь отправки
+     * переполнялась и сбрасывалась). Новые потери или очередь больше половины — поток на четверть ниже (не чаще
+     * раза в 5 с, не ниже KBPS_SET_MIN); спокойно 30 с — на 15 % выше, пока не вернётся к выбранному.
+     */
+    private fun podstroitPotok(now: Long, tesno: Boolean) {
+        if (tesno) {
+            setSpokojnoS = 0
+            if (now - snizilMs >= 5_000 && kbpsSeychas > Opts.KBPS_SET_MIN) {
+                snizilMs = now
+                postavitKbps(maxOf(Opts.KBPS_SET_MIN, kbpsSeychas * 3 / 4))
+            }
+        } else if (kbpsSeychas < celKbps) {
+            if (setSpokojnoS == 0L) setSpokojnoS = now
+            if (now - setSpokojnoS >= 30_000) {
+                setSpokojnoS = now
+                postavitKbps(minOf(celKbps, kbpsSeychas * 115 / 100))
+            }
         }
     }
 
@@ -157,10 +190,14 @@ class Efir(
      */
     private fun avtoCikl() {
         var podryad = 0
+        var dropsBylo = -1L
         while (running) {
             try { Thread.sleep(1000) } catch (e: InterruptedException) { break }
             val now = System.currentTimeMillis()
             otpravka.tik(now)                                // скорость и теснота сети по площадкам
+            val poteri = otpravka.drops
+            podstroitPotok(now, (dropsBylo >= 0 && poteri > dropsBylo) || otpravka.ocheredPolna)
+            dropsBylo = poteri
             val d = Hub.dispetcher
             if (d.igre) {
                 podryad++
@@ -206,7 +243,7 @@ class Efir(
         val sek = if (s == "efir") (now - otpravka.efirS) / 1000 else 0
         return "{\"state\":\"$s\",\"sec\":$sek,\"kbps\":$kbps,\"kadrov\":$kadrov,\"drops\":${otpravka.drops}," +
             "\"podklyucheniy\":${otpravka.podklyucheniy},\"zvuk\":${FrameServer.json(zvuk)}," +
-            "\"razmer\":\"${o.w}x${o.h}@$fpsSeychas\",\"tsel_kbps\":$celKbps,\"mic\":$mikrofon," +
+            "\"razmer\":\"${o.w}x${o.h}@$fpsSeychas\",\"tsel_kbps\":$celKbps,\"kbps_seychas\":$kbpsSeychas,\"mic\":$mikrofon," +
             "\"fps\":$fpsSeychas,\"fps_vybor\":$celFps,\"avto30\":${tesnoS != 0L}," +
             "\"mic_propuski\":${mic.propuski},\"mic_sbrosy\":${mic.sbrosy}," +
             // 2.3.9: игра или эфир — кадры экрана (то, что видит игрок), загрузки плашек, глаза Плюса

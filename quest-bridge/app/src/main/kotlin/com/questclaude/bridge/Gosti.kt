@@ -33,7 +33,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
 
     init {
         chitat(NASTROYKA)?.trim()?.split(' ')?.let { p ->
-            p.getOrNull(0)?.toFloatOrNull()?.let { mikser.gromkostShlem = it.coerceIn(0f, 1.5f) }
+            p.getOrNull(0)?.toFloatOrNull()?.let { mikser.gromkostShlem = it.coerceIn(0f, 3f) }
             p.getOrNull(1)?.toFloatOrNull()?.let { mikser.gromkostEfir = it.coerceIn(0f, 2f) }
             p.getOrNull(2)?.toFloatOrNull()?.let { mikser.eho = it.coerceIn(0f, 1f) }
             p.getOrNull(3)?.toFloatOrNull()?.let { mikser.ehoDb = it.coerceIn(0f, 30f) }
@@ -234,7 +234,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
     }
 
     override fun nastroyka(q: Map<String, String>): String {
-        q["shlem"]?.toFloatOrNull()?.let { mikser.gromkostShlem = it.coerceIn(0f, 1.5f) }
+        q["shlem"]?.toFloatOrNull()?.let { mikser.gromkostShlem = it.coerceIn(0f, 3f) }
         q["efir"]?.toFloatOrNull()?.let { mikser.gromkostEfir = it.coerceIn(0f, 2f) }
         q["eho"]?.toFloatOrNull()?.let { mikser.eho = it.coerceIn(0f, 1f) }
         q["eho_db"]?.toFloatOrNull()?.let { mikser.ehoDb = it.coerceIn(0f, 30f) }

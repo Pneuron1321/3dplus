@@ -240,4 +240,22 @@ class MikserTest {
         for (i in 100 until 200) { val p = t.paket(); m.prinyat(a, i, p, 0, p.size); m.tik(shlem, 10_000L + i * 20) }
         assertTrue(m.gostZvuchit(10_000L + 200 * 20))
     }
+
+    /** 2.7.7: тихий гость (−40 дБ) в шлеме выравнивается к речи, громкий — не усиливается. */
+    @Test fun tihiyGostGromche() {
+        val (a, _) = gost("Тихий")
+        val t = Ton(440.0, amp = 400.0)                             // ≈ −41 дБ RMS
+        val shlem = ShortArray(960)
+        var pik = 0
+        for (i in 0 until 200) {
+            val p = t.paket(); m.prinyat(a, i, p, 0, p.size); m.tik(shlem, 20_000L + i * 20)
+            if (i > 150) pik = maxOf(pik, shlem.maxOf { kotlin.math.abs(it.toInt()) })
+        }
+        assertTrue("усилили: пик $pik", pik > 400 * 0.8 * 4)
+        assertTrue(m.status().contains("\"usil\":"))
+        val (b, _) = gost("Громкий")
+        val tb = Ton(1000.0, amp = 12000.0)
+        for (i in 0 until 100) { val p = tb.paket(); m.prinyat(b, i, p, 0, p.size); m.tik(shlem, 30_000L + i * 20) }
+        assertTrue(m.status().contains("\"id\":${b.id},") && Regex("\"id\":${b.id},[^}]*\"usil\":1\\.0").containsMatchIn(m.status()))
+    }
 }

@@ -68,4 +68,27 @@ class BuferTest {
         assertTrue("почти все такты со звуком: $vzyato", vzyato > 480)
         assertEquals(1000, out[100].toInt())
     }
+
+    /** 2.7.7: долгий перерыв (гость свернул Safari) — запас возвращается к начальному, а не копится от раза к разу. */
+    @Test fun dolgoPustoZapasSnova() {
+        val b = Bufer(48000, 48000, tsel0Ms = 60, maksTselMs = 200, dogonMs = 120)
+        val out = ShortArray(960)
+        repeat(5) {                                               // пять обрывов посреди звука — цель растёт
+            b.dobavit(ShortArray(4800) { 1 })
+            repeat(6) { b.vzyat(out) }
+        }
+        assertTrue(b.tselMs > 60)
+        repeat(60) { b.vzyat(out) }                               // 1,2 с тишины
+        assertEquals(60, b.tselMs)
+    }
+
+    /** Запас сверх цели больше dogonMs — догоняем сразу. */
+    @Test fun dogonGostya() {
+        val b = Bufer(48000, 48000, tsel0Ms = 60, dogonMs = 120)
+        val out = ShortArray(960)
+        b.dobavit(ShortArray(48000 / 1000 * 250))                 // 250 мс > 60 + 120
+        b.vzyat(out)
+        assertTrue(b.estMs <= 60)
+        assertEquals(1, b.sbrosy)
+    }
 }
