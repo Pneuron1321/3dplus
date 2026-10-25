@@ -291,7 +291,7 @@ def start():
         with open(LOG, 'a') as zh:
             subprocess.Popen([sys.executable, '-S', os.path.abspath(__file__), 'tunnel'], stdin=subprocess.DEVNULL,
                              stdout=zh, stderr=subprocess.STDOUT, start_new_session=True)
-    konec = time.time() + 30 * SEK
+    konec = time.time() + 60 * SEK
     while time.time() < konec:
         s = most_ili('/gosti') or {}
         if (s.get('komnata') or {}).get('tunnel'):
@@ -303,7 +303,8 @@ def start():
         o = json.load(open(SOST)).get('oshibka')
     except (OSError, ValueError):
         o = ''
-    print('Комната открыта, а туннель ещё не готов%s. Проверь через минуту: gosti.' % (' (%s)' % o if o else ''))
+    print('Комната открыта, а туннель ещё не готов%s. Не перезапускай: подожди минуту и проверь одним `gosti`.' % (
+        ' (%s)' % o if o else ''))
     return 1
 
 
