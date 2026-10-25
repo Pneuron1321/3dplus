@@ -74,7 +74,7 @@ import kotlin.concurrent.thread
  *   GET /gosti/start, /gosti/stop -> открыть / закрыть комнату (сервер 127.0.0.1:8771 для туннеля)
  *   GET /gosti/upr?chto=vpustit|otklonit|vygnat|skryt|pokazat|zaglushit|vklyuchit|novaya|vpusk|mest&kto=ИМЯ|id&dop=…
  *   POST /gosti/adres        -> тело — адрес туннеля https://….trycloudflare.com (пусто — нет туннеля); обратно не отдаётся
- *   GET /gosti/ssylki        -> открыть на 2 минуты страницу ссылок для айфона (plus.local:8770/gosti)
+ *   GET /gosti/ssylki        -> открыть на 10 минут страницу ссылок для айфона (plus.local:8770/gosti): {"adres","ip","sek"}
  *   GET /gosti/sobytiya?posle=N&zhdat=S -> кто ждёт, вошёл, вышел (для голоса в ухо), ждать до S с
  *   GET /gosti/nastroyka?shlem=0.8&efir=1&eho=0.25&eho_db=10&kartinka=0|1
  *   GET /titry/rech?zhdat=S  -> следующая фраза для субтитров (WAV 16 кГц; X-Golos, X-Nachalo, X-Tihih, X-Db), 204 — нет

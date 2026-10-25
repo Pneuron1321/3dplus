@@ -23,7 +23,7 @@
     zhdiZag: 'Ждём, пока впустят…', zhdiPod: 'Модератор или Александр сейчас тебя впустят. Не закрывай страницу.',
     slyshno: '🔊 Слышно', igra: '🎮 Игра', lyudi: 'В эфире', pult: 'Пульт', priglasit: 'Пригласить гостя',
     moderSsylka: 'Ссылка модератора', novaya: 'Новая ссылка гостя', snova: 'Войти снова',
-    netKlyucha: 'В ссылке нет ключа. Попроси ссылку ещё раз.',
+    netKlyucha: 'В ссылке нет ключа. Скопируй ссылку целиком (из сообщения, где её прислали) и вставь в Safari или Chrome — или попроси ссылку ещё раз.',
     neumeet: 'Этот браузер не умеет звук для эфира (нужны AudioWorklet и WebAssembly). Открой ссылку в Safari или Chrome.',
     netDostupa: 'Браузер не дал камеру или микрофон. Разреши доступ в настройках сайта и обнови страницу.',
     vBrauzere: 'Здесь нет доступа к камере и микрофону (встроенный браузер приложения). Открой ссылку в Safari (iPhone) или Chrome (Android): ⋯ → «Открыть в браузере».',
@@ -68,7 +68,7 @@
     zhdiZag: 'Waiting to be admitted…', zhdiPod: 'The moderator or Alexander will let you in. Keep this page open.',
     slyshno: '🔊 Volume', igra: '🎮 Game', lyudi: 'On stream', pult: 'Control', priglasit: 'Invite a guest',
     moderSsylka: 'Moderator link', novaya: 'New guest link', snova: 'Join again',
-    netKlyucha: 'The link has no key. Ask for the link again.',
+    netKlyucha: 'The link has no key. Copy the whole link from the message it came in and paste it into Safari or Chrome — or ask for the link again.',
     neumeet: 'This browser cannot do stream audio (needs AudioWorklet and WebAssembly). Open the link in Safari or Chrome.',
     netDostupa: 'The browser blocked camera or microphone. Allow access in site settings and reload.',
     vBrauzere: 'No camera or microphone here (an app\'s built-in browser). Open the link in Safari (iPhone) or Chrome (Android): ⋯ → “Open in browser”.',
@@ -101,12 +101,22 @@
   const pokaz = (id, da) => { $(id).hidden = !da; };
 
   // ---------- ключ ----------
+  // 2.7.6 (25.10): ссылку открыли в Инстаграме, потом «Открыть в Safari» — Safari получал адрес уже без ключа
+  // (мы стирали его из адресной строки) и писал «нет ключа». Во встроенных браузерах ключ теперь остаётся в адресе;
+  // ключ можно передать и как ?k= (некоторые мессенджеры теряют часть после #).
+  const VSTROENNYY = /Instagram|FBAN|FBAV|FB_IAB|FBIOS|Line\/|MicroMessenger|Snapchat|musical_ly|BytedanceWebview|TikTok/i
+    .test(navigator.userAgent || '');
   const hash = new URLSearchParams(location.hash.slice(1));
-  let klyuch = hash.get('k') || sessionStorage.getItem('plus-k') || '';
-  const rolPodskazka = hash.get('r') || sessionStorage.getItem('plus-r') || '';
+  const poisk = new URLSearchParams(location.search);
+  let klyuch = hash.get('k') || poisk.get('k') || sessionStorage.getItem('plus-k') || '';
+  const rolPodskazka = hash.get('r') || poisk.get('r') || sessionStorage.getItem('plus-r') || '';
   if (klyuch) { sessionStorage.setItem('plus-k', klyuch); sessionStorage.setItem('plus-r', rolPodskazka); }
   const proba = /[?&]proba\b/.test(location.search);                   // проверка на столе: состояние наружу
-  if (location.hash) history.replaceState(null, '', location.pathname + location.search);   // ключ — не в адресной строке
+  if (!VSTROENNYY && (location.hash || poisk.has('k'))) {               // ключ — не в адресной строке
+    poisk.delete('k'); poisk.delete('r');
+    const q = poisk.toString();
+    history.replaceState(null, '', location.pathname + (q ? '?' + q : ''));
+  }
 
   const S = {
     ws: null, rol: '', sost: '', id: 0, zheton: sessionStorage.getItem('plus-z') || '', vnutri: false,
@@ -909,7 +919,7 @@
   if (!klyuch) { oshibkaVhoda(T.netKlyucha); $('knRazreshit').disabled = true; return; }
   if (!umeet.zvuk) { oshibkaVhoda(T.neumeet); $('knRazreshit').disabled = true; return; }
   // встроенный браузер приложения (Instagram, Facebook…) часто без камеры и микрофона — сразу сказать, куда открыть
-  if (rolPodskazka !== 'h' && !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+  if (rolPodskazka !== 'h' && (VSTROENNYY || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia))) {
     oshibkaVhoda(T.vBrauzere); $('knRazreshit').disabled = true; return;
   }
   if (rolPodskazka === 'h') {                                             // пульт Александра: без камеры и микрофона

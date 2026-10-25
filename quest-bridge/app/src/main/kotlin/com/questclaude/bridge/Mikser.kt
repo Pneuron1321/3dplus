@@ -62,6 +62,7 @@ class Mikser(
     private var shlemHistI = 0
     private var micUsil = 1f                               // заслонка: 1 — открыта
     private var zvuchaliMs = 0L
+    private var aleksandrMs = -ALEKSANDR_MS                // когда Александр последний раз говорил громче эха гостей
 
     /** Громкость гостей в шлеме (0–1,5) и в эфире (0–2). */
     @Volatile var gromkostShlem = 0.8f
@@ -106,7 +107,7 @@ class Mikser(
 
     /**
      * Такт 20 мс: в [shlem] — что играть в шлеме (KADR отсчётов); каждому участнику — его смесь.
-     * true — в шлеме звучит гость (для уха: голос гостя не должен будить Плюса).
+     * true — в шлеме говорит гость, а Александр молчит (для уха: голос гостя не должен будить Плюса).
      */
     fun tik(shlem: ShortArray, nowMs: Long = System.currentTimeMillis()): Boolean {
         taktov++
@@ -142,11 +143,16 @@ class Mikser(
             pik = maxOf(pik, kotlin.math.abs(v))
             shlem[i] = myagko(v)
         }
-        if (zvuchat.isNotEmpty()) zvuchaliMs = nowMs
         // заслонка эха: громкость гостей в шлеме за 300 мс против микрофона сейчас
         shlemHist[shlemHistI] = rms(shlemF) * g; shlemHistI = (shlemHistI + 1) % shlemHist.size
         shlemOgib = shlemHist.max()
         val micR = if (estMic) rms(micKadr) else 0f
+        // 2.7.6 (Санёк 25.10: «пока у гостя включён микрофон, Плюс не слышит „плюс плюс“»): раньше «гость
+        // звучит» было при любом пакете — включённый микрофон шлёт тишину и шум без конца, и уши молчали всё
+        // время. Теперь — только когда гость правда говорит, его слышно в шлеме, а микрофон Александра — лишь
+        // эхо. Александр говорит поверх гостей — его «плюс плюс» проходит.
+        if (micR >= MIC_GOLOS && micR >= maxOf(eho, ECHO_DOLYA) * shlemOgib) aleksandrMs = nowMs
+        if (slyshno.any { it.govorit } && shlemOgib > POROG_EHO) zvuchaliMs = nowMs
         val zakryt = eho > 0f && shlemOgib > POROG_EHO && micR < eho * shlemOgib
         val cel = if (zakryt) Math.pow(10.0, -ehoDb / 20.0).toFloat() else 1f
         micUsil = if (cel < micUsil) maxOf(cel, micUsil * 0.5f) else minOf(cel, micUsil + 0.08f)
@@ -163,7 +169,7 @@ class Mikser(
             if (n > 0) u.svyaz.dvoichnoe(GostiServer.kadrZvuka(k.seqVyhod, k.vyhod, 0, n), 'a', false)
             k.seqVyhod = (k.seqVyhod + 1) and 0xffff
         }
-        return nowMs - zvuchaliMs < ZVUCHALI_MS
+        return gostZvuchit(nowMs)
     }
 
     /** Гости в звук эфира: стерео [out] (L,R…), [frames] кадров 48 кГц — поток эфира. */
@@ -183,7 +189,8 @@ class Mikser(
     private val izEfira = ShortArray(4096)
 
     /** Звучал ли гость в шлеме за последние ZVUCHALI_MS (уши не будят Плюса его голосом). */
-    fun gostZvuchit(nowMs: Long = System.currentTimeMillis()) = nowMs - zvuchaliMs < ZVUCHALI_MS
+    fun gostZvuchit(nowMs: Long = System.currentTimeMillis()) =
+        nowMs - zvuchaliMs < ZVUCHALI_MS && nowMs - aleksandrMs >= ALEKSANDR_MS
 
     fun status(): String {
         val ks = kanaly.values.joinToString(",") { k ->
@@ -219,6 +226,12 @@ class Mikser(
         const val GOVORIT_DB = -42f
         const val GOVORIT_DERZHAT_MS = 600L
         const val ZVUCHALI_MS = 1200L
+        /** Александр говорил громче эха гостей за столько мс — уши его слушают, даже если гость тоже говорит. */
+        const val ALEKSANDR_MS = 1500L
+        /** Микрофон ушей громче этого (RMS, ≈ −38 дБ) — голос, а не шум комнаты. */
+        const val MIC_GOLOS = 400f
+        /** Микрофон громче этой доли звука гостей в шлеме — это сам Александр, а не эхо (как у заслонки). */
+        const val ECHO_DOLYA = 0.25f
         /** Ниже — гостей в шлеме не слышно, заслонке нечего делать (≈ −50 дБ). */
         const val POROG_EHO = 100f
 

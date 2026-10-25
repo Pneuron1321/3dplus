@@ -6,7 +6,7 @@
   gosti                   — кто в комнате, места, туннель, звук (ссылок и адреса тут нет никогда)
   gosti start             — открыть комнату и поднять туннель (≈5–10 с)
   gosti stop              — закрыть: всех прочь, туннель вниз, ссылки больше не работают
-  gosti ssylki            — страница ссылок на айфоне Александра: plus.local:8770/gosti (2 минуты, Wi-Fi)
+  gosti ssylki            — страница ссылок на айфоне Александра: plus.local:8770/gosti или по IP (10 минут, Wi-Fi)
   gosti vpustit [ИМЯ]     — впустить ждущего (без имени — того, кто ждёт дольше)
   gosti otklonit ИМЯ      — не впускать
   gosti vygnat ИМЯ        — выгнать (снова — только через ожидание)
@@ -202,6 +202,19 @@ class Tunnel:
             time.sleep(1 * SEK)
         self.zapis(True)
 
+    def storozh(self):
+        """2.7.6: мост перезапустился (упал, перезахват) — новая комната не знает адреса туннеля, и `gosti start`
+        вечно писал «туннель ещё не готов». Раз в 5 с: комната открыта, а адреса в ней нет — отдать снова."""
+        while not self.stop:
+            time.sleep(5 * SEK)
+            if not self.adres or self.stop:
+                continue
+            r = most_ili('/gosti')
+            if r and r.get('idyot') and not (r.get('komnata') or {}).get('tunnel'):
+                if self.otdat(self.adres):
+                    log('туннель: мост перезапускался — адрес отдан снова')
+                    self.zapis(True)
+
     def otdat(self, adres):
         r = most_ili('/gosti/adres', (adres or '').encode())
         return bool(r and r.get('ok'))
@@ -246,6 +259,7 @@ def tunnel_demon():
     t = Tunnel()
     signal.signal(signal.SIGTERM, lambda *a: (t.konec(), os._exit(0)))
     threading.Thread(target=sobytiya, daemon=True).start()
+    threading.Thread(target=t.storozh, daemon=True).start()
     try:
         return t.zhit()
     finally:
@@ -281,7 +295,8 @@ def start():
     while time.time() < konec:
         s = most_ili('/gosti') or {}
         if (s.get('komnata') or {}).get('tunnel'):
-            print('Гости: комната открыта, туннель готов. Ссылки — на айфоне: gosti ssylki (plus.local:8770/gosti).')
+            print('Гости: комната открыта, туннель готов. Ссылки — на айфоне: gosti ssylki (plus.local:8770/gosti). '
+                  'Эфир для гостей не нужен: говорить с ними можно и до эфира.')
             return 0
         time.sleep(0.5 * SEK)
     try:
@@ -409,7 +424,9 @@ def main(a):
             print(BEZ_EFIRA); return 1
         if r.get('oshibka'):
             print('Страница не открылась: %s' % r['oshibka']); return 1
-        print('На айфоне в Safari: plus.local:8770/gosti (страница открыта 2 минуты, айфон — в той же Wi-Fi).')
+        ip = (r.get('ip') or '').replace('http://', '')
+        print('На айфоне в Safari: plus.local:8770/gosti (страница открыта 10 минут, айфон — в той же Wi-Fi%s).' % (
+            '; не открылось — по адресу %s, на раздаче айфона имя plus.local не работает' % ip if ip else ''))
         return 0
     if c in ('vpustit', 'otklonit', 'vygnat', 'skryt', 'pokazat'):
         if c != 'vpustit' and not imya:

@@ -34,9 +34,10 @@ class KameraStranica(
     /** Секунд до закрытия (0 — закрыта). */
     val ostalos: Int get() = if (otkryta) ((doMs - System.currentTimeMillis()) / 1000).toInt() else 0
 
-    /** Открыть (или продлить) на sek секунд. */
+    /** Открыть (или продлить — не укоротить) на sek секунд. */
     @Synchronized fun otkryt(sek: Int = SEK) {
-        doMs = System.currentTimeMillis() + sek * 1000L
+        val do0 = System.currentTimeMillis() + sek * 1000L
+        doMs = if (server != null) maxOf(doMs, do0) else do0      // камера (2 мин) не укорачивает гостей (10 мин)
         if (server != null) return
         val s = ServerSocket()
         s.reuseAddress = true
@@ -45,7 +46,7 @@ class KameraStranica(
         try { pri(true) } catch (e: Exception) { }
         priyom = thread(name = "kamera-stranica", isDaemon = true) {
             while (!s.isClosed) {
-                val c = try { s.accept() } catch (e: IOException) { break }
+                val c = try { s.accept() } catch (e: IOException) { if (s.isClosed) break else continue }
                 thread(isDaemon = true) { otvet(c) }
             }
         }
@@ -69,8 +70,13 @@ class KameraStranica(
         }
     }
 
+    /**
+     * 2.7.6: айфон открыл страницу и замолчал (Safari, Instagram) — readLine ждал 5 с и бросал
+     * SocketTimeoutException мимо всех catch: поток падал и забирал с собой весь мост (25.10, дважды).
+     * Любая ошибка одного запроса — только этому запросу.
+     */
     private fun otvet(c: Socket) {
-        c.use { otvetIn(it) }
+        try { c.use { otvetIn(it) } } catch (e: Exception) { }
     }
 
     private fun otvetIn(c: Socket) {
@@ -97,6 +103,8 @@ class KameraStranica(
     companion object {
         const val PORT = 8770
         const val SEK = 120
+        /** Страница ссылок гостей — 10 минут (2.7.6, Санёк 25.10: за 2 минуты не успевал скопировать ссылки). */
+        const val SEK_GOSTI = 600
 
         /**
          * Ссылка Larix Grove: подключение «Quest» (перезаписать прежнее с тем же именем), только видео,
@@ -130,7 +138,7 @@ class KameraStranica(
 
         /**
          * Ссылки гостей эфира для айфона Александра (2.5.0): пульт (его), модератор, гость — «Поделиться»
-         * (Telegram и т. п.) и «Скопировать». Ссылки — с ключами: только здесь, по домашней Wi-Fi, 2 минуты.
+         * (Telegram и т. п.) и «Скопировать». Ссылки — с ключами: только здесь, по Wi-Fi шлема, 10 минут.
          */
         fun gostiHtml(hozyain: String?, moder: String?, gost: String?, vnutri: Int): String {
             if (hozyain == null || moder == null || gost == null) return """<!doctype html>
@@ -159,7 +167,10 @@ ${karta("m", "Модератор", "Входит сразу, впускает г
 ${karta("g", "Гость", "Ждёт, пока впустят (модератор или ты: «плюс, впусти гостя»).", gost, "#ff8cc8")}
 ${karta("h", "Мой пульт", "Тебе: кто в комнате, впустить, убрать с экрана, выгнать. Открой в Safari.", hozyain, "#82c8ff")}
 <p><small>Ссылки живут, пока открыта комната (gosti start … gosti stop); следующий раз — новые.
-Ссылка гостя утекла — Плюсу «новая ссылка гостя». Страница закроется через 2 минуты.</small></p>
+Ссылка гостя утекла — Плюсу «новая ссылка гостя». Страница закроется через 10 минут.</small></p>
+<p><small><b>Модератор здесь</b> — тот, кто в эфире впускает гостей (ссылка выше). <b>Модератор в Twitch</b> — другое:
+это <code>/mod ник</code> в чате Twitch, он чистит чат. Можно дать одному человеку и то и другое.</small></p>
+<p><small>Ссылку открывай в Safari или Chrome: во встроенном браузере Инстаграма и Телеграма камера и микрофон не работают.</small></p>
 <script>
 function kop(id){var t=document.getElementById(id);t.focus();t.select();t.setSelectionRange(0,99999);
 try{navigator.clipboard.writeText(t.value)}catch(e){try{document.execCommand('copy')}catch(e2){}}}

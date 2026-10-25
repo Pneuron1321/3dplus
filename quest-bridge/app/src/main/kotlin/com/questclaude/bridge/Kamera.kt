@@ -259,10 +259,10 @@ class Kamera(
             "\"sek\":${aifon.ostalos}}"
     }
 
-    /** Открыть страницу айфона ради ссылок гостей: ответ — адрес /gosti (без ключей). */
+    /** Открыть страницу айфона ради ссылок гостей (на 10 минут): ответ — адрес /gosti и он же по IP (без ключей). */
     fun stranicaGosti(): String {
         val ip = ip() ?: return "{\"oshibka\":\"шлем не в Wi-Fi\"}"
-        try { aifon.otkryt() } catch (e: Exception) {
+        try { aifon.otkryt(KameraStranica.SEK_GOSTI) } catch (e: Exception) {
             return "{\"oshibka\":${FrameServer.json("страница не открылась: ${e.message}")}}"
         }
         return "{\"adres\":\"http://${MdnsImya.IMYA}:${KameraStranica.PORT}/gosti\",\"ip\":\"http://$ip:${KameraStranica.PORT}/gosti\"," +

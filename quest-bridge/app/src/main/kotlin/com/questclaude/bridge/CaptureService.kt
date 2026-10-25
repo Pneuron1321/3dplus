@@ -201,6 +201,8 @@ class CaptureService : Service() {
             g.fayl = { imya -> gostiFayly[imya] ?: try { assets.open("gosti/$imya").use { it.readBytes() }.also { gostiFayly[imya] = it } } catch (e: Exception) { null } }
             kamera?.gostiStranica = { g.stranicaHtml() }
             Hub.gosti = g
+            // 2.7.6: комната была открыта до перезапуска моста — открыть снова (туннель gosti отдаст адрес сам)
+            if (g.bylaOtkryta) try { g.start() } catch (e: Exception) { }
         }
         Hub.micTapy += rechYa
         nalet = Nalet({ try { File(filesDir, NALET).readText().trim().toLong() } catch (e: Exception) { 0L } },
@@ -510,6 +512,7 @@ class CaptureService : Service() {
         efir = e
         kamera?.podklyuchit(rz)
         Struny.podklyuchit(rz)
+        gosti?.tesno = { efir?.tesnoSet == true || Hub.dispetcher.igre }
         gosti?.podklyuchit(rz)
         Hub.rechi.efir = true
         val k = kompas ?: Kompas(this).also { kompas = it }
@@ -680,7 +683,7 @@ class CaptureService : Service() {
         Hub.micTapy -= rechYa
         Hub.rechi.efir = false
         Hub.gosti = null
-        gosti?.let { it.otklyuchit(); it.stop() }
+        gosti?.let { it.otklyuchit(); it.stop(zabyt = false) }
         gosti = null
         Hub.nalet = null
         Hub.plashki = null

@@ -36,7 +36,10 @@ object Pamyat {
                 e.printStackTrace(java.io.PrintWriter(sw))
                 zapis("ПАДЕНИЕ в потоке «${t.name}»: " + sw.toString().take(3000).replace("\n", " ⏎ "))
             } catch (x: Throwable) { }
-            bylo?.uncaughtException(t, e)
+            // 2.7.6: ошибка в фоновом потоке (страница, сеть, гость) больше не закрывает весь мост — эфир, гости
+            // и уши живут дальше; падает только главный поток или нехватка памяти, как раньше.
+            if (t === android.os.Looper.getMainLooper().thread || e is VirtualMachineError) bylo?.uncaughtException(t, e)
+            else try { zapis("мост жив: упал только поток «${t.name}»") } catch (x: Throwable) { }
         }
         val am = ctx.applicationContext.getSystemService(ActivityManager::class.java)
         thread(name = "pamyat", isDaemon = true) {

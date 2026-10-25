@@ -52,10 +52,18 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
             Hub.mikser = mikser
             Pamyat.zapis("гости: комната открыта")
         }
+        pisat(OTKRYTA, "1")
         return status()
     }
 
-    @Synchronized override fun stop(): String {
+    /** Комната была открыта, когда мост закрылся (упал, перезахват) — открыть снова: гости живут отдельно от эфира. */
+    val bylaOtkryta: Boolean get() = chitat(OTKRYTA)?.trim() == "1"
+
+    override fun stop(): String = stop(zabyt = true)
+
+    /** zabyt = false — закрыть только на время (захват остановлен): со следующим захватом комната откроется сама. */
+    @Synchronized fun stop(zabyt: Boolean): String {
+        if (zabyt) try { File(dir, OTKRYTA).delete() } catch (e: Exception) { }
         Hub.micTapy -= micTap
         if (Hub.mikser === mikser) Hub.mikser = null
         server?.stop()
@@ -132,7 +140,20 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
         if (novye) prevyu?.klyuchevoy()
     }
 
+    /**
+     * Эфиру тесно (сеть теряет кадры Twitch, игре не хватает шлема) — 2.7.6, Санёк 25.10: чёрная картинка в эфире,
+     * пока картинка эфира идёт гостям. Тогда картинка гостям ждёт (звук идёт как шёл), после — с ключевого кадра.
+     */
+    @Volatile var tesno: () -> Boolean = { false }
+    @Volatile private var pauza = false
+    @Volatile var pauz = 0L; private set
+
     private fun razoslat(d: ByteArray, key: Boolean, ms: Long) {
+        if (tesno()) { if (!pauza) { pauza = true; pauz++ }; return }
+        if (pauza) {
+            if (!key) { prevyu?.klyuchevoy(); return }
+            pauza = false
+        }
         var kadr: ByteArray? = null
         for (u in komnata.vnutri()) {
             if (u.rol == "hozyain" || !u.prevyu || !u.h264) continue
@@ -172,7 +193,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
         val s = server
         return "{\"idyot\":${s != null},\"efir\":${razvilka != null},\"kartinka\":$kartinka,\"komnata\":${komnata.status()}," +
             "\"zvuk\":${mikser.status()},\"video\":${video.status()},\"prevyu\":{\"idyot\":${prevyu != null}," +
-            "\"kadrov\":${prevyu?.kadrov ?: 0},\"kodek\":${Komnata.js(kodek)}},\"set\":{\"prinyato\":${s?.prinyato?.get() ?: 0}," +
+            "\"kadrov\":${prevyu?.kadrov ?: 0},\"kodek\":${Komnata.js(kodek)},\"pauza\":$pauza,\"pauz\":$pauz},\"set\":{\"prinyato\":${s?.prinyato?.get() ?: 0}," +
             "\"otpravleno\":${s?.otpravleno?.get() ?: 0},\"vybrosheno\":${s?.vybrosheno ?: 0}}," +
             "\"oshibka\":${Komnata.js(oshibka ?: zvuk?.oshibka ?: video.oshibka ?: prevyu?.oshibka)}}"
     }
@@ -200,7 +221,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
         return "{\"ok\":${a == null || komnata.adres != null},\"tunnel\":${komnata.adres != null}}"
     }
 
-    /** Открыть на 2 минуты страницу ссылок для айфона (plus.local:8770/gosti). */
+    /** Открыть на 10 минут страницу ссылок для айфона (plus.local:8770/gosti). */
     override fun ssylki(): String = stranicaAifona() ?: oshibkaJson("страница не открылась")
 
     override fun sobytiya(posle: Long, zhdatMs: Long): String {
@@ -222,7 +243,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
         return status()
     }
 
-    /** Страница ссылок для айфона Александра (по Wi-Fi, 2 минуты): три ссылки — поделиться и скопировать. */
+    /** Страница ссылок для айфона Александра (по Wi-Fi, 10 минут): три ссылки — поделиться и скопировать. */
     fun stranicaHtml(): String = KameraStranica.gostiHtml(komnata.ssylka(klyuchi.hozyain), komnata.ssylka(klyuchi.moder),
         komnata.ssylka(klyuchi.gost), komnata.vse().count { it.vnutri && it.rol != "hozyain" })
 
@@ -239,6 +260,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
         private const val KLYUCHI = "gosti-klyuchi"
         private const val KARTINKA = "gosti-kartinka"
         private const val NASTROYKA = "gosti-nastroyka"
+        private const val OTKRYTA = "gosti-otkryta"
         private val ADRES = Regex("https://[a-z0-9.-]{3,253}")
     }
 }

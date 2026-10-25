@@ -9,7 +9,7 @@ import kotlin.concurrent.thread
 
 /**
  * Картинка эфира гостям (2.5.0): ещё один выход развилки — маленький кодировщик H.264 (Baseline,
- * 640×360, 15 к/с, 600 кбит/с) со всеми слоями эфира. Гость видит то же, что зрители, почти без
+ * 640×360, 2.7.6: 10 к/с, 450 кбит/с — бережём сеть и видеокарту эфира) со всеми слоями эфира. Гость видит то же, что зрители, почти без
  * задержки (без Twitch). Ключевой кадр — раз в 2 с и по просьбе (новый гость, отстал); в ключевом
  * всегда SPS и PPS (Annex B) — браузер (WebCodecs) раскодирует с любого ключевого.
  */
@@ -108,8 +108,8 @@ class Prevyu(
     companion object {
         const val W = 640
         const val H = 360
-        const val FPS = 15
-        const val KBPS = 600
+        const val FPS = 10
+        const val KBPS = 450
 
         /** «avc1.PPCCLL» из SPS (без стартового кода): профиль, ограничения, уровень. */
         fun stroka(sps: ByteArray): String = "avc1.%02X%02X%02X".format(sps[1].toInt() and 0xff, sps[2].toInt() and 0xff, sps[3].toInt() and 0xff)

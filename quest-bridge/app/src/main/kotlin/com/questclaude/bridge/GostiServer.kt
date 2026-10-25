@@ -63,7 +63,7 @@ class GostiServer(
         socket = s
         priyom = thread(name = "gosti-server", isDaemon = true) {
             while (!s.isClosed) {
-                val c = try { s.accept() } catch (e: SocketException) { break }
+                val c = try { s.accept() } catch (e: IOException) { if (s.isClosed) break else continue }
                 if (soedineniy.incrementAndGet() > MAKS_SOEDINENIY) {
                     soedineniy.decrementAndGet()
                     try { c.close() } catch (e: IOException) { }

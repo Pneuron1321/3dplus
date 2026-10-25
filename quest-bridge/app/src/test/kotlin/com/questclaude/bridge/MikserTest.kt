@@ -213,4 +213,31 @@ class MikserTest {
         m.ushel(a)
         assertFalse(m.status().contains("\"id\":${a.id},"))
     }
+
+    /** 2.7.6, Санёк 25.10: микрофон гостя включён, но он молчит — уши Плюса не глохнут. */
+    @Test fun molchashchiyGostNeGlushitUshi() {
+        val (a, _) = gost("Тишина")
+        val t = Ton(440.0, amp = 20.0)                              // шум комнаты гостя, ≈ −64 дБ
+        val shlem = ShortArray(960)
+        for (i in 0 until 100) { val p = t.paket(); m.prinyat(a, i, p, 0, p.size); m.tik(shlem, 10_000L + i * 20) }
+        assertFalse(a.govorit)
+        assertFalse(m.gostZvuchit(10_000L + 100 * 20))
+    }
+
+    /** Гость говорит, а Александр говорит громче эха — его «плюс плюс» уши слушают; замолчал — снова бережёмся. */
+    @Test fun aleksandrPoverhGostyaSlyshen() {
+        val (a, _) = gost("Болтун")
+        val t = Ton(440.0)
+        val shlem = ShortArray(960)
+        for (i in 0 until 50) { val p = t.paket(); m.prinyat(a, i, p, 0, p.size); m.tik(shlem, 10_000L + i * 20) }
+        assertTrue("гость говорит — голосом из динамиков не будим", m.gostZvuchit(10_000L + 50 * 20))
+        for (i in 50 until 100) {
+            val p = t.paket(); m.prinyat(a, i, p, 0, p.size)
+            m.mic(ShortArray(320) { (8000 * sin(2 * PI * 300.0 * (i * 320 + it) / 16000)).toInt().toShort() }, 320)
+            m.tik(shlem, 10_000L + i * 20)
+        }
+        assertFalse("Александр говорит сам — слушаем", m.gostZvuchit(10_000L + 100 * 20))
+        for (i in 100 until 200) { val p = t.paket(); m.prinyat(a, i, p, 0, p.size); m.tik(shlem, 10_000L + i * 20) }
+        assertTrue(m.gostZvuchit(10_000L + 200 * 20))
+    }
 }

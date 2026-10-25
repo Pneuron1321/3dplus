@@ -114,6 +114,8 @@ class Efir(
     @Volatile private var kadrov = 0L
     /** Потерянные кадры эфира всего (по всем площадкам) — диспетчеру «тесно». */
     val drops: Long get() = otpravka.drops
+    /** Сеть не успевает (площадка теряет кадры или очередь полна) — картинка гостям ждёт (2.7.6). */
+    val tesnoSet: Boolean get() = otpravka.tesnoSet
     private var lastSent = 0L
     private var lastT = System.currentTimeMillis()
 
