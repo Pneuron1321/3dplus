@@ -275,17 +275,16 @@ def obnovit_top():
 
 
 def blagodaril_follow(kto, pl):
-    """Уже благодарили этого фоловера (на этой площадке) за последние 12 часов? Если нет — запомнить."""
+    """Сколько раз этот фоловер (на этой площадке) уже подписывался за последние 12 часов (0 — впервые); посчитать этот."""
     klyuch = '%s:%s' % (pl or 'twitch', kto.lower())
     try:
         d = json.load(open(FOLLOW_BYLI))
     except (OSError, ValueError):
         d = {}
     now = time.time()
-    d = {k: t for k, t in d.items() if now - t < 12 * 3600}
-    bylo = klyuch in d
-    if not bylo:
-        d[klyuch] = now
+    d = {k: v for k, v in d.items() if isinstance(v, list) and now - v[0] < 12 * 3600}
+    bylo = d[klyuch][1] if klyuch in d else 0
+    d[klyuch] = [d[klyuch][0] if klyuch in d else now, bylo + 1]
     try:
         json.dump(d, open(FOLLOW_BYLI, 'w'))
     except OSError:
@@ -328,9 +327,17 @@ def obrabotat(d):
         rech = '%s привёл рейд%s — привет всем, добро пожаловать!' % (
             kto, (' на %d зрителей' % d['zriteley']) if d.get('zriteley') else '')
     elif ist == 'follow':                                  # 2.7.8: новый фоловер — плашка в эфире и спасибо голосом
-        # 29.10 (Александр): отписался и подписался снова — плашка и звук снова, а «спасибо» — только раз за вечер
-        if blagodaril_follow(kto, d.get('pl') or ''):
-            zapis['povtor'] = True
+        # 29.10 (Александр): отписался и подписался снова — плашка и звук ещё раз (всего два), «спасибо» — только первый;
+        # с третьего раза — ничего
+        n = blagodaril_follow(kto, d.get('pl') or '')
+        if n >= 2:
+            zapis['povtor'] = n + 1
+            with open(VECHER, 'a') as f:
+                f.write(json.dumps(zapis, ensure_ascii=False) + '\n')
+            log(ist, kto, 'подписался в %d-й раз — без плашки' % (n + 1))
+            return zapis
+        if n == 1:
+            zapis['povtor'] = 2
         else:
             rech = 'Спасибо за фоллоу, %s! Добро пожаловать.' % kto
     vid = {'follow': 'follow', 'sub': 'sub', 'resub': 'sub', 'subgift': 'sub', 'submysterygift': 'sub', 'raid': 'raid'}.get(ist)
