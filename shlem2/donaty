@@ -42,6 +42,7 @@ SE_JWT = os.environ.get('DONATY_SE_JWT', '/root/.se-jwt')
 SE_POSL = os.environ.get('DONATY_SE_POSL', '/root/.donaty-se-posl')
 SE_FOLLOW_POSL = os.environ.get('DONATY_SE_FOLLOW_POSL', '/root/.donaty-se-follow-posl')
 SE_JWT_YT = os.environ.get('DONATY_SE_JWT_YT', '/root/.se-jwt-youtube')
+FOLLOW_BYLI = os.environ.get('DONATY_FOLLOW_BYLI', '/tmp/donaty-follow-byli.json')
 SE_FOLLOW_POSL_YT = os.environ.get('DONATY_SE_FOLLOW_POSL_YT', '/root/.donaty-se-follow-posl-youtube')
 ZVUK_SEK = float(os.environ.get('DONATY_ZVUK_SEK', 3.5))       # звук плашки фоловера в мосте (assets/zvuki/folover.mp3)
 SE_URL = os.environ.get('DONATY_SE_URL', 'https://api.streamelements.com/kappa/v2')
@@ -273,6 +274,25 @@ def obnovit_top():
         return None
 
 
+def blagodaril_follow(kto, pl):
+    """Уже благодарили этого фоловера (на этой площадке) за последние 12 часов? Если нет — запомнить."""
+    klyuch = '%s:%s' % (pl or 'twitch', kto.lower())
+    try:
+        d = json.load(open(FOLLOW_BYLI))
+    except (OSError, ValueError):
+        d = {}
+    now = time.time()
+    d = {k: t for k, t in d.items() if now - t < 12 * 3600}
+    bylo = klyuch in d
+    if not bylo:
+        d[klyuch] = now
+    try:
+        json.dump(d, open(FOLLOW_BYLI, 'w'))
+    except OSError:
+        pass
+    return bylo
+
+
 def obrabotat(d):
     """Один донат или событие: цель, спасибо и ответ (только в эфир), вызов — в очередь соведущего."""
     ist, kto = d.get('istochnik', '?'), re.sub(r'[^\w-]', '', d.get('kto') or '?')[:25] or '?'
@@ -308,13 +328,17 @@ def obrabotat(d):
         rech = '%s привёл рейд%s — привет всем, добро пожаловать!' % (
             kto, (' на %d зрителей' % d['zriteley']) if d.get('zriteley') else '')
     elif ist == 'follow':                                  # 2.7.8: новый фоловер — плашка в эфире и спасибо голосом
-        rech = 'Спасибо за фоллоу, %s! Добро пожаловать.' % kto
+        # 29.10 (Александр): отписался и подписался снова — плашка и звук снова, а «спасибо» — только раз за вечер
+        if blagodaril_follow(kto, d.get('pl') or ''):
+            zapis['povtor'] = True
+        else:
+            rech = 'Спасибо за фоллоу, %s! Добро пожаловать.' % kto
     vid = {'follow': 'follow', 'sub': 'sub', 'resub': 'sub', 'subgift': 'sub', 'submysterygift': 'sub', 'raid': 'raid'}.get(ist)
     if vid and kto != '?':
         try:
             get('/opoveshchenie?vid=%s&kto=%s' % (vid, urllib.parse.quote(kto)))
             zapis['plashka'] = True
-            if ist == 'follow':
+            if ist == 'follow' and rech:
                 time.sleep(ZVUK_SEK)                       # звук фоловера (≈4 с) — договорит, потом «спасибо»
         except Exception:
             pass

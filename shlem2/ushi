@@ -1640,7 +1640,7 @@ def kick_chatroom(kanal):
 
 def kick_sobytie(stroka, uzhe=None):
     """Событие Pusher канала Kick → запись для donaty (фоловер, саб, подарок сабов, рейд/хост) или None.
-    uzhe — кого из фоловеров уже благодарили за эфир (отписался-подписался — второй раз не надо)."""
+    uzhe — не используется (повторных фоловеров различает donaty: звук — каждый раз, «спасибо» — раз)."""
     try:
         e = json.loads(stroka)
     except ValueError:
@@ -1657,11 +1657,7 @@ def kick_sobytie(stroka, uzhe=None):
         kto = d.get('username')
         if not kto or d.get('followed') is False:
             return None
-        if uzhe is not None:
-            if kto.lower() in uzhe:
-                return None
-            uzhe.add(kto.lower())
-        return {'istochnik': 'follow', 'kto': kto, 'pl': 'kick'}
+        return {'istochnik': 'follow', 'kto': kto, 'pl': 'kick'}   # повторный — тоже: звук каждый раз, «спасибо» — donaty раз
     if ev in ('ChannelSubscriptionEvent', 'SubscriptionEvent'):
         kto = d.get('username')
         return {'istochnik': 'sub', 'kto': kto, 'pl': 'kick', 'summa': 0, 'valyuta': '$'} if kto else None

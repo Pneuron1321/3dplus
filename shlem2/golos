@@ -221,6 +221,10 @@ VED_POROG = 38
 VED_TISHINA = 1.0
 VED_ZHDAT = 30.0
 VED_PEREBIT = 2                    # замеров подряд (по 0,15 с) громче порога, пока она говорит, — он перебил
+# 29.10 (Александр: «он разговаривает в то же время, что и я»): Плюс замолкает так же, как соведущая, — Александр
+# громче порога 0,3 с (два замера), даже если говорит не ему. Прерванное не теряется: «плюс плюс» — и Плюс продолжит
+# с прерванной фразы; не позвали за PAUZA_MAKS — не договаривает. Порог — /root/.golos-porog (дБ), нет — как у соведущей.
+GOLOS_POROG_F = os.environ.get('GOLOS_POROG', '/root/.golos-porog')
 
 
 def log(*a):
@@ -765,6 +769,13 @@ def mik_db():
         return None
 
 
+def golos_porog():
+    try:
+        return max(20, min(70, int(open(GOLOS_POROG_F).read().strip())))
+    except (OSError, ValueError):
+        return ved_porog()
+
+
 def ved_porog():
     try:
         return max(20, min(70, int(open(VED_POROG_F).read().strip())))
@@ -859,6 +870,9 @@ class Golos:
         self.ved_zhdu = None       # (uid реплики соведущей, с какого времени ждёт тишины)
         self.mik_ved = []          # микрофон, пока звучит соведущая (сводка в журнал)
         self.mik_podryad = 0       # замеров подряд, где Александр громче порога, пока звучит соведущая
+        self.perebil_plus = 0.0    # 29.10: когда Александр заговорил поверх Плюса (Плюс замолкает до «плюс плюс»)
+        self.perebil_plus_uchten = 0.0
+        self.mik_plus = 0
         self.perebil = 0.0         # когда Александр заговорил поверх соведущей (её обрываем)
         self.perebil_uchten = 0.0
 
@@ -1084,6 +1098,16 @@ class Golos:
                 self.vybrosit(lambda x: x.uid == uid)   # реплику целиком: договаривать её потом — уже не к месту
                 self.zhdu_dosluh = False
                 log('соведущая замолчала: Александр заговорил')
+        if self.perebil_plus > self.perebil_plus_uchten:
+            self.perebil_plus_uchten = self.perebil_plus
+            ig = self.igrok
+            if ig is not None and getattr(getattr(ig, 'kusok', None), 'golos', None) != VOICE_VED:
+                proshlo = time.time() - getattr(ig, 't0', time.time())
+                self.stop_igrok()
+                self.s_prervannoy(ig, proshlo)   # «плюс плюс» — продолжит с прерванной фразы
+                self.vnesh = time.time()         # пауза: ждём «дальше» (фраза услышана) или не договариваем
+                self.zhdu_dosluh = False
+                log('Плюс замолчал: Александр заговорил')
         dl = vremya(DALSHE)
         if dl > self.dl:
             self.dl = dl
@@ -1265,12 +1289,15 @@ class Golos:
         while True:
             ig = self.igrok
             zvuchit_ved = ig is not None and getattr(getattr(ig, 'kusok', None), 'golos', None) == VOICE_VED
+            # через play-audio Termux микрофон слышит эхо Плюса — там не перебиваем (мост на время голоса глушит микрофон)
+            zvuchit_plus = ig is not None and not zvuchit_ved and getattr(ig, 'kusok', None) is not None and \
+                type(ig) is not self.Termux
             if self.mik_ved and not zvuchit_ved:
                 v, self.mik_ved = sorted(self.mik_ved), []
                 log('соведущая звучала: микрофон медиана %d, громче всего %d дБ (%d замеров)' % (
                     v[len(v) // 2], v[0], len(v)))
             with self.cv:
-                nado = any(k.golos == VOICE_VED for k in self.q)
+                nado = any(k.golos == VOICE_VED for k in self.q) or zvuchit_plus
             if not nado:
                 self.mik_ot = None
                 time.sleep(0.2)
@@ -1294,6 +1321,12 @@ class Golos:
                         self.mik_gromko = now
                 else:
                     self.mik_podryad = 0
+                if zvuchit_plus:              # 29.10: Плюс — так же: два замера громче порога — замолкает
+                    self.mik_plus = self.mik_plus + 1 if db <= golos_porog() else 0
+                    if self.mik_plus >= VED_PEREBIT:
+                        self.perebil_plus, self.mik_plus = now, 0
+                else:
+                    self.mik_plus = 0
             time.sleep(shag)
 
     def ved_mozhno(self, k):
@@ -1574,7 +1607,7 @@ if __name__ == '__main__':
         sys.exit(proba(' '.join(a[1:]) or 'Привет, я Плюс. Так я звучу.'))
     if a and a[0] == 'pol':
         if len(a) < 2 or a[1] not in ('m', 'zh', 'moy'):
-            print('golos pol m | zh | moy — голос Плюса: мужской (Эндрю), женский (Ава) или свой (ElevenLabs); сейчас: %s'
+            print('golos pol m | zh | moy — голос Плюса: мужской (Эндрю), женский или свой (ElevenLabs); сейчас: %s'
                   % (pol() or 'm'))
             sys.exit(1)
         with open(POL, 'w') as f:

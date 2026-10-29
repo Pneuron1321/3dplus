@@ -813,7 +813,7 @@ def demon_staryy():
                         and not alexandr_govorit())
             if not svobodno:
                 tishina_s = None
-                zapis(False, 'мост не отвечает' if st is None else 'говорит Ава или Александр')
+                zapis(False, 'мост не отвечает' if st is None else 'говорит Плюс или Александр')
                 time.sleep(0.4)
                 continue
             if tishina_s is None:
