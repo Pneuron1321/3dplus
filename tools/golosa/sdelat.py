@@ -20,23 +20,37 @@ GOLOSA = [
     ('5-giuseppe', 'it-IT-GiuseppeMultilingualNeural'),
     ('6-dmitry-tolko-russkiy', 'ru-RU-DmitryNeural'),
 ]
-ZAPAS = ['ko-KR-HyunsuMultilingualNeural', 'en-US-ChristopherNeural', 'en-GB-RyanNeural', 'en-US-GuyNeural']
+ZAPAS = ['en-US-ChristopherNeural', 'en-GB-RyanNeural', 'en-US-GuyNeural', 'en-US-EricNeural', 'en-GB-ThomasNeural']
 
 
 async def main(out):
     os.makedirs(out, exist_ok=True)
     est = {v['ShortName'] for v in await edge_tts.list_voices()}
     zapas = [z for z in ZAPAS if z in est]
-    sdelano = []
-    for imya, g in GOLOSA:
-        if g not in est:
-            if not zapas:
-                continue
-            g = zapas.pop(0)
-            imya = imya.split('-')[0] + '-' + g.split('-')[2].replace('MultilingualNeural', '').replace('Neural', '').lower()
+    sdelano, oshibki = [], []
+
+    async def sdelat(imya, g):
         tekst = TEKST if 'ru-RU' not in g else TEKST.split(' Hey chat')[0] + ' Всем привет в чате! Кто, по-вашему, победит в этом раунде?'
-        await edge_tts.Communicate(tekst, g).save(os.path.join(out, imya + '.mp3'))
-        sdelano.append('%s.mp3 — %s' % (imya, g))
+        for popytka in range(3):
+            try:
+                await edge_tts.Communicate(tekst, g).save(os.path.join(out, imya + '.mp3'))
+                return True
+            except Exception as e:
+                oshibki.append('%s: %s' % (g, type(e).__name__))
+                await asyncio.sleep(3)
+        return False
+
+    for imya, g in GOLOSA:
+        kandidaty = ([g] if g in est else []) + zapas
+        for gg in kandidaty:
+            im = imya if gg == g else imya.split('-')[0] + '-' + gg.split('-')[2].replace('MultilingualNeural', '').replace('Neural', '').lower()
+            if await sdelat(im, gg):
+                sdelano.append('%s.mp3 — %s' % (im, gg))
+                if gg in zapas:
+                    zapas.remove(gg)
+                break
+    if oshibki:
+        print('Сбои:', '; '.join(oshibki))
     open(os.path.join(out, 'SPISOK.txt'), 'w').write('\n'.join(sdelano) + '\n')
     print('\n'.join(sdelano))
 
