@@ -24,9 +24,8 @@
   плитки гостей над Плюсом (двое по 240, трое ~165) — макет показан, ждём отзыва. Музыка: темп/жанр своих — Александр сам плейлистами; treki — Плюс ищет НОВЫЕ
   свободные треки (Kevin MacLeod, ccMixter CC BY) в плейлист novye, тест shlem/proverka/treki_test.py. Отчёт о падениях за 28.10 не ждём (Александр: «скорее
   всего нагрузка VRChat»).
-- **Следующее после «одобряю»:** зеркало (сперва `python3 shlem/sobrat-sumy /home/user/3dplus` и слить с прежним obnovi-sumy через
-  sort -u), версия уже 2.7.9/279; строки установки: APK, obnovi из shlem2 по sha, **`! obnovi pravila` (Александр сам)**, навык
-  otmychka: `! mkdir -p /root/.claude/skills/otmychka/references && curl … SKILL.md и references/otmychka.md`, `kill $(cat /tmp/golos.pid)`.
+- **Следующее:** ждём отзыв Александра об установке 2.7.9 и проверке в шлеме (клипы, фоловер, гости, раскладка, treki).
+  Перед каждым следующим зеркалом shlem2: `python3 shlem/sobrat-sumy /home/user/3dplus` + слить с прежним obnovi-sumy (sort -u).
 - **Возможно позже:** «Заплатка» (docs/OTMYCHKA-KLIP.md) — клип шлема без окна камеры почти без нагрузки (запись только
   области под окном + сборка после эфира) — только если Александр снова захочет без окна.
 - **2.7.8 (собрана):** «клип клип клип» (уши моста, KlipMp4 до 185 с, KlipZapis 200 с, /klip), плашка NEW FOLLOWER/SUB/RAID
