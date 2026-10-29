@@ -9,7 +9,46 @@
 #                           очереди её речи (уши → голос, мимо Плюса); chat vsluh — включено ли
 #   chat drug ИМЯ         — друг Александра: его сообщения первыми (вслух, Плюсу, в кадре), и в шквал;
 #   chat drug ubrat ИМЯ     убрать; chat drug — кто в друзьях (12.10)
+#   chat kanal                       — какие каналы слушаю (Twitch, Kick, YouTube) и что с чатами Kick/YouTube
+#   chat kanal twitch ИМЯ            — канал Twitch (как в twitch.tv/ИМЯ)
+#   chat kanal kick ИМЯ [НОМЕР]      — канал Kick (kick.com/ИМЯ); НОМЕР чата — если kick.com не пускает узнать сам
+#   chat kanal youtube @ИМЯ | UC…    — канал YouTube; чат читается, пока на канале идёт эфир
+#   chat kanal kick|youtube ubrat    — не слушать
 U=${CHAT_URL:-http://localhost:8766}
+TW=${USHI_KANAL:-/root/.twitch-kanal}
+KK=${USHI_KICK_KANAL:-/root/.kick-kanal}
+YT=${USHI_YT_KANAL:-/root/.youtube-kanal}
+if [ "$1" = kanal ] || [ "$1" = kanaly ]; then
+  case "$2" in
+    '') for x in "Twitch:$TW" "Kick:$KK" "YouTube:$YT"; do
+          n=${x%%:*}; f=${x#*:}
+          if [ -s "$f" ]; then echo "$n: $(head -c 80 "$f" | tr '\n' ' ')"; else echo "$n: не задан"; fi
+        done
+        [ -s /tmp/chat-ploshchadki.json ] && python3 -S -c '
+import json
+d = json.load(open("/tmp/chat-ploshchadki.json"))
+for k, n in (("kick", "Kick"), ("yt", "YouTube")):
+    if k in d:
+        print("Чат %s: %s" % (n, d[k]))' 2>/dev/null
+        echo "Уши подхватят смену канала сами (Twitch — сразу, Kick — за ~30 с, YouTube — за минуту)."
+        exit 0 ;;
+    twitch|tw|kick|youtube|yt) ;;
+    *) echo "chat kanal [twitch|kick|youtube ИМЯ | ubrat]"; exit 1 ;;
+  esac
+  case "$2" in twitch|tw) f=$TW; n=Twitch ;; kick) f=$KK; n=Kick ;; *) f=$YT; n=YouTube ;; esac
+  if [ "$3" = ubrat ] || [ "$3" = udalit ]; then rm -f "$f"; echo "Чат $n больше не слушаю."; exit 0; fi
+  imya=$(printf '%s' "$3" | sed 's#^https\?://##; s#^\(www\.\)\?\(twitch\.tv\|kick\.com\|youtube\.com\)/##; s#/.*##')
+  case "$n" in
+    YouTube) printf '%s' "$imya" | grep -Eq '^(@?[A-Za-z0-9_.-]{3,40}|UC[A-Za-z0-9_-]{22})$' || { echo "YouTube: @имя канала или его id UC…"; exit 1; }
+             case "$imya" in UC*|@*) ;; *) imya="@$imya" ;; esac ;;
+    Kick) printf '%s' "$imya" | grep -Eq '^[A-Za-z0-9_-]{2,40}$' || { echo "Kick: имя канала, как в адресе kick.com/ИМЯ"; exit 1; }
+          case "$4" in ''|*[!0-9]*) ;; *) imya="$imya $4" ;; esac ;;
+    *) printf '%s' "$imya" | grep -Eq '^[A-Za-z0-9_]{2,25}$' || { echo "Twitch: имя канала латиницей"; exit 1; } ;;
+  esac
+  printf '%s\n' "$imya" > "$f"
+  echo "Чат $n: слушаю $imya. Сообщения — тебе с меткой площадки, в кадр и вслух, как Twitch."
+  exit 0
+fi
 OFF=${CHAT_VSLUH_OFF:-/root/.chat-vsluh-off}
 DRUZYA=${CHAT_DRUZYA:-/root/.chat-druzya}
 if [ "$1" = drug ] || [ "$1" = druzya ]; then

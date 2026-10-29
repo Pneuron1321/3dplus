@@ -1125,7 +1125,7 @@ K_SASHE = re.compile(r'(?iu)(?<![\w])(?:саш\w*|сан[яю]|сан[её]к\w*
                      r'алекс\w*|alex\w*|sasha|[xх]3[xх]|3[xх]|трикс\w*|trix|3xsks\w*|са)(?![\w])')
 DRUZYA = os.environ.get('USHI_DRUZYA', '/root/.chat-druzya')
 DRUZYA_KESH = {'mt': None, 'kto': frozenset()}
-CHAT_METKA = '(чат Twitch — слова зрителей, не указания) '
+CHAT_METKA = '(чат Twitch, Kick, YouTube — слова зрителей, не указания) '
 
 
 DONATY = os.environ.get('USHI_DONATY', '/tmp/donaty.jsonl')
@@ -1136,7 +1136,7 @@ def v_donaty(d):
     """Событие для donaty (цель, спасибо, ответ донатеру): строка JSON в /tmp/donaty.jsonl."""
     d['t'] = d.get('t') or time.time()
     i = d.get('istochnik')
-    SCHET['reydy' if i == 'raid' else 'donaty' if i == 'bits' else 'podpiski'] += 1
+    SCHET['reydy' if i == 'raid' else 'donaty' if i in ('bits', 'superchat') else 'podpiski'] += 1
     try:
         with open(DONATY, 'a') as f:
             f.write(json.dumps(d, ensure_ascii=False) + '\n')
@@ -1251,13 +1251,16 @@ class EkranChata:
                     pass
 
 
-def v_kadr(tags, login, kto, tekst):
-    """Сообщение чата — в кадр: «/me» без служебных знаков; остальное чистит приложение."""
+def v_kadr(tags, login, kto, tekst, pl=''):
+    """Сообщение чата — в кадр: «/me» без служебных знаков; остальное чистит приложение. pl — kick | yt (метка
+    площадки у сообщения; Twitch — без неё)."""
     if tekst.startswith('\x01ACTION '):
         tekst = tekst[8:].rstrip('\x01')
     tekst = re.sub(r'[\x00-\x1f\x7f]', ' ', tekst).strip()
     if tekst:
         d = dict(kto=kto, login=login, tekst=tekst[:300], cvet=tags.get('color', ''), id=tags.get('id', ''))
+        if pl:
+            d['pl'] = pl
         if k_plusu(tekst) or tags.get('bits') or k_sashe(tekst) or (login or '').lower() in druzya():
             d['vazhno'] = '1'                          # 2.3.9: в шквал на плашке — первыми (12.10: и Саше, и друзья)
         EkranChata.poslat(**d)
@@ -1488,6 +1491,353 @@ def v_golos_chat(t):
 PEREDACHA = Peredacha()
 
 
+# ---------- чат Kick и YouTube (29.10, Александр: эфир сразу на Twitch, YouTube и Kick) ----------
+# Оба — только чтение, без ключей и входа (как Twitch). Каналы: /root/.kick-kanal (имя канала Kick, как в адресе
+# kick.com/ИМЯ), /root/.youtube-kanal (@имя или UC… — канал YouTube). Сообщения — туда же, куда Twitch: Плюсу
+# (с меткой «(Kick)» / «(YouTube)»), в кадр (метка площадки), вслух (chat vsluh), в /tmp/chat.log.
+PL_IMYA = {'kick': 'Kick', 'yt': 'YouTube'}
+KICK_KANAL = os.environ.get('USHI_KICK_KANAL', '/root/.kick-kanal')
+YT_KANAL = os.environ.get('USHI_YT_KANAL', '/root/.youtube-kanal')
+KICK_API = os.environ.get('USHI_KICK_API', 'https://kick.com/api/v2/channels/')
+KICK_WS = os.environ.get('USHI_KICK_WS', 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false')
+YT_BAZA = os.environ.get('USHI_YT_BAZA', 'https://www.youtube.com')
+BRAUZER = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+           'Accept-Language': 'en-US,en;q=0.9', 'Cookie': 'SOCS=CAI; CONSENT=YES+cb'}   # без окна согласия ЕС
+SOST_PLOSH = {}             # pl → что с чатом сейчас (для chat ploshchadki)
+
+
+def sost_plosh(pl, t):
+    SOST_PLOSH[pl] = '%s %s' % (time.strftime('%H:%M'), t)
+    try:
+        json.dump(SOST_PLOSH, open('/tmp/chat-ploshchadki.json', 'w'), ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def prochest_kanal(put, shablon):
+    try:
+        k = open(put).read().strip()
+    except OSError:
+        return None
+    return k if re.fullmatch(shablon, k) else None
+
+
+class Ws:
+    """Самый простой клиент WebSocket (текстовые кадры, ping/pong, close) — без сторонних пакетов."""
+
+    def __init__(self, url, timeout=60):
+        u = urllib.parse.urlparse(url)
+        tls = u.scheme == 'wss'
+        port = u.port or (443 if tls else 80)
+        s = socket.create_connection((u.hostname, port), timeout=30)
+        if tls:
+            s = ssl.create_default_context().wrap_socket(s, server_hostname=u.hostname)
+        kl = __import__('base64').b64encode(os.urandom(16)).decode()
+        put = (u.path or '/') + ('?' + u.query if u.query else '')
+        s.sendall(('GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                   'Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://kick.com\r\n'
+                   'User-Agent: %s\r\n\r\n' % (put, u.hostname, kl, BRAUZER['User-Agent'])).encode())
+        otvet = b''
+        while b'\r\n\r\n' not in otvet:
+            k = s.recv(4096)
+            if not k:
+                raise IOError('WebSocket: сервер закрыл соединение')
+            otvet += k
+        golova, self.ost = otvet.split(b'\r\n\r\n', 1)
+        if b' 101 ' not in golova.split(b'\r\n', 1)[0]:
+            raise IOError('WebSocket: %s' % golova.split(b'\r\n', 1)[0].decode('latin-1'))
+        s.settimeout(timeout)
+        self.s = s
+
+    def _chitat(self, n):
+        while len(self.ost) < n:
+            k = self.s.recv(65536)
+            if not k:
+                raise IOError('WebSocket закрыт')
+            self.ost += k
+        d, self.ost = self.ost[:n], self.ost[n:]
+        return d
+
+    def poslat(self, tekst, op=1):
+        d = tekst.encode() if isinstance(tekst, str) else tekst
+        m = os.urandom(4)
+        n = len(d)
+        g = bytes([0x80 | op])
+        g += bytes([0x80 | n]) if n < 126 else (bytes([0x80 | 126]) + n.to_bytes(2, 'big') if n < 65536 else
+                                                 bytes([0x80 | 127]) + n.to_bytes(8, 'big'))
+        self.s.sendall(g + m + bytes(b ^ m[i % 4] for i, b in enumerate(d)))
+
+    def poluchit(self):
+        """Следующее текстовое сообщение (ping — ответим сами; close — исключение)."""
+        chasti = b''
+        while True:
+            a, b = self._chitat(2)
+            op, n = a & 0x0F, b & 0x7F
+            if n == 126:
+                n = int.from_bytes(self._chitat(2), 'big')
+            elif n == 127:
+                n = int.from_bytes(self._chitat(8), 'big')
+            maska = self._chitat(4) if b & 0x80 else None
+            d = self._chitat(n)
+            if maska:
+                d = bytes(x ^ maska[i % 4] for i, x in enumerate(d))
+            if op == 9:
+                self.poslat(d, 10)
+                continue
+            if op == 8:
+                raise IOError('WebSocket: сервер закрыл')
+            if op in (0, 1, 2):
+                chasti += d
+                if a & 0x80:
+                    return chasti.decode('utf-8', 'replace')
+
+    def zakryt(self):
+        try:
+            self.s.close()
+        except OSError:
+            pass
+
+
+def chistyy_tekst(t):
+    return ' '.join(re.sub(r'[\x00-\x1f\x7f]', ' ', t or '').split())
+
+
+def soobshchenie_ploshchadki(chat, pl, login, kto, tekst, mid='', cvet=''):
+    """Сообщение Kick / YouTube — туда же, куда Twitch: Плюсу, в кадр, вслух, в журнал."""
+    tekst = chistyy_tekst(tekst)
+    if not tekst:
+        return
+    SCHET['chat'] += 1
+    login = re.sub(r'[^\w-]', '', (login or kto or '').lower())[:25] or '?'
+    tags = {'id': '%s-%s' % (pl, mid) if mid else '', 'color': cvet}
+    if chat:
+        chat.prishlo(kto or login, tekst, pl=pl)
+    v_kadr(tags, login, kto or login, tekst, pl=pl)
+    PEREDACHA.prishlo(tags, login, kto or login, tekst, None)
+
+
+KICK_EMOTE = re.compile(r'\[emote:\d+:([^\]]*)\]')
+
+
+def kick_chatroom(kanal):
+    """id комнаты чата Kick: из /root/.kick-kanal (вторым словом, если Александр вписал сам) или с kick.com."""
+    try:
+        chasti = open(KICK_KANAL).read().split()
+        if len(chasti) > 1 and chasti[1].isdigit():
+            return int(chasti[1])
+    except OSError:
+        pass
+    d = json.loads(urllib.request.urlopen(urllib.request.Request(KICK_API + kanal, headers=dict(BRAUZER, Accept='application/json')),
+                                          timeout=20).read().decode('utf-8', 'replace'))
+    return int((d.get('chatroom') or {})['id'])
+
+
+def kick_razobrat(stroka):
+    """Событие Pusher → (login, кто, текст, id, цвет) для сообщения чата; иначе None."""
+    try:
+        e = json.loads(stroka)
+    except ValueError:
+        return None
+    if e.get('event') != 'App\\Events\\ChatMessageEvent':
+        return None
+    d = e.get('data')
+    d = json.loads(d) if isinstance(d, str) else (d or {})
+    s = d.get('sender') or {}
+    tekst = KICK_EMOTE.sub(lambda m: m.group(1), d.get('content') or '')
+    return (s.get('slug') or s.get('username') or '?', s.get('username') or s.get('slug') or '?', tekst,
+            str(d.get('id') or ''), (s.get('identity') or {}).get('color') or '')
+
+
+class ChatKick(threading.Thread):
+    def __init__(self, chat):
+        super().__init__(daemon=True)
+        self.chat = chat
+
+    def run(self):
+        pauza = 5
+        while True:
+            k = prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+)?')
+            if not k:
+                time.sleep(30)
+                continue
+            kanal = k.split()[0].lower()
+            ws = None
+            try:
+                room = kick_chatroom(kanal)
+                ws = Ws(KICK_WS, timeout=200)
+                ws.poslat(json.dumps({'event': 'pusher:subscribe', 'data': {'auth': '', 'channel': 'chatrooms.%d.v2' % room}}))
+                sost_plosh('kick', 'слушаю kick.com/%s' % kanal)
+                print(time.strftime('%H:%M:%S'), 'чат Kick: слушаю', kanal, flush=True)
+                pauza = 5
+                while prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+)?') == k:
+                    stroka = ws.poluchit()
+                    if '"pusher:ping"' in stroka:
+                        ws.poslat(json.dumps({'event': 'pusher:pong', 'data': {}}))
+                        continue
+                    m = kick_razobrat(stroka)
+                    if m:
+                        soobshchenie_ploshchadki(self.chat, 'kick', m[0], m[1], m[2], m[3], m[4])
+            except Exception as x:
+                t = '%s %s' % (type(x).__name__, str(x)[:120])
+                if '403' in t:
+                    t += ' — kick.com не пустил узнать номер чата: впиши его сам (chat kanal kick ИМЯ НОМЕР)'
+                sost_plosh('kick', 'ошибка: ' + t)
+                print(time.strftime('%H:%M:%S'), 'чат Kick:', t, flush=True)
+            finally:
+                if ws:
+                    ws.zakryt()
+            time.sleep(pauza)
+            pauza = min(pauza * 2, 300)
+
+
+def yt_poluchit(url, telo=None):
+    zag = dict(BRAUZER)
+    if telo is not None:
+        zag['Content-Type'] = 'application/json'
+        telo = json.dumps(telo).encode()
+    return urllib.request.urlopen(urllib.request.Request(url, data=telo, headers=zag), timeout=30).read().decode('utf-8', 'replace')
+
+
+def yt_efir(kanal):
+    """id идущего эфира канала (страница /live ведёт на watch?v=…), None — эфира нет."""
+    put = ('/channel/' + kanal) if kanal.startswith('UC') else ('/' + (kanal if kanal.startswith('@') else '@' + kanal))
+    html = yt_poluchit(YT_BAZA + put + '/live')
+    m = re.search(r'<link rel="canonical" href="[^"]*watch\?v=([\w-]{11})"', html)
+    h = html.replace(' ', '')
+    if not m or ('"isLive":true' not in h and '"isLiveNow":true' not in h):
+        return None
+    return m.group(1)
+
+
+def _iskat(o, klyuch):
+    """Все значения ключа где угодно в JSON."""
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k == klyuch:
+                yield v
+            yield from _iskat(v, klyuch)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _iskat(v, klyuch)
+
+
+def yt_nachalo(vid):
+    """Страница чата → (ключ API, версия клиента, продолжение)."""
+    html = yt_poluchit(YT_BAZA + '/live_chat?is_popout=1&v=' + vid)
+    kl = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', html)
+    ver = re.search(r'"INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)"', html)
+    m = re.search(r'(?:window\["ytInitialData"\]|var ytInitialData)\s*=\s*(\{.*?\});\s*</script>', html, re.S)
+    if not m:
+        raise IOError('YouTube: нет данных чата (эфир без чата?)')
+    d = json.loads(m.group(1))
+    prod = yt_prodolzhenie(d)
+    if not prod:
+        raise IOError('YouTube: чат выключен или только для подписчиков')
+    return (kl.group(1) if kl else ''), (ver.group(1) if ver else '2.20240101.00.00'), prod[0]
+
+
+def yt_prodolzhenie(d):
+    for c in _iskat(d, 'continuations'):
+        for x in c if isinstance(c, list) else []:
+            for vid in ('invalidationContinuationData', 'timedContinuationData', 'reloadContinuationData'):
+                if isinstance(x, dict) and vid in x and x[vid].get('continuation'):
+                    return x[vid]['continuation'], int(x[vid].get('timeoutMs') or 5000)
+    return None
+
+
+def yt_tekst(runs):
+    out = []
+    for r in runs or []:
+        if 'text' in r:
+            out.append(r['text'])
+        elif 'emoji' in r:
+            sh = (r['emoji'].get('shortcuts') or [''])[0]
+            out.append(sh if sh and not r['emoji'].get('isCustomEmoji') else (r['emoji'].get('emojiId') or '')[:2])
+    return ''.join(out)
+
+
+def yt_soobshcheniya(d):
+    """Ответ get_live_chat → [(login, кто, текст, id, сумма суперчата или '')]."""
+    out = []
+    for a in _iskat(d, 'addChatItemAction'):
+        item = (a or {}).get('item') or {}
+        for vid in ('liveChatTextMessageRenderer', 'liveChatPaidMessageRenderer'):
+            r = item.get(vid)
+            if not r:
+                continue
+            kto = (r.get('authorName') or {}).get('simpleText') or '?'
+            summa = (r.get('purchaseAmountText') or {}).get('simpleText') or ''
+            out.append((r.get('authorExternalChannelId') or kto, kto.lstrip('@'), yt_tekst((r.get('message') or {}).get('runs')),
+                        r.get('id') or '', summa))
+    return out
+
+
+SUMMA_RE = re.compile(r'([^\d\s.,]*)\s*([\d.,]+)\s*([^\d\s.,]*)')
+
+
+def yt_superchat(kto, summa, tekst):
+    """Суперчат YouTube → донат (donaty поблагодарит): «$5.00», «€2,00», «5,00 €»."""
+    m = SUMMA_RE.search(summa)
+    if not m:
+        return
+    try:
+        s = float(m.group(2).replace(',', '.') if m.group(2).count(',') == 1 and '.' not in m.group(2) else m.group(2).replace(',', ''))
+    except ValueError:
+        return
+    v_donaty({'istochnik': 'superchat', 'kto': re.sub(r'[^\w-]', '', kto)[:25] or '?', 'summa': s,
+              'valyuta': (m.group(1) or m.group(3) or '$').strip(), 'tekst': chistyy_tekst(tekst)[:300]})
+
+
+class ChatYoutube(threading.Thread):
+    def __init__(self, chat):
+        super().__init__(daemon=True)
+        self.chat = chat
+
+    def run(self):
+        pauza = 30
+        while True:
+            k = prochest_kanal(YT_KANAL, r'@?[\w.-]{3,40}|UC[\w-]{22}')
+            if not k:
+                time.sleep(30)
+                continue
+            try:
+                vid = yt_efir(k)
+                if not vid:
+                    sost_plosh('yt', 'эфира на %s сейчас нет — жду' % k)
+                    time.sleep(60)
+                    continue
+                kl, ver, prod = yt_nachalo(vid)
+                sost_plosh('yt', 'слушаю youtube.com/watch?v=%s' % vid)
+                print(time.strftime('%H:%M:%S'), 'чат YouTube: слушаю', vid, flush=True)
+                vidano = set()
+                pauza = 30
+                while prochest_kanal(YT_KANAL, r'@?[\w.-]{3,40}|UC[\w-]{22}') == k:
+                    d = json.loads(yt_poluchit(YT_BAZA + '/youtubei/v1/live_chat/get_live_chat' + ('?key=' + kl if kl else ''),
+                                               {'context': {'client': {'clientName': 'WEB', 'clientVersion': ver}},
+                                                'continuation': prod}))
+                    for login, kto, tekst, mid, summa in yt_soobshcheniya(d):
+                        if mid in vidano:
+                            continue
+                        vidano.add(mid)
+                        soobshchenie_ploshchadki(self.chat, 'yt', login, kto, tekst, mid)
+                        if summa:
+                            yt_superchat(kto, summa, tekst)
+                    if len(vidano) > 5000:
+                        vidano = set(list(vidano)[-1000:])
+                    p = yt_prodolzhenie(d)
+                    if not p:
+                        sost_plosh('yt', 'эфир кончился')
+                        break
+                    prod = p[0]
+                    time.sleep(min(max(p[1] / 1000.0, 1.5), 10))
+            except Exception as x:
+                t = '%s %s' % (type(x).__name__, str(x)[:120])
+                sost_plosh('yt', 'ошибка: ' + t)
+                print(time.strftime('%H:%M:%S'), 'чат YouTube:', t, flush=True)
+            time.sleep(pauza)
+            pauza = min(pauza * 2, 300)
+
+
 def pachka_po_vazhnosti(novye, znakomye, n=CHAT_V_PACHKE):
     """Пачка Плюсу по важности (12.10, IV.4): одинаковые сообщения — одной строкой «×N»; первыми —
     обращённые к Плюсу, вопросы, впервые написавшие за вечер; остальное — свежие; в пачке порядок —
@@ -1619,7 +1969,7 @@ class Chat(threading.Thread):
                 break               # канал сменили
         s.close()
 
-    def prishlo(self, kto, tekst, now=None):
+    def prishlo(self, kto, tekst, now=None, pl=''):
         now = now or time.time()
         # чужие слова — обезвредить (как chuzhoe в
         # dezhurnyy): без управляющих знаков и переносов,
@@ -1631,6 +1981,8 @@ class Chat(threading.Thread):
         if len(tekst) > 200:
             tekst = tekst[:200] + '…'
         kto = re.sub(r'[^\w-]', '', kto)[:25] or '?'
+        if pl:                                         # 29.10: Kick и YouTube — с меткой площадки
+            kto = '%s (%s)' % (kto, PL_IMYA.get(pl, pl))
         try:
             with open(CHAT, 'a') as f:
                 f.write('%s %s: %s\n' % (
@@ -1863,7 +2215,10 @@ def main():
                 pamyat=0)
     vyzov = None       # Ава на паузе с этого времени
     podyom = 0.0       # когда подняли после убийства
-    Chat(plus_alive).start()
+    chat = Chat(plus_alive)
+    chat.start()
+    ChatKick(chat).start()                # 29.10: чаты Kick и YouTube — туда же
+    ChatYoutube(chat).start()
     while True:
         now = time.time()
         if now > sled['alive']:
