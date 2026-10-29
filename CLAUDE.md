@@ -12,7 +12,7 @@
 # Состояние работы (29.10, для продолжения после сжатия контекста)
 
 - **Приложение (мост 2):** **2.7.9 СОБРАНА 29.10** (зеркало 3dplus f0f124f, APK app-2.7.9; строки установки — docs/SOSTOYANIE.md
-  «2.7.9 СОБРАН»; shlem2 по sha 3fcd9e8 — там же treki 2, чат Kick/YouTube (ushi, chat kanal), golos muzhskoy (образцы 3dplus docs/golosa — ждём выбор); 2.8.0 копим: шторка ЭФИР с галочками площадок (EfirShtorka), не собрано). В 2.7.9: цвета рамок (модератор #FF4520 мандариново-грейпфрутовый, свечение
+  «2.7.9 СОБРАН»; shlem2 по sha 155b22c — там же treki 2, чат и фоловеры Kick/YouTube (ushi, chat kanal, kluch se-youtube), golos muzhskoy (образцы 3dplus docs/golosa — ждём выбор); 2.8.0 копим: шторка ЭФИР с галочками площадок (EfirShtorka), не собрано). В 2.7.9: цвета рамок (модератор #FF4520 мандариново-грейпфрутовый, свечение
   ×1,25; гостям случайный из 8: фиолет, тёмный ярко-зелёный, жёлтый, рубиновый, белый, шоколадный, песочный, мятный — Komnata.RAMKI/
   SLUCHAYNYE); звук фоловера assets/zvuki/folover.mp3 (из ролика Александра) в Opoveshchenie, «спасибо» после звука (donaty ZVUK_SEK);
   приветствие зрителей на чистом английском, ники словами (zriteli vslukh); запреты соведущей в коде (_otkaz_pravil); полные
@@ -34,7 +34,7 @@
 - **2.7.8 (собрана):** «клип клип клип» (уши моста, KlipMp4 до 185 с, KlipZapis 200 с, /klip), плашка NEW FOLLOWER/SUB/RAID
   (Opoveshchenie, слой "al", /opoveshchenie, фоловеры StreamElements в donaty), gosti razmer/cvet, полный экран у гостя,
   голос Плюса мужской (Эндрю; golos pol m|zh|moy; свой — ElevenLabs: kluch eleven, golos moy ID), переводы в роде голоса.
-- **Ждём от Александра:** отзыв о 3D-пробе telo=setka.
+- **Ждём от Александра:** отзыв о 3D-пробе telo=setka; plus-diag.txt — «Плюс говорит поверх меня, на „плюс плюс“ не замолкает» (29.10).
 - **Стенды:** тесты `sh quest-bridge/proba-stol/sobrat.sh ANDROID_JAR` (283), макет `proba-maket/zapusk.sh`, гости в браузере
   `PW=/opt/node-tools/node_modules/playwright-core/index.mjs CHROME=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome
   ANDROID_JAR=… sh proba-gosti/zapusk.sh proba-stol OUT`. android.jar: scratchpad aplat/android-34 (качать с
