@@ -868,7 +868,7 @@ class Nalozhenie(
         "plus" -> Color.rgb(255, 205, 70)
         "igra" -> Color.rgb(140, 225, 140)
         "ya" -> Color.rgb(130, 200, 255)
-        else -> CVET_GOSTYA.getOrElse((kto.drop(1).toIntOrNull() ?: 1) - 1) { CVET_GOSTYA[0] }
+        else -> gosti?.komnata?.poGolosu(kto)?.let { cvetRamki(it) } ?: cvetRamki(null)
     }
 
     /**
@@ -879,7 +879,7 @@ class Nalozhenie(
         lgc.drawColor(0, PorterDuff.Mode.CLEAR)
         val g = gosti ?: return
         for ((u, p) in ek) {
-            val cvet = CVET_GOSTYA.getOrElse(u.cvet) { CVET_GOSTYA[0] }
+            val cvet = cvetRamki(u)
             val r = RectF(p.x, p.y - Raskladka.SLOY_Y, p.pravo, p.niz - Raskladka.SLOY_Y)
             if (!p.video) { strokaGostya(u, r, cvet); continue }
             val rad = Raskladka.RADIUS
@@ -972,7 +972,7 @@ class Nalozhenie(
         var est = false
         for ((u, p) in g.naEkrane()) {
             val st = pz.lastOrNull { it.kto == u.golos } ?: continue
-            val cvet = CVET_GOSTYA.getOrElse(u.cvet) { CVET_GOSTYA[0] }
+            val cvet = cvetRamki(u)
             val shir = Raskladka.PUZYR_SHIR - 36f
             tt.textSize = 24f
             val ryady = perenos(st.tekst, shir, 2).map { it to true }.toMutableList()
@@ -1230,6 +1230,7 @@ class Nalozhenie(
         const val GLAZA_EFIR = 2
         const val GLAZA_RAZGOVOR = 1
         /** Цвета гостей g1…g3 (2.5.0): плитка, имя и субтитры — одного цвета. */
-        val CVET_GOSTYA = intArrayOf(Color.rgb(255, 140, 200), Color.rgb(255, 170, 90), Color.rgb(190, 160, 255))
+        /** Цвет рамки, имени и пузыря гостя (2.7.8: Komnata.RAMKI — без розового); нет гостя — фиолетовый. */
+        fun cvetRamki(u: Komnata.Uchastnik?): Int = 0xFF000000.toInt() or (u?.let { Komnata.ramkaRgb(it) } ?: 0x8B5CF6)
     }
 }

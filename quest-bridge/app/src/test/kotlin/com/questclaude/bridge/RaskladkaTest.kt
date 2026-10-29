@@ -56,4 +56,16 @@ class RaskladkaTest {
         // узко — картинка не выходит за левый край
         assertEquals(550, Raskladka.centrNiza(1920, 0, 400, 1100))
     }
+
+    /** 2.7.8: `gosti razmer` — плитка больше; не влезает по высоте — квадраты меньше, но в промежутке. */
+    @Test fun razmerPlitki() {
+        val p = Raskladka.plitki(listOf(true, true), 2, listOf(1.75f, 1f))
+        assertEquals(420f, p[0].s, 0.5f)
+        assertEquals(240f, p[1].s, 0.5f)
+        assertTrue(p[0].y >= Raskladka.VERH && p[1].niz <= Raskladka.NIZ + 0.5f)
+        val b = Raskladka.plitki(listOf(true, true), 2, listOf(2f, 2f))           // 960 + зазор — не влезает
+        assertTrue(b[1].niz <= Raskladka.NIZ + 0.5f && b[0].y >= Raskladka.VERH - 0.5f)
+        assertEquals(b[0].s, b[1].s, 0.5f)
+        assertTrue(b[0].pravo + 14f <= Raskladka.SLOY_LG)                         // свечение влезает в слой рамок
+    }
 }

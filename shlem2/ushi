@@ -689,6 +689,31 @@ def zoom(kind):
         say(otv or 'Кадр не получился.')
 
 
+def klip_gotov(t):
+    """2.7.8: «клип клип клип» — мост сам сохранил два клипа; Александру в ухо коротко, что вышло."""
+    try:
+        d = json.loads(t or '{}')
+    except ValueError:
+        d = {}
+    chasti = []
+    for kto, imya in (('kamera', 'камеры'), ('efir', 'эфира')):
+        r = d.get(kto) or {}
+        if r.get('ok'):
+            chasti.append('клип %s — %d секунд' % (imya, int(r.get('sek') or 0)))
+        else:
+            chasti.append('клипа %s нет' % imya)
+    tekst = 'Сохранил: ' + ', '.join(chasti) + '. Они в «Фильмы/Plus».' if d else 'Клип не вышел: мост не ответил.'
+    print(time.strftime('%H:%M:%S'), 'клип клип клип:', t[:300], flush=True)
+    try:
+        os.makedirs(G_Q, exist_ok=True)
+        put = os.path.join(G_Q, '%d.uho' % time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(tekst)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
 def plenka(n, ms):
     """«Чек чек» (7 кадров, ±1,5 с) и «зум чек» (13, ±3 с): плёнка момента
     команды — Плюсу сразу, как «зум зум». В фоне: приложение ждёт кадры
@@ -1037,6 +1062,8 @@ def handle(e, sluh):
         zoom(t)
     elif kind == 'plenka':
         plenka('7' if t == '7' else '13', e.get('ms'))
+    elif kind == 'klip':
+        klip_gotov(t)
     elif kind == 'compact':
         compact(t)
     elif kind == 'text' and low in ('компакт', 'compact'):

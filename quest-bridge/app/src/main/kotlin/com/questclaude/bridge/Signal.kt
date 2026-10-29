@@ -28,6 +28,7 @@ object Signal {
         TIHO(listOf(440 to 160)),
         COMPACT(listOf(740 to 60, 0 to 50, 740 to 60, 0 to 50, 740 to 60)),
         PODYOM(listOf(523 to 90, 0 to 20, 659 to 90, 0 to 20, 784 to 160)),
+        KLIP(listOf(988 to 60, 0 to 40, 988 to 60, 0 to 40, 1319 to 160)),   // «клип клип клип» — сохраняю
         SOTNYA(listOf(1047 to 110, 0 to 15, 1319 to 110, 0 to 15, 1568 to 110, 0 to 15, 2093 to 320)),
     }
 

@@ -181,7 +181,7 @@ class Gosti(private val dir: File, private val stranicaAifona: () -> String?) : 
     /** Гости в кадре и их плитки. */
     fun naEkrane(): List<Pair<Komnata.Uchastnik, Raskladka.Plitka>> {
         val e = komnata.naEkrane()
-        val p = Raskladka.plitki(e.map { it.sVideo }, komnata.mest)
+        val p = Raskladka.plitki(e.map { it.sVideo }, komnata.mest, e.map { it.razmer })
         return e.mapIndexed { i, u -> u to p[i] }
     }
 

@@ -425,6 +425,16 @@ class EarService : Service() {
                             Hub.ear.post("plenka", h.action.removePrefix("plenka:"))
                             status = "Уши: плёнка ${h.action.removePrefix("plenka:")} кадров."
                         }
+                        h.action == "klip" -> {                   // 2.7.8: «клип клип клип» — два клипа сразу, без Плюса
+                            beep(Signal.Kind.KLIP)
+                            status = "Уши: клип — сохраняю камеру и эфир (3 мин)…"
+                            kotlin.concurrent.thread(name = "klip-klip", isDaemon = true) {
+                                val r = try { Hub.klipKlip?.invoke() ?: "{\"oshibka\":\"захват не идёт — клипов нет\"}" }
+                                    catch (e: Exception) { "{\"oshibka\":${FrameServer.json(e.message ?: "клип не вышел")}}" }
+                                Hub.ear.post("klip", r)
+                                Pamyat.zapis("клип клип клип: $r")
+                            }
+                        }
                         h.action == "tiho" -> {
                             Hub.say?.stop()
                             beep(Signal.Kind.TIHO)

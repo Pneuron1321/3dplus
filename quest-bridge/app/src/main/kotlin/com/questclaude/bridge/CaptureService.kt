@@ -104,6 +104,16 @@ class CaptureService : Service() {
     private var revived = false
     private var razvilka: Razvilka? = null      // эфир: кадр захвата — и в кодировщик, и в глаза
     private var efir: Efir? = null
+    /** Круг клипа эфира (2.7.8): живёт со службой глаз — клип эфира можно сохранить и сразу после эфира. */
+    private val efirKlip by lazy { KlipZapis(File(cacheDir, "klip-efir")) }
+
+    /** «Клип клип клип»: камера и эфир по 3 минуты в «Фильмы/Plus»; ответ — {"kamera":{…},"efir":{…}}. */
+    private fun klipKlip(): String {
+        val k = kamera?.let { KlipMp4.sohranit(this, it.klip, KlipMp4.MAKS_SEK - 5, "plus-klip-kamera") }
+            ?: "{\"oshibka\":\"камера не подключена\"}"
+        val e = KlipMp4.sohranit(this, efirKlip, KlipMp4.MAKS_SEK - 5, "plus-klip-efir")
+        return "{\"kamera\":$k,\"efir\":$e}"
+    }
     private lateinit var nalet: Nalet
     private lateinit var cel: Cel
     private lateinit var top: Top
@@ -205,6 +215,9 @@ class CaptureService : Service() {
             if (g.bylaOtkryta) try { g.start() } catch (e: Exception) { }
         }
         Hub.micTapy += rechYa
+        // 2.7.8: «клип клип клип» — два клипа по 3 минуты: камера телефона и эфир (что в очках, со слоями), без пережатия
+        Hub.klipKlip = { klipKlip() }
+        Hub.opoveshchenie = Opoveshchenie(this) { razvilka }
         nalet = Nalet({ try { File(filesDir, NALET).readText().trim().toLong() } catch (e: Exception) { 0L } },
             { sek -> try { File(filesDir, NALET).writeText(sek.toString()) } catch (e: Exception) { } })
         pokaz = try {
@@ -501,7 +514,7 @@ class CaptureService : Service() {
         reader = r
         razvilka = rz
         Hub.dispetcher = Dispetcher()                    // «тесно» — заново на каждый эфир
-        val e = Efir(p, rz, opts, nastroyki)
+        val e = Efir(p, rz, opts, nastroyki, efirKlip)
         try {
             e.start()
         } catch (ex: Exception) {
@@ -683,6 +696,8 @@ class CaptureService : Service() {
         Hub.micTapy -= rechYa
         Hub.rechi.efir = false
         Hub.gosti = null
+        Hub.klipKlip = null
+        Hub.opoveshchenie = null
         gosti?.let { it.otklyuchit(); it.stop(zabyt = false) }
         gosti = null
         Hub.nalet = null

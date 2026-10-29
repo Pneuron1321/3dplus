@@ -34,9 +34,27 @@ KIRILL = re.compile('[А-Яа-яЁёІіЇїЄєҐґ]')
 PLUS_ONA = ('Plus is female: in Russian she speaks of herself in feminine forms (я поняла, я уверена) and addresses '
             'Alexander informally as «ты», never «вы». Alexander is male: "you" is always masculine in Russian '
             '(ты выиграл, ты вышел, ты сам), never feminine. ')
+# 2.7.8: голос Плюса — мужской (файл /root/.golos-pol: «m» по умолчанию, «zh» — снова женский); соведущая — всегда женский
+PLUS_ON = ('Plus is male: in Russian he speaks of himself in masculine forms (я понял, я уверен) and addresses '
+           'Alexander informally as «ты», never «вы». Alexander is male: "you" is always masculine in Russian '
+           '(ты выиграл, ты вышел, ты сам), never feminine. ')
+POL = os.environ.get('TITR_POL', '/root/.golos-pol')
+# соведущая грузит titr модулем из своего процесса (vedushchiy) — её переводы всегда в женском роде
+VEDUSHCHAYA = 'vedushchiy' in os.path.basename(sys.argv[0] if sys.argv and sys.argv[0] else '')
+
+
+def rod(ved=False):
+    if ved or VEDUSHCHAYA:
+        return PLUS_ONA
+    try:
+        return PLUS_ONA if open(POL).read().strip() == 'zh' else PLUS_ON
+    except OSError:
+        return PLUS_ON
+
+
 ZADANIE = ('You write live-stream subtitles. Translate the user text (spoken to or by Plus, a voice '
            'assistant, during a VR game stream) into short natural {yazyk}. Keep names (Plus, '
-           'Alexander), game terms and numbers. ' + PLUS_ONA + 'Output only the translation, one line, no quotes, '
+           'Alexander), game terms and numbers. {rod}Output only the translation, one line, no quotes, '
            'no notes.')
 
 
@@ -73,7 +91,7 @@ def groq_key():
 
 ZADANIE_MNOGO = ('You write live-stream subtitles. The user sends numbered lines (spoken by Plus, a voice '
                  'assistant, during a VR game stream). Translate each line separately into short natural '
-                 '{yazyk}. Keep names (Plus, Alexander), game terms and numbers. ' + PLUS_ONA + 'Output exactly the same '
+                 '{yazyk}. Keep names (Plus, Alexander), game terms and numbers. {rod}Output exactly the same '
                  'number of lines, each starting with its number and a dot, nothing else.')
 
 
@@ -140,21 +158,21 @@ def yazyk_dlya(tekst):
     return 'English' if KIRILL.search(tekst) else 'Russian'
 
 
-def perevod(tekst):
+def perevod(tekst, ved=False):
     """Кириллица — в английский, иначе — в русский. Не вышло — None (субтитр одним рядом)."""
-    t = sprosit(ZADANIE.format(yazyk=yazyk_dlya(tekst)), tekst)
+    t = sprosit(ZADANIE.format(yazyk=yazyk_dlya(tekst), rod=rod(ved)), tekst)
     return t.splitlines()[0].strip().strip('"«»“”').strip() or None if t else None
 
 
-def perevod_mnogo(frazy):
+def perevod_mnogo(frazy, ved=False):
     """Фразы ответа — одним запросом (12.10): список переводов той же длины; чего не вышло — None.
     Ответ не разобрался по номерам — переводим по одной (в том же соединении)."""
     frazy = [f for f in frazy]
     if not frazy:
         return []
     if len(frazy) == 1:
-        return [perevod(frazy[0])]
-    t = sprosit(ZADANIE_MNOGO.format(yazyk=yazyk_dlya(' '.join(frazy))),
+        return [perevod(frazy[0], ved)]
+    t = sprosit(ZADANIE_MNOGO.format(yazyk=yazyk_dlya(' '.join(frazy)), rod=rod(ved)),
                 '\n'.join('%d. %s' % (i + 1, f) for i, f in enumerate(frazy)), max_tokens=120 + 80 * len(frazy))
     if t is not None:
         out = [None] * len(frazy)
@@ -165,7 +183,7 @@ def perevod_mnogo(frazy):
         if all(out):
             return out
         log('перевод по номерам не разобрался — по одной')
-    return [perevod(f) for f in frazy]
+    return [perevod(f, ved) for f in frazy]
 
 
 def pokazat(kto, tekst, perevod_=None, sek=None):

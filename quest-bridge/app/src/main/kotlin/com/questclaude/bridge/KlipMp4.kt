@@ -19,13 +19,15 @@ import java.util.Locale
 object KlipMp4 {
     private val zanyat = java.util.concurrent.atomic.AtomicBoolean(false)
     const val PAPKA = "Movies/Plus"
+    /** Клип — до 3 минут (2.7.8, «клип клип клип»: два клипа по 3 минуты); круг KlipZapis держит чуть больше. */
+    const val MAKS_SEK = 185
 
     /** Ответ JSON: {"ok":true,"put":"Movies/Plus/…mp4","sek":150,"mb":88} или {"oshibka":"…"}. */
-    fun sohranit(ctx: Context, z: KlipZapis, sek: Int): String {
+    fun sohranit(ctx: Context, z: KlipZapis, sek: Int, nachalo: String = "plus-klip"): String {
         if (!zanyat.compareAndSet(false, true)) return "{\"oshibka\":\"клип уже сохраняется\"}"
         try {
-            val s = z.snimok(sek.coerceIn(5, 155)) ?: return "{\"oshibka\":\"камера ещё ничего не прислала — клипа нет\"}"
-            val imya = "plus-klip-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".mp4"
+            val s = z.snimok(sek.coerceIn(5, MAKS_SEK)) ?: return "{\"oshibka\":\"${if (nachalo.contains("efir")) "эфира не было" else "камера ещё ничего не прислала"} — клипа нет\"}"
+            val imya = "$nachalo-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".mp4"
             val r = ctx.contentResolver
             val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, imya)

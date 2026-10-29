@@ -48,6 +48,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 
 ME = os.path.abspath(__file__)
@@ -64,6 +65,96 @@ OFF = os.environ.get('GOLOS_OFF', '/root/.golos-off')
 ZAMER = os.environ.get('GOLOS_ZAMER', '/tmp/zamer.log')
 MOST = os.environ.get('GOLOS_MOST', 'http://localhost:8766')   # приложение 2 (1.0 — 8765)
 VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
+# 2.7.8 (Санёк 25.10): голос Плюса — мужской (Эндрю), соведущая — женский (Серафина). Переключатель — файл
+# /root/.golos-pol: «m» (по умолчанию) или «zh» (снова Ава); `golos pol m|zh`. Свой GOLOS_VOICE — сильнее файла.
+VOICE_M = os.environ.get('GOLOS_VOICE_M', 'en-US-AndrewMultilingualNeural')
+POL = os.environ.get('GOLOS_POL', '/root/.golos-pol')
+
+
+def pol():
+    try:
+        return open(POL).read().strip()
+    except OSError:
+        return 'm'
+
+
+def golos_plusa():
+    """Голос edge-tts для Плюса (и запасной, когда свой голос ElevenLabs недоступен)."""
+    if 'GOLOS_VOICE' in os.environ:
+        return VOICE
+    return VOICE if pol() == 'zh' else VOICE_M
+
+
+# 2.7.8 (Александр 26.10: «чтобы Плюс говорил моим голосом, но немного ниже»): свой голос — клон в ElevenLabs.
+# Ключ — `! kluch eleven` (/root/.eleven-key, секрет), ID голоса — `golos moy ID` (/root/.eleven-golos), включить —
+# `golos pol moy`. Ниже на ELEVEN_NIZHE полутонов (ffmpeg, темп тот же). Не вышло (сеть, кончились кредиты) — фраза
+# голосом Эндрю, и ElevenLabs отдыхает ELEVEN_PAUZA с.
+ELEVEN_KEY = os.environ.get('GOLOS_ELEVEN_KEY', '/root/.eleven-key')
+ELEVEN_GOLOS = os.environ.get('GOLOS_ELEVEN_GOLOS', '/root/.eleven-golos')
+ELEVEN_NIZHE_F = os.environ.get('GOLOS_ELEVEN_NIZHE', '/root/.eleven-nizhe')
+ELEVEN_URL = os.environ.get('GOLOS_ELEVEN_URL', 'https://api.elevenlabs.io')
+ELEVEN_MODEL = os.environ.get('GOLOS_ELEVEN_MODEL', 'eleven_flash_v2_5')
+ELEVEN_PAUZA = 600
+_eleven_otdyh = [0.0]
+
+
+def eleven_golos():
+    """ID своего голоса, если он включён (golos pol moy) и есть ключ; иначе None."""
+    if pol() != 'moy' or time.time() < _eleven_otdyh[0] or not os.path.exists(ELEVEN_KEY):
+        return None
+    try:
+        g = open(ELEVEN_GOLOS).read().strip()
+    except OSError:
+        return None
+    return g if re.fullmatch(r'[A-Za-z0-9]{8,40}', g) else None
+
+
+def eleven_nizhe():
+    try:
+        return max(-6.0, min(6.0, float(open(ELEVEN_NIZHE_F).read().strip().replace(',', '.'))))
+    except (OSError, ValueError):
+        return 1.5                                   # «немного ниже» — полтора полутона
+
+
+def eleven_sintez(tekst, temp, put, golos_id):
+    """Синтез своим голосом в put (MP3). True — вышло."""
+    try:
+        p = int(temp.strip().rstrip('%'))
+    except ValueError:
+        p = 0
+    telo = json.dumps({'text': tekst, 'model_id': ELEVEN_MODEL,
+                       'voice_settings': {'stability': 0.5, 'similarity_boost': 0.8,
+                                          'speed': max(0.7, min(1.2, 1 + p / 100))}}).encode()
+    req = urllib.request.Request('%s/v1/text-to-speech/%s?output_format=mp3_44100_128' % (ELEVEN_URL, golos_id),
+                                 data=telo, method='POST',
+                                 headers={'xi-api-key': open(ELEVEN_KEY).read().strip(),
+                                          'Content-Type': 'application/json', 'Accept': 'audio/mpeg'})
+    syroy = put + '.el'
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r, open(syroy, 'wb') as f:
+            shutil.copyfileobj(r, f)
+    except urllib.error.HTTPError as e:
+        log('ElevenLabs HTTP %d — фраза голосом Эндрю, свой голос отдыхает %d с' % (e.code, ELEVEN_PAUZA))
+        if e.code in (401, 402, 403, 429):
+            _eleven_otdyh[0] = time.time() + ELEVEN_PAUZA
+        return False
+    except Exception as e:
+        log('ElevenLabs:', type(e).__name__)
+        return False
+    if os.path.getsize(syroy) == 0:
+        return False
+    n = eleven_nizhe()
+    ff = shutil.which('ffmpeg')
+    if n and ff:
+        k = 2 ** (-n / 12)                           # ниже на n полутонов: частота × k, темп обратно ÷ k
+        r = subprocess.run([ff, '-v', 'error', '-y', '-i', syroy, '-af',
+                            'asetrate=44100*%.5f,aresample=44100,atempo=%.5f' % (k, 1 / k),
+                            '-c:a', 'libmp3lame', '-b:a', '128k', put], timeout=30)
+        if r.returncode == 0 and os.path.exists(put) and os.path.getsize(put) > 0:
+            os.remove(syroy)
+            return True
+    os.replace(syroy, put)
+    return True
 # Соведущая (12.10, Александр): свой голос — Серафина; темп, порции, очередь, эфир, субтитры — как у Авы.
 VOICE_VED = os.environ.get('GOLOS_VOICE_VED', 'de-DE-SeraphinaMultilingualNeural')
 PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
@@ -120,7 +211,8 @@ def log(*a):
 
 def kesh(tekst, temp, golos=None):
     """Файл короткой фразы в кэше (у каждого голоса — свой)."""
-    return os.path.join(KESH, hashlib.sha1(('%s|%s|%s' % (golos or VOICE, temp, tekst)).encode()).hexdigest()
+    g = golos or (('eleven:%s:%s' % (eleven_golos(), eleven_nizhe())) if eleven_golos() else golos_plusa())
+    return os.path.join(KESH, hashlib.sha1(('%s|%s|%s' % (g, temp, tekst)).encode()).hexdigest()
                         + '.mp3')
 
 
@@ -406,13 +498,19 @@ class Sintez:
         сервис часто отвечал «403», и двух попыток не хватало)."""
         tmp = put + '.tmp'
         self.tl.metki = None
+        eg = None if golos else eleven_golos()
+        if eg and re.search(r'[^\W\d_]', tekst):              # 2.7.8: свой голос (ElevenLabs); не вышло — Эндрю
+            if eleven_sintez(tekst, temp, tmp, eg) and os.path.getsize(tmp) > 0:
+                os.replace(tmp, put)
+                return True
+            self.ubrat(tmp)
         for popytka in range(1, len(PAUZY_SINTEZA) + 2):
             try:
                 if self.mod:
                     metki = []
 
                     async def go():
-                        c = self.mod.Communicate(tekst, golos or VOICE, rate=temp)
+                        c = self.mod.Communicate(tekst, golos or golos_plusa(), rate=temp)
                         with open(tmp, 'wb') as f:
                             async for ch in c.stream():
                                 if ch['type'] == 'audio':
@@ -423,7 +521,7 @@ class Sintez:
                     self.asyncio.run(go())
                     self.tl.metki = metki or None
                 elif self.exe:
-                    subprocess.run([self.exe, '--voice', golos or VOICE, '--rate=' + temp, '--text', tekst,
+                    subprocess.run([self.exe, '--voice', golos or golos_plusa(), '--rate=' + temp, '--text', tekst,
                                     '--write-media', tmp], stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, timeout=30)
                 if os.path.getsize(tmp) > 0:
@@ -478,7 +576,7 @@ class Titry:
             self.efir_t = time.time()
         return self.efir
 
-    def perevesti(self, uid, frazy):
+    def perevesti(self, uid, frazy, ved=False):
         if not self.m or not frazy or not self.efir_idyot():
             return
         with self.cv:
@@ -490,7 +588,10 @@ class Titry:
 
         def idti():
             try:
-                res = self.m.perevod_mnogo(frazy)
+                try:
+                    res = self.m.perevod_mnogo(frazy, ved=ved)      # 2.7.8: род — Плюса или соведущей
+                except TypeError:
+                    res = self.m.perevod_mnogo(frazy)
             except Exception as e:
                 log('перевод не вышел:', type(e).__name__, e)
                 return
@@ -870,7 +971,7 @@ class Golos:
         # инструментом, приветствие зрителям, «не расслышала» — нет.
         dosluh = vid in DOSLUH
         if self.chitat_rezhim() != 'uho' and vid != 'uho':  # субтитры — только вслух: перевод всего ответа сразу
-            self.titry.perevesti(ns, [f for p in ps for f in p])
+            self.titry.perevesti(ns, [f for p in ps for f in p], ved=vid == 'ved')
         with self.cv:
             for i, p in enumerate(ps):
                 k = Kusok(p, ns, t, i == 0 and not dalshe, dosluh and i == len(ps) - 1)
@@ -1452,5 +1553,30 @@ if __name__ == '__main__':
         if py:
             os.environ['GOLOS_PEREZAPUSK'] = '1'
             os.execv(py, [py, ME] + a)
-        sys.exit(proba(' '.join(a[1:]) or 'Привет, я Ава. Так я звучу.'))
+        sys.exit(proba(' '.join(a[1:]) or 'Привет, я Плюс. Так я звучу.'))
+    if a and a[0] == 'pol':
+        if len(a) < 2 or a[1] not in ('m', 'zh', 'moy'):
+            print('golos pol m | zh | moy — голос Плюса: мужской (Эндрю), женский (Ава) или свой (ElevenLabs); сейчас: %s'
+                  % (pol() or 'm'))
+            sys.exit(1)
+        with open(POL, 'w') as f:
+            f.write(a[1])
+        if a[1] == 'moy' and not eleven_golos():
+            print('Свой голос включён, но нет %s: `! kluch eleven` (ключ API) и `golos moy ID_ГОЛОСА`. Пока — голос Эндрю.'
+                  % ('ключа' if not os.path.exists(ELEVEN_KEY) else 'ID голоса'))
+        else:
+            print('Голос Плюса: %s (со следующей фразы). Соведущая — как была.' % (
+                'свой (ElevenLabs, ниже на %s полутона)' % eleven_nizhe() if a[1] == 'moy' else golos_plusa()))
+        sys.exit(0)
+    if a and a[0] == 'moy':                          # ID голоса ElevenLabs (не секрет) и насколько ниже
+        if len(a) >= 2 and re.fullmatch(r'[A-Za-z0-9]{8,40}', a[1]):
+            open(ELEVEN_GOLOS, 'w').write(a[1])
+            print('ID голоса сохранён. Включить: golos pol moy.')
+            sys.exit(0)
+        if len(a) >= 3 and a[1] == 'nizhe':
+            open(ELEVEN_NIZHE_F, 'w').write(a[2])
+            print('Свой голос ниже на %s полутона.' % eleven_nizhe())
+            sys.exit(0)
+        print('golos moy ID_ГОЛОСА | golos moy nizhe 1.5 (полутонов; 0 — как есть)')
+        sys.exit(1)
     sys.exit(demon())

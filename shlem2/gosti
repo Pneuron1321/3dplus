@@ -16,6 +16,8 @@
   gosti novaya            — новая ссылка гостя (старая перестанет работать)
   gosti vpusk avto | ruchnoy — впускать сами или ждать модератора / Александра
   gosti mest 1|2|3        — мест в кадре (по умолчанию 2)
+  gosti razmer ИМЯ 175    — плитка гостя в кадре: % обычного (50–200); +75 / -25 — от нынешнего
+  gosti cvet ИМЯ ЦВЕТ     — рамка плитки: мандарин | фиолетовый | зелёный | жёлтый | красный | мятный | avto
   gosti gromkost 80       — гости в шлеме, % (0–300; тихий голос гостя мост и так выравнивает сам)
   gosti efir 100          — гости в эфире, % (0–200)
   gosti kartinka vkl | vykl — картинка эфира гостям (выкл — только звук: раздача тесная)
@@ -354,6 +356,8 @@ def status():
             p.append('камера ' + ('выкл модератором' if u.get('kamera_zapret') else ('вкл' if u['kamera'] else 'выкл')))
             if u.get('raciya'):
                 p.append('рация (слышно, только пока держит кнопку)')
+            if u.get('razmer') and abs(float(u['razmer']) - 1) > 0.01:
+                p.append('плитка %d %%' % round(float(u['razmer']) * 100))
             if u.get('govorit'):
                 p.append('говорит')
         print('  %s — %s' % (u['imya'], ', '.join(p)))
@@ -398,6 +402,43 @@ def upr(chto, kto=None, dop=None):
     return 1
 
 
+CVETA = {'mandarin': 'mandarin', 'мандарин': 'mandarin', 'мандариновый': 'mandarin', 'оранжевый': 'mandarin',
+         'коралловый': 'mandarin', 'грейпфрут': 'mandarin', 'fiolet': 'fiolet', 'фиолетовый': 'fiolet',
+         'zelenyy': 'zelenyy', 'зелёный': 'zelenyy', 'зеленый': 'zelenyy', 'zheltyy': 'zheltyy', 'жёлтый': 'zheltyy',
+         'желтый': 'zheltyy', 'krasnyy': 'krasnyy', 'красный': 'krasnyy', 'myatnyy': 'myatnyy', 'мятный': 'myatnyy',
+         'avto': 'avto', 'авто': 'avto', 'обычный': 'avto'}
+
+
+def razmer(kto, n):
+    """Размер плитки гостя (2.7.8): 175 — 175 % обычного; +75 / -25 — на столько процентов от нынешнего."""
+    n = n.replace(',', '.').rstrip('%')
+    try:
+        v = float(n)
+    except ValueError:
+        print('Размер — числом: gosti razmer ИМЯ 150 (процент обычного) или +50 / -25 (от нынешнего).'); return 1
+    if n[0] in '+-':
+        r = most_ili('/gosti') or {}
+        lyudi = (r.get('komnata') or {}).get('lyudi') or []
+        u = next((x for x in lyudi if x.get('imya', '').lower().startswith(kto.lower())), None)
+        tek = float((u or {}).get('razmer') or 1)
+        m = tek * (1 + v / 100)
+    else:
+        m = v / 100
+    m = max(0.5, min(2.0, m))
+    k = upr('razmer', kto, '%.2f' % m)
+    if k == 0:
+        print('Плитка %s — %d %% обычного (можно 50–200 %%).' % (kto, round(m * 100)))
+    return k
+
+
+def cvet(kto, c):
+    """Цвет рамки плитки гостя (2.7.8)."""
+    k = CVETA.get(c.lower())
+    if not k:
+        print('Цвета: мандарин, фиолетовый, зелёный, жёлтый, красный, мятный; avto — как было.'); return 1
+    return upr('cvet', kto, k)
+
+
 def nastroyka(**q):
     r = most_ili('/gosti/nastroyka?' + urllib.parse.urlencode(q))
     if r is None:
@@ -438,6 +479,10 @@ def main(a):
         return upr('vklyuchit' if ost[-1] == 'vkl' else 'zaglushit', ' '.join(ost[:-1]))
     if c == 'kamera' and len(ost) >= 2 and ost[-1] in ('vkl', 'vykl'):
         return upr('kamera_vkl' if ost[-1] == 'vkl' else 'kamera_vykl', ' '.join(ost[:-1]))
+    if c == 'razmer' and len(ost) >= 2:
+        return razmer(' '.join(ost[:-1]), ost[-1])
+    if c == 'cvet' and len(ost) >= 2:
+        return cvet(' '.join(ost[:-1]), ost[-1])
     if c == 'novaya':
         return upr('novaya')
     if c == 'vpusk' and ost and ost[0] in ('avto', 'ruchnoy'):
@@ -457,7 +502,8 @@ def main(a):
         except (ValueError, IndexError):
             pass
     print('gosti; start | stop | ssylki | vpustit [ИМЯ] | otklonit|vygnat|skryt|pokazat ИМЯ | mikrofon|kamera ИМЯ vkl|vykl | '
-          'novaya | vpusk avto|ruchnoy | mest 1|2|3 | gromkost N | efir N | kartinka vkl|vykl | eho N')
+          'novaya | vpusk avto|ruchnoy | mest 1|2|3 | razmer ИМЯ N|+N|-N | cvet ИМЯ ЦВЕТ | gromkost N | efir N | '
+          'kartinka vkl|vykl | eho N')
     return 1
 
 

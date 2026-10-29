@@ -76,3 +76,12 @@ user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-actio
 .dialogOkno p{margin:0 0 4px;font-size:16px}
 #dialogNet{display:block;width:100%;margin-top:10px}
 @media (max-width:420px){.krug{width:46px;height:46px;font-size:19px}.polzunok span{width:80px}}
+
+/* 2.7.8: во весь экран — картинка эфира на весь экран, поверх — микрофон, камера и «обратно в окно» */
+.polnyyPanel{display:none}
+body.polnyy{overflow:hidden}
+body.polnyy .prevyu{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;aspect-ratio:auto;border-radius:0;z-index:50}
+body.polnyy .prevyu canvas{object-fit:contain;background:#000}
+body.polnyy .polnyyPanel{display:flex;gap:14px;position:absolute;left:50%;transform:translateX(-50%);
+  bottom:calc(16px + env(safe-area-inset-bottom));padding:8px 12px;border-radius:40px;background:rgba(0,0,0,.55);z-index:51}
+body.polnyy .polnyyPanel .krug{width:60px;height:60px;font-size:26px}

@@ -41,7 +41,8 @@ internal fun zvat(o: Any, imya: String, vararg a: Any?): Any? {
 }
 
 class Gost(val imya: String, val rol: String, val kamera: Boolean, val govorit: Boolean = false,
-           val mikrofon: Boolean = true, val fon: Pair<Int, Int> = 0xFF2D4B5E.toInt() to 0xFF16222C.toInt())
+           val mikrofon: Boolean = true, val fon: Pair<Int, Int> = 0xFF2D4B5E.toInt() to 0xFF16222C.toInt(),
+           val razmer: Float = 1f)
 
 class Varyant(val imya: String, val mest: Int, val gosti: List<Gost>, val niz: List<Triple<String, String, String>>,
               val puzyri: Map<String, Pair<String, String>>, val vnizu: Boolean = false, val muzyka: Boolean = false)
@@ -63,6 +64,10 @@ fun main(args: Array<String>) {
             listOf(Triple("plus", "Лена, ставлю на то, что он возьмёт обоих", "Lena, I bet he takes both of them"),
                 Triple("ya", "Сейчас посмотрим", "We'll see")),
             mapOf("Lena" to ("He's got no chance, trust me" to "У него нет шансов, поверь"))),
+        Varyant("gosti-maket-razmer", 2,                               // 2.7.8: gosti razmer Max 175
+            listOf(Gost("Max", "moder", kamera = true, govorit = true, fon = siniy, razmer = 1.75f), Gost("Lena", "gost", kamera = true, fon = lilovyy)),
+            listOf(Triple("ya", "Макс, прикрой слева", "Max, cover the left")),
+            mapOf("Max" to ("Вижу двоих на крыше" to "I see two on the roof"))),
         Varyant("gosti-maket-vnizu", 2,
             listOf(Gost("Max", "moder", kamera = true, govorit = true, fon = siniy), Gost("Lena", "gost", kamera = false)),
             listOf(Triple("ya", "Макс, прикрой слева", "Max, cover the left"),
@@ -99,6 +104,7 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
     }
     val moder = lyudi.first { it.first.rol == "moder" }.first
     for ((u, _) in lyudi) if (u.sost != "vnutri") k.upr(moder, "vpustit", u.id)
+    for ((u, gs) in lyudi) if (gs.razmer != 1f) k.upr(null, "razmer", u.id, gs.razmer.toString())
     val gostKlass = Class.forName("com.questclaude.bridge.Razvilka\$Gost")
     val rgosti: java.util.concurrent.ConcurrentHashMap<Int, Any> = vzyat(rz, "gosti")
     for ((u, gs) in lyudi) {

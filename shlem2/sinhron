@@ -109,6 +109,14 @@ KOMANDA_RE = re.compile(r'\b(?:плюс|plus)[\s,.!-]+(?:плюс|plus)\b|'
 IMENA = set('плюс саша александр gta гта twitch твич plus sasha alexander'.split())
 
 
+
+def plus_rod():
+    """2.7.8: голос Плюса мужской (файл /root/.golos-pol: «m» по умолчанию, «zh» — женский)."""
+    try:
+        return 'female' if open('/root/.golos-pol').read().strip() == 'zh' else 'male'
+    except OSError:
+        return 'male'
+
 def log(*a):
     try:
         with open(LOG, 'a') as f:
@@ -673,7 +681,7 @@ class Sinhron:
         zadanie = ('You translate live-stream subtitles (a VR game stream with guests). Each user line is '
                    '"N. [to LANGUAGE] text". Translate every line into its target language: short, natural, '
                    'spoken style; keep names (Plus, Alexander, guest names), game terms and numbers; add '
-                   'nothing. Alexander (the streamer) is male, Plus is female: keep Russian gender forms right. '
+                   'nothing. Alexander (the streamer) is male, Plus is ' + plus_rod() + ': keep Russian gender forms right. '
                    'Answer with exactly the same number of lines, each "N. translation".')
         poryadok = PEREVOD[self.perevod_model:] + PEREVOD[:self.perevod_model]
         for model in poryadok:

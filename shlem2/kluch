@@ -14,6 +14,8 @@
 #   ! kluch twitch-id     — Client ID приложения Twitch (dev.twitch.tv → Your Console →
 #   ! kluch twitch-secret — Applications → Manage) и его секрет (New Secret): сколько
 #                      зрителей смотрят эфир (zriteli). Секрет — /root/.twitch-app-secret
+#   ! kluch eleven   — ключ API ElevenLabs (elevenlabs.io → профиль → API Keys) → /root/.eleven-key (2.7.8:
+#                      голос Плюса — клон голоса Александра; ID голоса — golos moy ID, не секрет)
 # Ключ — секрет: не печатать, не читать вслух, не заливать, не в кадр.
 T=${KLUCH_TERMUX:-/data/data/com.termux/files/usr/bin}
 D=${KLUCH_DIR:-/root}                 # куда класть ключи Kick и YouTube (проверка — во временную папку)
@@ -32,6 +34,22 @@ if [ "$1" = se ]; then
     200) echo "Ключ StreamElements сохранён и работает (${#k} знаков). Буфер очищен. Донаты со страницы чаевых пойдут в цель." ;;
     401) echo "Ключ сохранён, но StreamElements его не принял (401). Скопируй JWT заново." ;;
     *) echo "Ключ сохранён; StreamElements не ответил (код $c) — проверь интернет." ;;
+  esac
+  exit 0
+fi
+if [ "$1" = eleven ]; then
+  case "$k" in *[!A-Za-z0-9_-]*|'') echo "В буфере не ключ ElevenLabs: только латинские буквы, цифры, _ и -."; exit 1 ;; esac
+  [ ${#k} -ge 20 ] || { echo "В буфере не ключ ElevenLabs: слишком короткий (${#k})."; exit 1; }
+  printf '%s\n' "$k" > "$D/.eleven-key"
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  h=$(mktemp)
+  printf 'xi-api-key: %s\n' "$k" > "$h"
+  c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H @"$h" https://api.elevenlabs.io/v1/user)
+  rm -f "$h"
+  case "$c" in
+    200) echo "Ключ ElevenLabs сохранён и работает. Буфер очищен. Дальше: golos moy ID_ГОЛОСА." ;;
+    401) echo "Ключ сохранён, но ElevenLabs его не принял (401). Скопируй ключ заново." ;;
+    *) echo "Ключ сохранён; ElevenLabs не ответил (код $c) — проверь интернет." ;;
   esac
   exit 0
 fi

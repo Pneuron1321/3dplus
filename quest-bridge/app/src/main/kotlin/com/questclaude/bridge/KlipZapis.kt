@@ -20,7 +20,7 @@ import java.io.InputStream
  */
 class KlipZapis(
     private val dir: File,
-    private val derzhatMs: Long = 160_000,
+    private val derzhatMs: Long = 200_000,                 // 2.7.8: клип до 3 минут (было 160 с под 2,5 мин)
     private val kuskomMs: Long = 10_000,
 ) {
     class Golova(val sps: ByteArray, val pps: ByteArray, val w: Int, val h: Int)

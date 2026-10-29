@@ -537,6 +537,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             "nc" -> { x = nizCentr(o, w) - w / 2; y = o.h * 5 / 100 }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }   // слои гостей: от точки (0; SLOY_Y) 1080p
             "vse" -> { x = 0; y = 0; w = o.w; h = o.h }
+            "al" -> { x = (o.w - w) / 2; y = o.h - (Opoveshchenie.VERH * s).toInt() - h }   // 2.7.8: оповещение — сверху по центру
             "mz" -> {                         // музыка: справа над окном камеры (без камеры — над субтитрами)
                 val zazor = (8 * s).toInt()
                 y = kameraVerh(o)?.let { it + zazor } ?: (o.h * 5 / 100 + (Nalozhenie.TH * s).toInt() + zazor)
@@ -579,6 +580,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             "nc" -> { x = (titryLevo(o) * s).toInt(); y = gl(Vizor.TITRY_VERH) }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
+            "al" -> { x = (o.w - w) / 2; y = gl(Opoveshchenie.VERH) }                      // 2.7.8: оповещение — сверху по центру
             "mz" -> { x = (Vizor.MUZ.l * s).toInt(); y = gl(Vizor.MUZ.t) }   // слева внизу под розой (2.7.5)
             "pc" -> {
                 val zazor = (Vizor.ZAZOR * s).toInt()

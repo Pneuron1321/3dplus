@@ -33,6 +33,8 @@ class Efir(
     private val razvilka: Razvilka,
     private val o: Opts,
     nastroyki: List<Ploshchadki.Nastroyka>,
+    /** Круг клипа эфира (2.7.8, «клип клип клип»): то же сжатое видео и звук, что уходят на Twitch, — без пережатия. */
+    private val klip: KlipZapis? = null,
 ) {
     class Opts(val url: String, val w: Int, val h: Int, val fps: Int, val kbps: Int, val akbps: Int = 160,
                val mic: Float = MIC) {
@@ -215,6 +217,7 @@ class Efir(
 
     fun stop() {
         running = false
+        try { klip?.konec() } catch (e: Exception) { }         // круг клипа эфира остаётся: клип можно сохранить и после
         Hub.micTap = null
         if (Hub.vstavka === vstavka) Hub.vstavka = null
         if (Hub.vstavkaGolos === vstavkaGolos) Hub.vstavkaGolos = null
@@ -331,6 +334,7 @@ class Efir(
                     val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     kadrov++
                     otpravka.video(Flv.video(Flv.avcc(a), key), info.presentationTimeUs, key)
+                    try { klip?.video(a, info.presentationTimeUs, key) } catch (e: Exception) { }
                 }
             }
         }
@@ -338,7 +342,10 @@ class Efir(
 
     private fun zagolovok(annexB: ByteArray) {
         val (sps, pps) = Flv.spsPps(annexB)
-        if (sps != null && pps != null) otpravka.videoConfig = Flv.video(Flv.avcConfig(sps, pps), key = true, config = true)
+        if (sps != null && pps != null) {
+            otpravka.videoConfig = Flv.video(Flv.avcConfig(sps, pps), key = true, config = true)
+            try { klip?.golova(sps, pps, o.w, o.h) } catch (e: Exception) { }
+        }
     }
 
     // ---------- звук ----------
@@ -457,14 +464,18 @@ class Efir(
                         c.outputFormat.getByteBuffer("csd-0")?.let { b ->
                             val asc = ByteArray(b.remaining()).also { b.duplicate().get(it) }
                             otpravka.audioConfig = Flv.audio(asc, config = true)
+                            klip?.zvukGolova(asc)
                         }
                     } else if (o >= 0) {
                         val b = c.getOutputBuffer(o)
                         val a = ByteArray(info.size)
                         if (b != null) { b.position(info.offset); b.get(a) }
                         c.releaseOutputBuffer(o, false)
-                        if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) otpravka.audioConfig = Flv.audio(a, config = true)
-                        else if (a.isNotEmpty()) otpravka.audio(Flv.audio(a), info.presentationTimeUs)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) { otpravka.audioConfig = Flv.audio(a, config = true); klip?.zvukGolova(a) }
+                        else if (a.isNotEmpty()) {
+                            otpravka.audio(Flv.audio(a), info.presentationTimeUs)
+                            try { klip?.zvuk(a, info.presentationTimeUs) } catch (e: Exception) { }
+                        }
                     } else break
                 }
             } catch (e: IllegalStateException) {

@@ -142,6 +142,20 @@ try {
   const zhiva = await a.evaluate(() => { const t = window.__plus.S.stream.getVideoTracks()[0]; return !!t && t.readyState === 'live'; });
   if (o6 - o5 < 10 || !zhiva) throw new Error('после фона камера не вернулась: кадров за 2 с ' + (o6 - o5) + ', дорожка ' + zhiva);
   shag('свернул и развернул браузер: пока свёрнут — модератор видит «камера выкл», после — камера сама вернулась (' + (o6 - o5) + ' кадров за 2 с)');
+  // 2.7.8: во весь экран — эфир на весь экран, поверх микрофон, камера и «обратно в окно»
+  await a.click('#knPolnyy');
+  const pe = await a.evaluate(() => { const r = document.getElementById('prevyuBlok').getBoundingClientRect();
+    return { cls: document.body.classList.contains('polnyy'), w: r.width, h: r.height, vw: innerWidth, vh: innerHeight,
+      panel: getComputedStyle(document.getElementById('polnyyPanel')).display }; });
+  if (!pe.cls || Math.abs(pe.w - pe.vw) > 2 || Math.abs(pe.h - pe.vh) > 2 || pe.panel !== 'flex') throw new Error('во весь экран: ' + JSON.stringify(pe));
+  const mik0 = await a.evaluate(() => window.__plus.S.mikrofon);
+  await a.click('#knMikP');
+  await a.waitForFunction((m) => window.__plus.S.mikrofon !== m, mik0, { timeout: 3000 });
+  await a.click('#knMikP');
+  await a.click('#knNazad');
+  const nazad = await a.evaluate(() => document.body.classList.contains('polnyy'));
+  if (nazad) throw new Error('не вернулась в окно');
+  shag('во весь экран: картинка эфира на весь экран, 🎤 работает поверх, ⤡ — обратно в окно');
   await a.screenshot({ path: out + '/android-v-efire.png' });
   // модератор: камера и микрофон гостя (выкл — гаснет у гостя, своя кнопка не включает; вкл — камера вернулась сама)
   const ryad = () => m.locator('#pultLyudi .pultKto', { hasText: 'Pixel' });

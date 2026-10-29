@@ -49,6 +49,9 @@ class Komnata(
         @Volatile var raciya = false                 // 2.5.3: рация — слышно, только пока держит кнопку (видно модератору)
         @Volatile var h264 = false                   // умеет раскодировать H.264 (WebCodecs)
         @Volatile var govorit = false                // слышно сейчас (ставит движок звука)
+        /** 2.7.8: цвет рамки (имя из RAMKI; null — по умолчанию: модератору мандарин, гостям по месту) и размер плитки. */
+        @Volatile var ramka: String? = null
+        @Volatile var razmer = 1f
         val vnutri: Boolean get() = sost == "vnutri"
         val media: Boolean get() = kamera || mikrofon
         val upravlyaet: Boolean get() = rol == "hozyain" || rol == "moder"
@@ -101,8 +104,9 @@ class Komnata(
     /** Место того, у кого оборвалась сеть: вернётся с жетоном — с теми же цветом и запретами модератора. */
     private class Vozvrat(val rol: String, val imya: String, val cvet: Int, val ms: Long,
                           val skryt: Boolean = false, val zaglushen: Boolean = false, val kameraZapret: Boolean = false,
-                          val igra: Float = IGRA) {
-        constructor(u: Uchastnik, ms: Long) : this(u.rol, u.imya, u.cvet, ms, u.skryt, u.zaglushen, u.kameraZapret, u.igra)
+                          val igra: Float = IGRA, val ramka: String? = null, val razmer: Float = 1f) {
+        constructor(u: Uchastnik, ms: Long) : this(u.rol, u.imya, u.cvet, ms, u.skryt, u.zaglushen, u.kameraZapret, u.igra,
+            u.ramka, u.razmer)
     }
     private val vozvraty = HashMap<String, Vozvrat>()
 
@@ -149,6 +153,7 @@ class Komnata(
                 val u = Uchastnik(sledId++, rol, v.imya, svyaz, chasy())
                 u.h264 = h264
                 u.skryt = v.skryt; u.zaglushen = v.zaglushen; u.kameraZapret = v.kameraZapret; u.igra = v.igra
+                u.ramka = v.ramka; u.razmer = v.razmer
                 if (rol != "hozyain") { u.kamera = kamera; u.mikrofon = mikrofon }
                 lyudi[u.id] = u
                 if (u.media && zanyato() >= mest) { u.kamera = false; u.mikrofon = false }
@@ -240,6 +245,23 @@ class Komnata(
                 c.svyaz.tekst("{\"t\":\"kamera_zapret\",\"da\":${c.kameraZapret}}")
                 razoslatSostav(); slushatel?.izmenilos()
             }
+            "cvet" -> {                                       // 2.7.8: цвет рамки плитки; dop — имя из RAMKI или «avto»
+                val c = u ?: return oshibka("кого?")
+                val d = dop?.trim()?.lowercase()
+                c.ramka = when {
+                    d == null || d == "" -> return oshibka("цвет: " + RAMKI.keys.joinToString(" | ") + " | avto")
+                    d == "avto" -> null
+                    d in RAMKI -> d
+                    else -> return oshibka("нет цвета «$d»: " + RAMKI.keys.joinToString(" | ") + " | avto")
+                }
+                razoslatSostav(); slushatel?.izmenilos()
+            }
+            "razmer" -> {                                     // 2.7.8: размер плитки; dop — множитель 0,5–2 (1 — обычный)
+                val c = u ?: return oshibka("кого?")
+                val r = dop?.replace(',', '.')?.toFloatOrNull()?.takeIf { !it.isNaN() } ?: return oshibka("razmer 0.5…2")
+                c.razmer = r.coerceIn(RAZMER_MIN, RAZMER_MAKS)
+                razoslatSostav(); slushatel?.izmenilos()
+            }
             "novaya" -> { klyuchi.novyGost(); razoslatSsylki() }
             "vpusk" -> {
                 if (kto != null && kto.rol != "hozyain") return oshibka("впуск меняет хозяин")
@@ -293,6 +315,9 @@ class Komnata(
     fun vnutri(): List<Uchastnik> = synchronized(zamok) { lyudi.values.filter { it.vnutri } }
     fun vse(): List<Uchastnik> = synchronized(zamok) { lyudi.values.toList() }
     fun po(id: Int): Uchastnik? = synchronized(zamok) { lyudi[id] }
+
+    /** Участник по голосу субтитров (g1…g3) — для цвета; нет такого — null. */
+    fun poGolosu(golos: String): Uchastnik? = synchronized(zamok) { lyudi.values.firstOrNull { it.golos == golos } }
 
     /** Имя по голосу субтитров (g1…g3) — для подписи; нет такого — null. */
     fun imyaGolosa(golos: String): String? = synchronized(zamok) { lyudi.values.firstOrNull { it.golos == golos }?.imya }
@@ -391,7 +416,7 @@ class Komnata(
     private fun chelovek(u: Uchastnik) = "{\"id\":${u.id},\"imya\":${js(u.imya)},\"rol\":\"${u.rol}\",\"sost\":\"${u.sost}\"," +
         "\"kamera\":${u.kamera},\"mikrofon\":${u.mikrofon},\"skryt\":${u.skryt},\"zaglushen\":${u.zaglushen}," +
         "\"kamera_zapret\":${u.kameraZapret},\"igra\":${u.igra},\"raciya\":${u.raciya}," +
-        "\"cvet\":${u.cvet},\"govorit\":${u.govorit}}"
+        "\"cvet\":${u.cvet},\"ramka\":\"${ramkaHex(u)}\",\"razmer\":${u.razmer},\"govorit\":${u.govorit}}"
 
     private fun sobytie(vid: String, imya: String) {
         sobytiya.addLast(Sobytie(sledSobytie++, vid, imya, chasy()))
@@ -407,6 +432,21 @@ class Komnata(
     }
 
     companion object {
+        /**
+         * Цвета рамок плиток (2.7.8, Санёк 25.10: «розовый убрать»): модератору — мандарин (оранжево-коралловый),
+         * гостям по месту — фиолетовый, зелёный, жёлтый; ещё красный и мятный (тапочки Плюса). RGB без прозрачности.
+         */
+        val RAMKI: Map<String, Int> = linkedMapOf(
+            "mandarin" to 0xFF7A45, "fiolet" to 0x8B5CF6, "zelenyy" to 0x12C24A, "zheltyy" to 0xFFD21F,
+            "krasnyy" to 0xF0303A, "myatnyy" to 0xB8E8A0)
+        private val PO_MESTU = listOf("fiolet", "zelenyy", "zheltyy")
+        const val RAZMER_MIN = 0.5f
+        const val RAZMER_MAKS = 2f
+
+        fun ramkaImya(u: Uchastnik): String = u.ramka ?: if (u.rol == "moder") "mandarin" else PO_MESTU[u.cvet.coerceIn(0, PO_MESTU.size - 1)]
+        fun ramkaRgb(u: Uchastnik): Int = RAMKI[ramkaImya(u)] ?: 0x8B5CF6
+        fun ramkaHex(u: Uchastnik): String = "#%06x".format(ramkaRgb(u))
+
         const val MEST = 2
         const val MAKS_MEST = 3
         const val MAKS_ZHDUT = 4

@@ -263,4 +263,26 @@ class KomnataTest {
         val g2 = k.vhod(Svyaz(), kl.gost, "Макс", true, true, zheton = g.zheton)!!
         assertTrue(g2.zaglushen); assertTrue(g2.skryt); assertFalse(g2.kameraZapret)
     }
+
+    /** 2.7.8: цвета рамок без розового — модератор мандарин, гости по месту; gosti cvet / razmer, и в составе. */
+    @Test fun cvetIRazmerPlitki() {
+        val (m, _) = voyti(kl.moder, "Мод")
+        val (g, gs) = voyti(kl.gost, "Макс")
+        k.upr(null, "vpustit", g!!.id)
+        assertEquals("mandarin", Komnata.ramkaImya(m!!))
+        assertEquals("zelenyy", Komnata.ramkaImya(g))                      // второе место
+        assertTrue(Komnata.RAMKI.values.none { it == 0xFF8CC8 })           // розового нет
+        assertTrue(k.upr(null, "cvet", g.id, "krasnyy").contains("\"ok\":true"))
+        assertEquals(0xF0303A, Komnata.ramkaRgb(g))
+        assertTrue(gs.posl("sostav")!!.contains("\"ramka\":\"#f0303a\""))
+        assertTrue(k.upr(null, "cvet", g.id, "rozovyy").contains("\"ok\":false"))
+        assertTrue(k.upr(null, "cvet", g.id, "avto").contains("\"ok\":true"))
+        assertEquals("zelenyy", Komnata.ramkaImya(g))
+        assertTrue(k.upr(null, "razmer", m.id, "1.75").contains("\"ok\":true"))
+        assertEquals(1.75f, m.razmer, 0.001f)
+        k.upr(null, "razmer", m.id, "9")
+        assertEquals(Komnata.RAZMER_MAKS, m.razmer, 0.001f)
+        assertTrue(k.upr(null, "razmer", m.id, "x").contains("\"ok\":false"))
+        assertTrue(k.status().contains("\"razmer\":2.0"))
+    }
 }

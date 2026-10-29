@@ -31,8 +31,8 @@ object Raskladka {
      *  левый верх обоих — (0; SLOY_Y) в точках 1080p. */
     const val SLOY_Y = 130f
     const val SLOY_H = 800
-    const val SLOY_LG = 300
-    const val SLOY_LB = 900
+    const val SLOY_LG = 540                  // 2.7.8: плитка до ×2 (480) со свечением
+    const val SLOY_LB = 1160
 
     /** Плитка: левый верх, ширина [s] (точки 1080p); с камерой — квадрат s×s, без — строка s×STROKA. */
     class Plitka(val x: Float, val y: Float, val s: Float, val video: Boolean = true) {
@@ -48,13 +48,20 @@ object Raskladka {
     /** Плитки [n] гостей в кадре при [mest] местах (все с камерой). */
     fun plitki(n: Int, mest: Int): List<Plitka> = plitki(List(maxOf(0, n)) { true }, mest)
 
-    /** Плитки гостей в кадре по порядку: [video] — у кого камера (квадрат), у кого нет (строка с именем). */
-    fun plitki(video: List<Boolean>, mest: Int): List<Plitka> {
+    /**
+     * Плитки гостей в кадре по порядку: [video] — у кого камера (квадрат), у кого нет (строка с именем);
+     * [razmery] — множители размера (2.7.8, `gosti razmer`): не влезают по высоте — все квадраты чуть меньше.
+     */
+    fun plitki(video: List<Boolean>, mest: Int, razmery: List<Float> = emptyList()): List<Plitka> {
         if (video.isEmpty()) return emptyList()
-        val s = storona(mest)
-        val vsego = video.sumOf { (if (it) s else STROKA).toDouble() }.toFloat() + (video.size - 1) * ZAZOR
+        val s0 = storona(mest)
+        val r = video.indices.map { razmery.getOrElse(it) { 1f }.coerceIn(0.5f, 2f) }
+        val stroki = video.count { !it } * STROKA + (video.size - 1) * ZAZOR
+        val kv = video.indices.filter { video[it] }.sumOf { (s0 * r[it]).toDouble() }.toFloat()
+        val k = if (kv > 0f && stroki + kv > NIZ - VERH) maxOf(0.3f, (NIZ - VERH - stroki) / kv) else 1f
+        val vsego = stroki + kv * k
         var y = VERH + maxOf(0f, (NIZ - VERH - vsego) / 2f)
-        return video.map { v -> Plitka(KRAY, y, s, v).also { y += it.h + ZAZOR } }
+        return video.mapIndexed { i, v -> Plitka(KRAY, y, if (v) s0 * r[i] * k else s0 * r[i], v).also { y += it.h + ZAZOR } }
     }
 
     /** Левый край пузыря субтитров у плитки. */

@@ -61,6 +61,8 @@ import kotlin.concurrent.thread
  *                              pov=0|90|180|270 — повернуть картинку по часовой, kray=0 — вплотную снизу (сверху),
  *                              1 — с отступом 3 % высоты; bok=4 — отступ сбоку, % ширины (0 — вплотную; 2.3.8)
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}
+ *   GET /opoveshchenie?vid=follow|sub|raid&kto=НИК -> плашка сверху эфира на 6 с (2.7.8): «NEW FOLLOWER» и ник
+ *   GET /klip                -> «клип клип клип» (2.7.8): клипы камеры и эфира по 3 минуты в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
  *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 150) с видео телефона — MP4 в «Фильмы/Plus»
  *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}
  *   GET /karta/upr?vkl=0|1&g=100 -> звук карты в шлем и эфир вкл/выкл, громкость %
@@ -403,6 +405,17 @@ class FrameServer(
                     }
                     reply(out, 200, "application/json; charset=utf-8", json.toByteArray(Charsets.UTF_8))
                 }
+            }
+            "/opoveshchenie" -> {                         // 2.7.8: плашка «NEW FOLLOWER» и др. сверху эфира
+                val op = Hub.opoveshchenie
+                if (op == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8",
+                    op.pokazat(query["vid"] ?: "follow", Titry.dekod(query["kto"] ?: "")).toByteArray(Charsets.UTF_8))
+            }
+            "/klip" -> {                                  // 2.7.8: «клип клип клип» — камера и эфир по 3 минуты
+                val f = Hub.klipKlip
+                if (f == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8", f().toByteArray(Charsets.UTF_8))
             }
             "/kamera", "/kamera/vid", "/kamera/stranica", "/kamera/klip" -> {
                 val k = kamera()

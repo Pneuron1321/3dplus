@@ -32,6 +32,7 @@
     kamVyklK: '📷 выкл', kamVklK: '📷 вкл',
     mikPropal: 'Микрофон пропал (звонок? другое приложение?) — поднимаю…', mikNet: 'Микрофон не вернулся: проверь, не занят ли он звонком, и обнови страницу.',
     mikZanyat: 'Микрофон занят (звонок?) — вернётся сам, когда освободится.',
+    polnyyT: 'Во весь экран', nazadT: 'Обратно в окно',
     izFona: 'Пока Safari был свёрнут, iPhone выключал камеру и звук — тебя не было слышно. Вернула всё. Не сворачивай во время эфира.',
     kamPropala: 'Камера пропала — поднимаю…', kamNet2: 'Камера не вернулась: не занята ли она другим приложением? Голос в эфире идёт.',
     naushnikiSmena: '🎧 Наушники отключились — включила «🔇 Только голоса», чтобы эфир не услышал эхо твоего динамика.',
@@ -78,6 +79,7 @@
     kamVyklK: '📷 off', kamVklK: '📷 on',
     mikPropal: 'Microphone lost (a call? another app?) — restoring…', mikNet: 'The microphone did not come back: is a call using it? Reload the page.',
     mikZanyat: 'Microphone busy (a call?) — it comes back by itself.',
+    polnyyT: 'Full screen', nazadT: 'Back to window',
     izFona: 'While Safari was in the background, the iPhone paused your camera and sound — nobody heard you. Restored. Keep the page open during the stream.',
     kamPropala: 'Camera lost — restoring…', kamNet2: 'The camera did not come back: is another app using it? Your voice is still on stream.',
     naushnikiSmena: '🎧 Headphones unplugged — “🔇 Voices only” is on so the stream won’t hear your speaker as an echo.',
@@ -98,7 +100,7 @@
     netSsylki: 'The link appears when the tunnel is up.', vy: ' (you)', rtt: 'link', bufer: 'buffer', ms: 'ms',
     neSoedinilos: 'Could not connect to the stream. Check your internet or ask Alexander for a new link.',
   };
-  const CVET = ['#ff8cc8', '#ffaa5a', '#bea0ff'];
+  const CVET = ['#8b5cf6', '#12c24a', '#ffd21f'];                    // запасные; цвет рамки шлем присылает сам (ramka)
   const $ = (id) => document.getElementById(id);
   const pokaz = (id, da) => { $(id).hidden = !da; };
 
@@ -152,6 +154,7 @@
     $('tZhdiZag').textContent = T.zhdiZag; $('tZhdiPod').textContent = T.zhdiPod;
     $('tSlyshno').textContent = T.slyshno; $('tIgra').textContent = T.igra; $('tLyudi').textContent = T.lyudi;
     $('tGolosa').textContent = T.golosa; $('tTwitch').textContent = T.twitch; $('tTwitch2').textContent = T.twitch2;
+    $('knPolnyy').title = T.polnyyT; $('knNazad').title = T.nazadT; $('knKamP').title = T.kameraEfir;
     $('knRaciya').title = T.raciyaT; $('knGovori').textContent = T.govori;
     $('tPult').textContent = T.pult; $('tPriglasit').textContent = T.priglasit; $('tModerSsylka').textContent = T.moderSsylka;
     $('tNovaya').textContent = T.novaya; $('knSnova').textContent = T.snova;
@@ -353,9 +356,24 @@
     } catch (x) { S.facing = S.facing === 'user' ? 'environment' : 'user'; }
   }
 
+  // 2.7.8 (Санёк 25.10): во весь экран — эфир на весь экран телефона, поверх три кнопки: микрофон, камера, обратно.
+  // Где браузер умеет полный экран (Android, iPad) — настоящий; на iPhone — вся страница под картинку (Safari не даёт).
+  function polnyy(da) {
+    S.polnyy = da;
+    document.body.classList.toggle('polnyy', da);
+    const el = document.documentElement;
+    try {
+      if (da) { const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) { const p = f.call(el); if (p && p.catch) p.catch(() => {}); } }
+      else if (document.fullscreenElement || document.webkitFullscreenElement) {
+        const f = document.exitFullscreen || document.webkitExitFullscreen; if (f) { const p = f.call(document); if (p && p.catch) p.catch(() => {}); }
+      }
+    } catch (x) { }
+    knopki();
+  }
+
   function knopki() {
-    for (const id of ['knKamera', 'knKam2']) { $(id).classList.toggle('vkl', S.kamera && !S.kameraZapret); $(id).classList.toggle('zapret', S.kameraZapret); }
-    for (const id of ['knMikrofon', 'knMik2']) $(id).classList.toggle('vkl', S.mikrofon && !S.zaglushen);
+    for (const id of ['knKamera', 'knKam2', 'knKamP']) { $(id).classList.toggle('vkl', S.kamera && !S.kameraZapret); $(id).classList.toggle('zapret', S.kameraZapret); }
+    for (const id of ['knMikrofon', 'knMik2', 'knMikP']) $(id).classList.toggle('vkl', S.mikrofon && !S.zaglushen);
     $('knRaciya').classList.toggle('vkl', S.raciya);
   }
 
@@ -794,7 +812,7 @@
       const li = document.createElement('li');
       li.classList.toggle('govorit', S.govoryat.has(x.id));
       const c = document.createElement('span'); c.className = 'cvet';
-      c.style.background = x.cvet >= 0 ? CVET[x.cvet] : '#555'; c.style.color = c.style.background;
+      c.style.background = x.ramka || (x.cvet >= 0 ? CVET[x.cvet] : '#555'); c.style.color = c.style.background;
       const n = document.createElement('span'); n.className = 'imya'; n.textContent = x.imya + (x.id === S.id ? T.vy : '');
       const r = document.createElement('span'); r.className = 'rol';
       r.textContent = (x.rol === 'moder' ? T.moder + ' · ' : '') + (x.mikrofon && !x.zaglushen ? '🎤' : '🔇') + (x.kamera && !x.kamera_zapret ? ' 📷' : '') +
@@ -826,7 +844,7 @@
       const d = document.createElement('div'); d.className = 'pultKto'; d.dataset.id = x.id;
       d.classList.toggle('govorit', S.govoryat.has(x.id));                      // говорит сейчас — зелёная рамка: кого глушить
       const b = document.createElement('b'); b.textContent = x.imya + ' · ' + (T[x.rol] || x.rol) + (x.raciya ? ' · 📻' : '');
-      if (x.cvet >= 0) b.style.color = CVET[x.cvet];
+      if (x.ramka || x.cvet >= 0) b.style.color = x.ramka || CVET[x.cvet];
       d.append(b,
         knopka(x.skryt ? T.pokazatK : T.skrytK, '', () => upr(x.skryt ? 'pokazat' : 'skryt', x.id)),
         knopka(x.zaglushen ? T.vklK : T.zaglK, x.zaglushen ? 'vyk' : '', () => upr(x.zaglushen ? 'vklyuchit' : 'zaglushit', x.id)),
@@ -874,6 +892,12 @@
     };
     $('knKam2').onclick = kameraTumbler;
     $('knMik2').onclick = mikrofonTumbler;
+    $('knKamP').onclick = kameraTumbler;
+    $('knMikP').onclick = mikrofonTumbler;
+    $('knPolnyy').onclick = () => polnyy(true);
+    $('knNazad').onclick = () => polnyy(false);
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && S.polnyy) polnyy(false); });
+    document.addEventListener('webkitfullscreenchange', () => { if (!document.webkitFullscreenElement && S.polnyy) polnyy(false); });
     $('knVyyti').onclick = () => { S.ushel = true; try { S.ws && S.ws.send('{"t":"uhozhu"}'); } catch (x) { } sessionStorage.removeItem('plus-z'); konec(T.prichina.sam); };
     $('knSnova').onclick = () => location.reload();
     $('gromkost').oninput = (e) => { if (S.usil) S.usil.gain.value = e.target.value / 100; };
