@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+# treki — Плюс ищет Александру НОВЫЕ треки (29.10, Александр: «темп и жанр я делаю сам плейлистами, а чтобы Плюс мог
+# найти мне новых треков — хорошая основа»). Только свободная музыка без Content ID для эфира: каталог Kevin MacLeod
+# (incompetech.com, CC BY 4.0 — у каждого трека в каталоге есть жанр, настроение и темп), запасной — ccMixter
+# (только CC BY, без NC; темп там неизвестен). Находки — в /root/muzyka и в плейлист «novye»: Александр слушает,
+# лучшее переносит в свои плейлисты (`treki ostavit`), лишнее удаляет (`muzyka udalit`). Удалённое второй раз не придёт.
+#
+#   treki najti [что] [темп] [N]   — найти и скачать N новых (3 по умолчанию, до 10). «что» — жанр, настроение или
+#                                    слова по-русски или по-английски: техно, рок, джаз, эмбиент, мрачный, бодрый,
+#                                    эпичный, спокойный, погоня…; темп — «120-130», «темп 128», «быстрый», «медленный»
+#   treki pokazat [что] [темп] [N] — то же, но только показать, ничего не качать
+#   treki novye                    — что лежит в плейлисте novye
+#   treki ostavit ТРЕК ПЛЕЙЛИСТ    — перенести трек из novye в свой плейлист
+#   treki katalog                  — обновить каталог сейчас (сам — раз в неделю)
+import json
+import os
+import random
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+E = os.environ.get
+DIR = E('MUZYKA_DIR', '/root/muzyka')
+KATALOG = E('TREKI_KATALOG', '/root/.treki-katalog.json')
+BYLO = E('TREKI_BYLO', '/root/.treki-bylo.json')
+INC_URL = E('TREKI_INC_URL', 'https://incompetech.com/music/royalty-free/pieces.json')
+INC_MP3 = E('TREKI_INC_MP3', 'https://incompetech.com/music/royalty-free/mp3-royaltyfree/')
+CCM_URL = E('TREKI_CCM_URL', 'https://ccmixter.org/api/query')
+PLEYLIST = 'novye'
+NEDELYA = 7 * 24 * 3600
+EXT = ('.mp3', '.ogg', '.wav', '.m4a', '.flac', '.opus')
+UA = {'User-Agent': 'plus-treki/1.0'}
+
+# русское слово → что искать в жанре, настроении, названии и описании (английский каталог)
+SLOVAR = {
+    'техно': ['electronica', 'electronic', 'techno', 'house', 'edm', 'synth'],
+    'электро': ['electronica', 'electronic', 'synth'], 'электроника': ['electronica', 'electronic', 'synth'],
+    'хаус': ['house'], 'синт': ['synth'], 'синтвейв': ['synth', 'retro', '80s'],
+    'рок': ['rock'], 'метал': ['metal', 'heavy'], 'панк': ['punk'], 'джаз': ['jazz'], 'блюз': ['blues'],
+    'фанк': ['funk'], 'диско': ['disco'], 'поп': ['pop'], 'хип': ['hip hop', 'hip-hop'], 'хипхоп': ['hip hop', 'hip-hop'],
+    'рэп': ['hip hop', 'hip-hop'], 'эмбиент': ['ambient'], 'классика': ['classical'], 'оркестр': ['orchestra', 'orchestral'],
+    'кино': ['cinematic', 'soundtrack', 'film'], 'саундтрек': ['soundtrack', 'cinematic'], 'латино': ['latin'],
+    'регги': ['reggae'], 'кантри': ['country'], 'хоррор': ['horror'], 'ужас': ['horror', 'scary'], 'лаунж': ['lounge'],
+    'чиптюн': ['chiptune', '8-bit', '8bit'], 'восьмибит': ['chiptune', '8-bit', '8bit'], 'ретро': ['retro'],
+    'бодрый': ['driving', 'action', 'intense', 'energetic', 'upbeat'], 'энергичный': ['driving', 'intense', 'energetic', 'upbeat'],
+    'драйв': ['driving', 'action'], 'погоня': ['action', 'driving', 'chase', 'intense'], 'экшн': ['action'],
+    'бой': ['action', 'aggressive', 'intense', 'epic'], 'агрессивный': ['aggressive'], 'эпичный': ['epic'], 'эпик': ['epic'],
+    'спокойный': ['calming', 'relaxed', 'calm', 'peaceful'], 'расслабленный': ['relaxed', 'calming'], 'чилл': ['relaxed', 'chill', 'lounge'],
+    'мрачный': ['dark', 'somber', 'ominous'], 'тёмный': ['dark'], 'темный': ['dark'], 'грустный': ['somber', 'sad'],
+    'весёлый': ['bright', 'bouncy', 'humorous', 'uplifting', 'happy'], 'веселый': ['bright', 'bouncy', 'humorous', 'uplifting', 'happy'],
+    'светлый': ['bright', 'uplifting'], 'таинственный': ['mysterious', 'suspenseful'], 'напряжённый': ['suspenseful', 'intense'],
+    'напряженный': ['suspenseful', 'intense'], 'смешной': ['humorous', 'quirky'], 'грув': ['grooving', 'groove'],
+}
+TEMP_SLOVA = {'быстрый': (128, 999), 'быстро': (128, 999), 'побыстрее': (125, 999), 'fast': (128, 999),
+              'средний': (96, 127), 'медленный': (0, 95), 'медленно': (0, 95), 'помедленнее': (0, 100), 'slow': (0, 95)}
+LISHNIE = {'треки', 'трек', 'трека', 'треков', 'музыка', 'музыку', 'новые', 'новых', 'найди', 'мне', 'для', 'и', 'в', 'с',
+           'темп', 'темпом', 'bpm', 'штук', 'штуки', 'что-нибудь', 'какой-нибудь', 'track', 'tracks', 'music', 'new'}
+
+
+def norm(s):
+    return re.sub(r'[^a-z0-9а-яё]+', ' ', str(s).lower()).strip()
+
+
+def poluchit(url, tajm=40):
+    return urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=tajm).read()
+
+
+# ---------- каталог Kevin MacLeod ----------
+
+def _pole(d, *imena):
+    for k in imena:
+        for kk in (k, k.capitalize(), k.upper()):
+            v = d.get(kk)
+            if v not in (None, ''):
+                return v
+    return ''
+
+
+def _bpm(v):
+    m = re.search(r'\d+', str(v or ''))
+    n = int(m.group(0)) if m else 0
+    return n if 30 <= n <= 300 else 0
+
+
+def razobrat_inc(dannye):
+    """pieces.json → [{imya, fajl, zhanr, nastroenie, bpm, tekst, avtor, url}]; поля ищем и в разном регистре."""
+    spisok = dannye if isinstance(dannye, list) else (dannye.get('pieces') or dannye.get('data') or [])
+    out = []
+    for d in spisok:
+        if not isinstance(d, dict):
+            continue
+        imya = str(_pole(d, 'title', 'name')).strip()
+        fajl = str(_pole(d, 'filename', 'file', 'mp3')).strip() or (imya + '.mp3' if imya else '')
+        if not imya or not fajl.lower().endswith('.mp3'):
+            continue
+        zhanr = str(_pole(d, 'genre', 'genres'))
+        nastr = str(_pole(d, 'feel', 'feels', 'mood'))
+        out.append({'imya': imya, 'zhanr': zhanr, 'nastroenie': nastr, 'bpm': _bpm(_pole(d, 'bpm', 'tempo')),
+                    'tekst': norm(' '.join([imya, zhanr, nastr, str(_pole(d, 'description')), str(_pole(d, 'instruments')),
+                                            str(_pole(d, 'collection'))])),
+                    'avtor': 'Kevin MacLeod (CC BY 4.0)', 'url': INC_MP3 + urllib.parse.quote(fajl), 'istochnik': 'incompetech'})
+    return out
+
+
+def katalog(svezhiy=False):
+    try:
+        k = json.load(open(KATALOG, encoding='utf-8'))
+        if not svezhiy and time.time() - k.get('vremya', 0) < NEDELYA and k.get('treki'):
+            return k['treki']
+    except (OSError, ValueError):
+        k = {}
+    try:
+        treki = razobrat_inc(json.loads(poluchit(INC_URL, 60).decode('utf-8', 'replace')))
+        if len(treki) >= 1:
+            tmp = KATALOG + '.tmp'
+            json.dump({'vremya': time.time(), 'treki': treki}, open(tmp, 'w', encoding='utf-8'), ensure_ascii=False)
+            os.replace(tmp, KATALOG)
+            return treki
+    except Exception as e:
+        print('Каталог Kevin MacLeod не скачался (%s)%s.' % (str(e)[:80], ' — беру прошлый' if k.get('treki') else ''),
+              file=sys.stderr)
+    return k.get('treki') or []
+
+
+# ---------- запасной: ccMixter (CC BY) ----------
+
+def ccmixter(slova, n):
+    q = {'f': 'json', 'lic': 'by', 'sort': 'rank', 'limit': str(max(10, n * 4))}
+    angl = [s for s in slova if re.match(r'^[a-z0-9 -]+$', s)]
+    if angl:
+        q['tags'] = '+'.join(a.replace(' ', '_') for a in angl[:3])
+    try:
+        dannye = json.loads(poluchit(CCM_URL + '?' + urllib.parse.urlencode(q, safe='+'), 40).decode('utf-8', 'replace'))
+    except Exception:
+        return []
+    out = []
+    for d in dannye if isinstance(dannye, list) else []:
+        lic = norm(d.get('license_name', '') + ' ' + d.get('license_url', ''))
+        if 'nc' in lic.split() or 'noncommercial' in lic.replace(' ', '') or 'sampling' in lic:
+            continue
+        url = ''
+        for f in d.get('files') or []:
+            u = f.get('download_url') or ''
+            if u.lower().endswith('.mp3'):
+                url = u
+                break
+        imya = str(d.get('upload_name') or '').strip()
+        if not url or not imya:
+            continue
+        kto = str(d.get('user_real_name') or d.get('user_name') or 'ccMixter').strip()
+        teg = str(d.get('upload_tags') or '')
+        out.append({'imya': imya, 'zhanr': '', 'nastroenie': '', 'bpm': 0, 'tekst': norm(imya + ' ' + teg.replace(',', ' ')),
+                    'avtor': '%s (ccMixter, CC BY)' % kto, 'url': url, 'istochnik': 'ccmixter'})
+    return out
+
+
+# ---------- запрос ----------
+
+def razobrat_zapros(slova):
+    """«техно быстрый 5» → (группы синонимов, (от, до) темпа или None, сколько)."""
+    t = ' '.join(slova).lower().replace('–', '-').replace('—', '-')
+    temp, n = None, 3
+    m = re.search(r'(\d{2,3})\s*-\s*(\d{2,3})', t)
+    if m:
+        a, b = sorted((int(m.group(1)), int(m.group(2))))
+        temp = (a, b)
+        t = t[:m.start()] + ' ' + t[m.end():]
+    for c in re.findall(r'\d+', t):
+        c = int(c)
+        if 40 <= c <= 250 and temp is None:
+            temp = (c - 4, c + 4)
+        elif 1 <= c <= 10:
+            n = c
+    gruppy = []
+    for w in re.findall(r'[a-zа-яё][a-zа-яё-]*', t):
+        if w in LISHNIE or len(w) < 3:
+            continue
+        tw = po_osnove(w, TEMP_SLOVA)
+        if tw:
+            temp = temp or tw
+        else:
+            gruppy.append(po_osnove(w, SLOVAR) or [w])
+    return gruppy, temp, max(1, min(10, n))
+
+
+def po_osnove(w, d):
+    """Слово из словаря и в другой форме: «спокойное», «мрачную», «быстрое», «весёлое» — по основе (без окончания)."""
+    w = w.replace('ё', 'е')
+    for k, v in d.items():
+        k2 = k.replace('ё', 'е')
+        if w == k2 or (len(k2) >= 5 and w.startswith(k2[:max(4, len(k2) - 2)])):
+            return v
+    return None
+
+
+def podhodit(tr, gruppy, temp):
+    if temp:
+        if not tr['bpm'] or not (temp[0] <= tr['bpm'] <= temp[1]):
+            return 0
+    return sum(1 for g in gruppy if any(s in tr['tekst'] for s in g))
+
+
+def bylo():
+    try:
+        return set(json.load(open(BYLO, encoding='utf-8')))
+    except (OSError, ValueError):
+        return set()
+
+
+def uzhe_est():
+    try:
+        return {norm(os.path.splitext(f)[0]) for f in os.listdir(DIR) if f.lower().endswith(EXT)}
+    except OSError:
+        return set()
+
+
+def vybrat(slova):
+    gruppy, temp, n = razobrat_zapros(slova)
+    est, b = uzhe_est(), bylo()
+    svoi = [t for t in katalog() if norm(t['imya']) not in est and t['url'] not in b]
+    nashli = []
+    if gruppy or temp:
+        ochki = [(podhodit(t, gruppy, temp), t) for t in svoi]
+        vse = [t for o, t in ochki if o == len(gruppy) and (o > 0 or temp)]
+        if not vse and len(gruppy) > 1:                                     # всё сразу не нашлось — хоть что-то
+            vse = [t for o, t in ochki if o > 0]
+        nashli = vse
+    else:
+        nashli = svoi
+    random.shuffle(nashli)
+    nashli = nashli[:n]
+    if len(nashli) < n and not temp:                                        # темп ccMixter не знает
+        angl = [g[0] for g in gruppy]
+        for t in ccmixter(angl, n - len(nashli)):
+            if norm(t['imya']) not in est and t['url'] not in b and podhodit(t, gruppy, None) >= min(1, len(gruppy)):
+                nashli.append(t)
+                if len(nashli) >= n:
+                    break
+    return nashli, gruppy, temp, n
+
+
+def opisat(t):
+    p = [x for x in (t['zhanr'], ('%d BPM' % t['bpm']) if t['bpm'] else '', t['nastroenie'].split(',')[0].strip()) if x]
+    return '«%s»%s' % (t['imya'], (' (' + ', '.join(p) + ')') if p else '')
+
+
+def imya_fajla(t):
+    s = re.sub(r'[\\/:*?"<>|\n\r\t]+', ' ', t['imya']).strip()[:80] or 'trek'
+    f = s + '.mp3'
+    i = 2
+    while os.path.exists(os.path.join(DIR, f)):
+        f = '%s %d.mp3' % (s, i)
+        i += 1
+    return f
+
+
+def skachat(t):
+    dannye = poluchit(t['url'], 120)
+    if len(dannye) < 50_000 or not (dannye[:3] == b'ID3' or (dannye[0] == 0xFF and dannye[1] & 0xE0 == 0xE0)):
+        raise ValueError('не MP3 (%d байт)' % len(dannye))
+    os.makedirs(DIR, exist_ok=True)
+    f = imya_fajla(t)
+    tmp = os.path.join(DIR, '.skachivaetsya.mp3')
+    open(tmp, 'wb').write(dannye)
+    os.replace(tmp, os.path.join(DIR, f))
+    return f
+
+
+def v_pleylist(pl, f, ubrat=False):
+    put = os.path.join(DIR, '.pleylist-%s.txt' % pl)
+    try:
+        sp = [l.strip() for l in open(put, encoding='utf-8') if l.strip()]
+    except OSError:
+        sp = []
+    if ubrat:
+        sp = [x for x in sp if x != f]
+    elif f not in sp:
+        sp.append(f)
+    open(put, 'w', encoding='utf-8').write(''.join(x + '\n' for x in sp))
+    return sp
+
+
+def zapisat_avtora(f, avtor):
+    put = os.path.join(DIR, 'avtory.json')
+    try:
+        d = json.load(open(put, encoding='utf-8'))
+    except (OSError, ValueError):
+        d = {}
+    d[os.path.splitext(f)[0]] = avtor
+    json.dump(d, open(put, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+
+
+def najti(slova, kachat):
+    nashli, gruppy, temp, n = vybrat(slova)
+    if not nashli:
+        print('Новых треков%s не нашла%s. Попробуй шире: жанр или настроение без темпа.' % (
+            (' под «%s»' % ' '.join(slova)) if slova else '', (' в темпе %d–%d' % temp) if temp else ''))
+        return 1
+    if not kachat:
+        print('Нашла %d: %s. Скачать — treki najti с тем же запросом.' % (len(nashli), '; '.join(opisat(t) for t in nashli)))
+        return 0
+    b = bylo()
+    gotovo, oshibki = [], []
+    for t in nashli:
+        try:
+            f = skachat(t)
+        except Exception as e:
+            oshibki.append('%s: %s' % (t['imya'], str(e)[:60]))
+            continue
+        zapisat_avtora(f, t['avtor'])
+        v_pleylist(PLEYLIST, f)
+        b.add(t['url'])
+        gotovo.append(opisat(t))
+    try:
+        json.dump(sorted(b), open(BYLO, 'w', encoding='utf-8'), ensure_ascii=False)
+    except OSError:
+        pass
+    if not gotovo:
+        print('Нашла, но не скачалось: %s.' % '; '.join(oshibki))
+        return 1
+    print('Скачала %d новых в плейлист novye: %s.%s Послушать — muzyka pleylist novye vkl; '
+          'понравился — treki ostavit ТРЕК ПЛЕЙЛИСТ; нет — muzyka udalit ТРЕК.' % (
+              len(gotovo), '; '.join(gotovo), (' Не скачались: %s.' % '; '.join(oshibki)) if oshibki else ''))
+    return 0
+
+
+def main(a):
+    cmd = a[0].lower() if a else ''
+    rest = a[1:]
+    if cmd in ('najti', 'naiti', 'find', 'iskat'):
+        return najti(rest, True)
+    if cmd in ('pokazat', 'show', 'spisok'):
+        return najti(rest, False)
+    if cmd in ('novye', 'new', ''):
+        try:
+            sp = [l.strip() for l in open(os.path.join(DIR, '.pleylist-%s.txt' % PLEYLIST), encoding='utf-8') if l.strip()]
+        except OSError:
+            sp = []
+        sp = [f for f in sp if os.path.exists(os.path.join(DIR, f))]
+        print('В плейлисте novye %d: %s.' % (len(sp), ', '.join(os.path.splitext(f)[0] for f in sp)) if sp else
+              'Плейлист novye пуст. Найти — treki najti техно, treki najti спокойный 90-100…')
+        return 0
+    if cmd in ('ostavit', 'keep', 'perenesti'):
+        if len(rest) < 2:
+            print('treki ostavit ТРЕК ПЛЕЙЛИСТ — например: treki ostavit Volatile Reaction tekhno')
+            return 1
+        pl = rest[-1]
+        z = norm(' '.join(rest[:-1]))
+        try:
+            novye = [l.strip() for l in open(os.path.join(DIR, '.pleylist-%s.txt' % PLEYLIST), encoding='utf-8') if l.strip()]
+        except OSError:
+            novye = []
+        n = [f for f in novye if z == norm(os.path.splitext(f)[0])] or [f for f in novye if z in norm(os.path.splitext(f)[0])]
+        if len(n) != 1:
+            print(('Подходит несколько: %s. Уточни.' % ', '.join(os.path.splitext(f)[0] for f in n)) if n else
+                  'В novye нет «%s». Там: %s.' % (' '.join(rest[:-1]), ', '.join(os.path.splitext(f)[0] for f in novye) or 'пусто'))
+            return 1
+        sp = v_pleylist(pl, n[0])
+        v_pleylist(PLEYLIST, n[0], ubrat=True)
+        print('«%s» — в плейлисте %s (там %d).' % (os.path.splitext(n[0])[0], pl, len(sp)))
+        return 0
+    if cmd in ('katalog', 'catalog'):
+        t = katalog(svezhiy=True)
+        print('В каталоге %d треков Kevin MacLeod.' % len(t) if t else 'Каталог не скачался.')
+        return 0 if t else 1
+    print(__doc__ or 'treki najti [что] [темп] [N] | pokazat | novye | ostavit ТРЕК ПЛЕЙЛИСТ | katalog')
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
