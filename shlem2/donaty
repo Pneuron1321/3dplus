@@ -41,6 +41,8 @@ VECHER = os.environ.get('DONATY_VECHER', '/tmp/donaty-vecher.jsonl')
 SE_JWT = os.environ.get('DONATY_SE_JWT', '/root/.se-jwt')
 SE_POSL = os.environ.get('DONATY_SE_POSL', '/root/.donaty-se-posl')
 SE_FOLLOW_POSL = os.environ.get('DONATY_SE_FOLLOW_POSL', '/root/.donaty-se-follow-posl')
+SE_JWT_YT = os.environ.get('DONATY_SE_JWT_YT', '/root/.se-jwt-youtube')
+SE_FOLLOW_POSL_YT = os.environ.get('DONATY_SE_FOLLOW_POSL_YT', '/root/.donaty-se-follow-posl-youtube')
 ZVUK_SEK = float(os.environ.get('DONATY_ZVUK_SEK', 3.5))       # звук плашки фоловера в мосте (assets/zvuki/folover.mp3)
 SE_URL = os.environ.get('DONATY_SE_URL', 'https://api.streamelements.com/kappa/v2')
 POROG = os.environ.get('DONATY_POROG', '/root/.donaty-porog')
@@ -351,9 +353,9 @@ def iz_chata():
     return out
 
 
-def se_klyuch():
+def se_klyuch(put=None):
     try:
-        k = open(SE_JWT).read().strip()
+        k = open(put or SE_JWT).read().strip()
     except OSError:
         return None, None
     try:
@@ -398,14 +400,15 @@ def iz_se():
     return out
 
 
-def iz_se_follow():
-    """Новые фоловеры (2.7.8) — лента StreamElements (тот же ключ, что у чаевых). Первый раз — только отметка."""
-    k, kanal = se_klyuch()
+def iz_se_follow(jwt=None, posl_put=None, tipy=('follow',)):
+    """Новые фоловеры (2.7.8) — лента StreamElements (тот же ключ, что у чаевых). Первый раз — только отметка.
+    29.10: второй StreamElements на YouTube (`kluch se-youtube`) — новые подписчики YouTube (тип subscriber) — как фоловеры."""
+    k, kanal = se_klyuch(jwt)
     if not k or not kanal:
         return []
     seychas = time.time()
     iso = lambda t: time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(t))
-    q = urllib.parse.urlencode({'after': iso(seychas - 3600), 'before': iso(seychas + 60), 'limit': 25, 'types': 'follow',
+    q = urllib.parse.urlencode({'after': iso(seychas - 3600), 'before': iso(seychas + 60), 'limit': 25, 'types': ','.join(tipy),
                                 'mincheer': 0, 'minhost': 0, 'minsub': 0, 'mintip': 0, 'origin': 'feed'})
     req = urllib.request.Request('%s/activities/%s?%s' % (SE_URL, urllib.parse.quote(kanal), q),
                                  headers={'Authorization': 'Bearer ' + k, 'Accept': 'application/json'})
@@ -420,23 +423,31 @@ def iz_se_follow():
         return []
     if isinstance(docs, dict):
         docs = docs.get('docs') or []
-    docs = [a for a in docs if isinstance(a, dict) and a.get('type') == 'follow']
+    docs = [a for a in docs if isinstance(a, dict) and a.get('type') in tipy]
     try:
-        posl = open(SE_FOLLOW_POSL).read().strip()
+        posl = open(posl_put or SE_FOLLOW_POSL).read().strip()
     except OSError:
         posl = None
     novye = sorted((a for a in docs if a.get('createdAt', '') > (posl or '')), key=lambda a: a.get('createdAt', ''))
     if docs:
-        open(SE_FOLLOW_POSL, 'w').write(max(a.get('createdAt', '') for a in docs))
+        open(posl_put or SE_FOLLOW_POSL, 'w').write(max(a.get('createdAt', '') for a in docs))
     elif posl is None:
-        open(SE_FOLLOW_POSL, 'w').write(iso(seychas))
+        open(posl_put or SE_FOLLOW_POSL, 'w').write(iso(seychas))
     if posl is None:
         return []                                            # первый запуск: старых фоловеров не озвучиваем
     out = []
     for a in novye[-5:]:                                     # шквал — не больше пяти за раз
         dd = a.get('data') or {}
-        out.append({'t': time.time(), 'istochnik': 'follow', 'kto': dd.get('displayName') or dd.get('username') or '?'})
+        out.append({'t': time.time(), 'istochnik': 'follow', 'kto': dd.get('displayName') or dd.get('username') or '?',
+                    'pl': 'youtube' if jwt == SE_JWT_YT else 'twitch'})
     return out
+
+
+def iz_se_youtube():
+    """Подписчики YouTube — через второй StreamElements (`kluch se-youtube`); нет ключа — ничего."""
+    if not os.path.exists(SE_JWT_YT):
+        return []
+    return iz_se_follow(SE_JWT_YT, SE_FOLLOW_POSL_YT, ('subscriber', 'follow'))
 
 
 def demon():
@@ -456,7 +467,7 @@ def demon():
         for d in iz_chata():
             obrabotat(d)
         if time.time() >= sled_se:
-            for d in iz_se() + iz_se_follow():
+            for d in iz_se() + iz_se_follow() + iz_se_youtube():
                 obrabotat(d)
             sled_se = time.time() + SE_RAZ
         time.sleep(TAKT)

@@ -1619,17 +1619,66 @@ def soobshchenie_ploshchadki(chat, pl, login, kto, tekst, mid='', cvet=''):
 KICK_EMOTE = re.compile(r'\[emote:\d+:([^\]]*)\]')
 
 
-def kick_chatroom(kanal):
-    """id комнаты чата Kick: из /root/.kick-kanal (вторым словом, если Александр вписал сам) или с kick.com."""
+def kick_nomera(kanal):
+    """(номер комнаты чата, номер канала или None) Kick: из /root/.kick-kanal (вторым и третьим словом, если Александр
+    вписал сам) или с kick.com. Номер канала нужен для фоловеров и сабов (события канала)."""
     try:
         chasti = open(KICK_KANAL).read().split()
         if len(chasti) > 1 and chasti[1].isdigit():
-            return int(chasti[1])
+            return int(chasti[1]), (int(chasti[2]) if len(chasti) > 2 and chasti[2].isdigit() else None)
     except OSError:
         pass
     d = json.loads(urllib.request.urlopen(urllib.request.Request(KICK_API + kanal, headers=dict(BRAUZER, Accept='application/json')),
                                           timeout=20).read().decode('utf-8', 'replace'))
-    return int((d.get('chatroom') or {})['id'])
+    kan = d.get('id')
+    return int((d.get('chatroom') or {})['id']), (int(kan) if str(kan).isdigit() else None)
+
+
+def kick_chatroom(kanal):
+    return kick_nomera(kanal)[0]
+
+
+def kick_sobytie(stroka, uzhe=None):
+    """Событие Pusher канала Kick → запись для donaty (фоловер, саб, подарок сабов, рейд/хост) или None.
+    uzhe — кого из фоловеров уже благодарили за эфир (отписался-подписался — второй раз не надо)."""
+    try:
+        e = json.loads(stroka)
+    except ValueError:
+        return None
+    ev = str(e.get('event') or '').rsplit('\\', 1)[-1]
+    d = e.get('data')
+    try:
+        d = json.loads(d) if isinstance(d, str) else (d or {})
+    except ValueError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    if ev == 'FollowersUpdated':
+        kto = d.get('username')
+        if not kto or d.get('followed') is False:
+            return None
+        if uzhe is not None:
+            if kto.lower() in uzhe:
+                return None
+            uzhe.add(kto.lower())
+        return {'istochnik': 'follow', 'kto': kto, 'pl': 'kick'}
+    if ev in ('ChannelSubscriptionEvent', 'SubscriptionEvent'):
+        kto = d.get('username')
+        return {'istochnik': 'sub', 'kto': kto, 'pl': 'kick', 'summa': 0, 'valyuta': '$'} if kto else None
+    if ev == 'GiftedSubscriptionsEvent':
+        kto = d.get('gifter_username')
+        return {'istochnik': 'subgift', 'kto': kto, 'pl': 'kick', 'summa': 0, 'valyuta': '$'} if kto else None
+    if ev == 'StreamHostEvent':
+        kto = d.get('host_username')
+        if not kto:
+            return None
+        z = {'istochnik': 'raid', 'kto': kto, 'pl': 'kick', 'summa': 0, 'valyuta': '$'}
+        try:
+            z['zriteley'] = int(d.get('number_viewers') or 0)
+        except (TypeError, ValueError):
+            pass
+        return z
+    return None
 
 
 def kick_razobrat(stroka):
@@ -1652,6 +1701,7 @@ class ChatKick(threading.Thread):
     def __init__(self, chat):
         super().__init__(daemon=True)
         self.chat = chat
+        self.blagodarili = set()          # фоловеры Kick, кого уже поблагодарили (за этот запуск ушей)
 
     def run(self):
         pauza = 5
@@ -1663,9 +1713,13 @@ class ChatKick(threading.Thread):
             kanal = k.split()[0].lower()
             ws = None
             try:
-                room = kick_chatroom(kanal)
+                room, kan = kick_nomera(kanal)
                 ws = Ws(KICK_WS, timeout=200)
-                ws.poslat(json.dumps({'event': 'pusher:subscribe', 'data': {'auth': '', 'channel': 'chatrooms.%d.v2' % room}}))
+                kanaly = ['chatrooms.%d.v2' % room] + (['channel.%d' % kan, 'channel_%d' % kan] if kan else [])
+                for ch in kanaly:                 # чат + события канала: фоловеры, сабы, подарки, рейды (29.10)
+                    ws.poslat(json.dumps({'event': 'pusher:subscribe', 'data': {'auth': '', 'channel': ch}}))
+                if not kan:
+                    sost_plosh('kick_sobytiya', 'номер канала неизвестен — фоловеров Kick не вижу (chat kanal kick ИМЯ ЧАТ КАНАЛ)')
                 sost_plosh('kick', 'слушаю kick.com/%s' % kanal)
                 print(time.strftime('%H:%M:%S'), 'чат Kick: слушаю', kanal, flush=True)
                 pauza = 5
@@ -1677,6 +1731,11 @@ class ChatKick(threading.Thread):
                     m = kick_razobrat(stroka)
                     if m:
                         soobshchenie_ploshchadki(self.chat, 'kick', m[0], m[1], m[2], m[3], m[4])
+                        continue
+                    z = kick_sobytie(stroka, self.blagodarili)
+                    if z:
+                        v_donaty(z)               # плашка «NEW FOLLOWER», звук и «спасибо» — как у Twitch
+                        print(time.strftime('%H:%M:%S'), 'Kick:', z['istochnik'], z['kto'], flush=True)
             except Exception as x:
                 t = '%s %s' % (type(x).__name__, str(x)[:120])
                 if '403' in t:
@@ -1761,6 +1820,11 @@ def yt_soobshcheniya(d):
     out = []
     for a in _iskat(d, 'addChatItemAction'):
         item = (a or {}).get('item') or {}
+        r = item.get('liveChatMembershipItemRenderer')         # 29.10: новый спонсор (участник) канала — как саб
+        if r:
+            kto = ((r.get('authorName') or {}).get('simpleText') or '?').lstrip('@')
+            out.append((r.get('authorExternalChannelId') or kto, kto, '', r.get('id') or '', 'SPONSOR'))
+            continue
         for vid in ('liveChatTextMessageRenderer', 'liveChatPaidMessageRenderer'):
             r = item.get(vid)
             if not r:
@@ -1819,6 +1883,10 @@ class ChatYoutube(threading.Thread):
                         if mid in vidano:
                             continue
                         vidano.add(mid)
+                        if summa == 'SPONSOR':
+                            v_donaty({'istochnik': 'sub', 'kto': re.sub(r'[^\w-]', '', kto)[:25] or '?', 'pl': 'youtube',
+                                      'summa': 0, 'valyuta': '$'})
+                            continue
                         soobshchenie_ploshchadki(self.chat, 'yt', login, kto, tekst, mid)
                         if summa:
                             yt_superchat(kto, summa, tekst)

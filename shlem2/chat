@@ -11,7 +11,8 @@
 #   chat drug ubrat ИМЯ     убрать; chat drug — кто в друзьях (12.10)
 #   chat kanal                       — какие каналы слушаю (Twitch, Kick, YouTube) и что с чатами Kick/YouTube
 #   chat kanal twitch ИМЯ            — канал Twitch (как в twitch.tv/ИМЯ)
-#   chat kanal kick ИМЯ [НОМЕР]      — канал Kick (kick.com/ИМЯ); НОМЕР чата — если kick.com не пускает узнать сам
+#   chat kanal kick ИМЯ [ЧАТ [КАНАЛ]] — канал Kick (kick.com/ИМЯ); номера чата и канала — если kick.com не пускает
+#                                      узнать сам (номер канала нужен для фоловеров и сабов Kick)
 #   chat kanal youtube @ИМЯ | UC…    — канал YouTube; чат читается, пока на канале идёт эфир
 #   chat kanal kick|youtube ubrat    — не слушать
 U=${CHAT_URL:-http://localhost:8766}
@@ -42,7 +43,8 @@ for k, n in (("kick", "Kick"), ("yt", "YouTube")):
     YouTube) printf '%s' "$imya" | grep -Eq '^(@?[A-Za-z0-9_.-]{3,40}|UC[A-Za-z0-9_-]{22})$' || { echo "YouTube: @имя канала или его id UC…"; exit 1; }
              case "$imya" in UC*|@*) ;; *) imya="@$imya" ;; esac ;;
     Kick) printf '%s' "$imya" | grep -Eq '^[A-Za-z0-9_-]{2,40}$' || { echo "Kick: имя канала, как в адресе kick.com/ИМЯ"; exit 1; }
-          case "$4" in ''|*[!0-9]*) ;; *) imya="$imya $4" ;; esac ;;
+          case "$4" in ''|*[!0-9]*) ;; *) imya="$imya $4" ;; esac
+          case "$5" in ''|*[!0-9]*) ;; *) [ -n "$4" ] && imya="$imya $5" ;; esac ;;
     *) printf '%s' "$imya" | grep -Eq '^[A-Za-z0-9_]{2,25}$' || { echo "Twitch: имя канала латиницей"; exit 1; } ;;
   esac
   printf '%s\n' "$imya" > "$f"
