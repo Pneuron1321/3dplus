@@ -341,6 +341,24 @@ def efir(a):
         k, out = efir_skazat(U)
     elif c in ('status', 's'):
         k, out = efir_skazat(U)
+    elif c == 'klip':                                   # 2.7.9: клип шлема — otdelno (без окна камеры) | efir | vykl
+        r = a[1] if len(a) > 1 and a[1] in ('otdelno', 'efir', 'vykl') else None
+        kod, telo = zapros(U, '/klip/upr' + ('?rezhim=' + r if r else ''), 5) or (None, None)
+        try:
+            d = json.loads(telo or '{}')
+        except ValueError:
+            d = {}
+        if not d:
+            k, out = 1, 'Приложение 2 не ответило — открой Quest Claude Bridge 2.'
+        else:
+            imya = {'otdelno': 'отдельная запись со всеми плашками, без окна камеры (сама уступает игре)',
+                    'efir': 'сам эфир (с окном камеры, без лишней нагрузки)', 'vykl': 'выключен'}
+            out = 'Клип шлема: %s.' % imya.get(d.get('rezhim'), d.get('rezhim'))
+            if r:
+                out += ' Со следующего эфира.'
+            elif d.get('ekonom'):
+                out += ' Сейчас игре тесно — клип пишется на 5 кадрах, вернётся сам.'
+            k = 0
     elif c == 'mic':
         g = a[1] if len(a) > 1 else ''
         was = None

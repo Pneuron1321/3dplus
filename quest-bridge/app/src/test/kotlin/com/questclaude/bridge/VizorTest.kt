@@ -17,15 +17,15 @@ class VizorTest {
     /** Всё, что рисуется поверх игры в стиле viz, — в точках 1080p (наибольшие размеры). */
     private fun karty(): Map<String, Vizor.Pryam> {
         val lv = Vizor.LV
+        val k = Vizor.LV_K                                            // 2.7.9: левый верх вдвое меньше
         val m = mutableMapOf(
-            "топ и цель" to Vizor.Pryam(lv.l, lv.t, lv.l + Vizor.KARTA_TOPA_W, lv.t + Vizor.kartaTopaH(top = true, cel = true)),
-            "табло" to Vizor.Pryam(lv.l + Vizor.TABLO_X, lv.t, lv.l + Vizor.LV_W, lv.t + Vizor.tabloH(3)),
+            "топ и цель" to Vizor.Pryam(lv.l, lv.t, lv.l + Vizor.KARTA_TOPA_W * k, lv.t + Vizor.kartaTopaH(top = true, cel = true) * k),
+            "табло" to Vizor.Pryam(lv.l + Vizor.TABLO_X * k, lv.t, lv.l + Vizor.LV_W * k, lv.t + Vizor.tabloH(3) * k),
             "налёт" to Vizor.NALET_PILYULYA,
             "бюст Плюса" to Vizor.BYUST,
             "плашка Плюса" to Vizor.PLASHKA_PLYUSA,
             "чат" to Vizor.Pryam(Vizor.STOLB_X, Vizor.CHAT_VERH, Vizor.PRAVO, Vizor.NIZ),
             "сейчас играет" to Vizor.MUZ,
-            "роза" to Vizor.ROZA,
         )
         // субтитры — при любом месте окна камеры справа (и без него)
         for (pravo in listOf(Vizor.PRAVO, 1563f, 1363f, 1000f)) {
@@ -46,13 +46,19 @@ class VizorTest {
     @Test fun nichtoNeVylezaetZaKadr() {
         for ((imya, r) in karty()) assertTrue("$imya $r за кадром", r.vnutri(Vizor.KADR))
         // слои целиком в кадре
-        for ((imya, r) in mapOf("lv" to Vizor.LV, "pv" to Vizor.PV, "верх" to Vizor.RAMKA_VERH, "низ" to Vizor.RAMKA_NIZ))
+        for ((imya, r) in mapOf("lv" to Vizor.LV, "pv" to Vizor.PV, "pl" to Vizor.PL, "верх" to Vizor.RAMKA_VERH, "низ" to Vizor.RAMKA_NIZ))
             assertTrue("$imya $r", r.vnutri(Vizor.KADR))
         // содержимое слоёв — внутри своих картинок
-        assertTrue(Vizor.BYUST.vnutri(Vizor.PV.shire(0.5f)))
-        assertTrue(Vizor.PLASHKA_PLYUSA.vnutri(Vizor.PV))
+        assertTrue(Vizor.BYUST.vnutri(Vizor.PL.shire(0.5f)))
+        assertTrue(Vizor.PLASHKA_PLYUSA.vnutri(Vizor.PL))
+        // фигура с покачиванием (±3) и шириной ×1,08 — внутри слоя Плюса
+        val w = Vizor.TELO_W * Vizor.KT * Vizor.TELO_SHIRE
+        val cx = Vizor.TELO_X + Vizor.TELO_W * Vizor.KT / 2f
+        assertTrue(cx - w / 2f - 3f >= Vizor.PL.l && cx + w / 2f + 3f <= Vizor.PL.r)
+        assertTrue(Vizor.TELO_Y + Vizor.TELO_H * Vizor.KT + 2f <= Vizor.PL.b)
         assertTrue(Vizor.NALET_PILYULYA.vnutri(Vizor.PV))
         assertTrue(Vizor.kartaTopaH(top = true, cel = true) <= Vizor.LV_H)
+        assertEquals(Vizor.LV_W * Vizor.LV_K, Vizor.LV.w, 0.01f)
         assertTrue(Vizor.tabloH(3) <= Vizor.LV_H)
     }
 
@@ -64,15 +70,19 @@ class VizorTest {
             if (setOf(a, b) == setOf("плашка Плюса", "бюст Плюса")) continue
             assertFalse("$a $ra и $b $rb", ra.peresekaet(rb))
         }
-        // налёт — слева от бюста, чат — под плашкой Плюса
-        assertTrue(Vizor.NALET_PILYULYA.r <= Vizor.BYUST.l)
-        assertTrue(Vizor.CHAT_VERH >= Vizor.PLASHKA_PLYUSA.b)
-        // субтитры не наезжают на розу
+        // чат — под налётом (2.7.9)
+        assertTrue(Vizor.CHAT_VERH >= Vizor.NALET_PILYULYA.b)
+        // субтитры не наезжают на Плюса и музыку
         for ((imya, r) in karty().filterKeys { it.startsWith("субтитры") }) {
-            assertFalse(imya, r.peresekaet(Vizor.ROZA)); assertFalse(imya, r.peresekaet(Vizor.MUZ))
+            assertFalse(imya, r.peresekaet(Vizor.PL)); assertFalse(imya, r.peresekaet(Vizor.MUZ))
         }
-        // музыка — под розой (2.7.5); субтитры при айфоне лёжа (окно с 1363) не заходят на камеру
-        assertTrue(Vizor.MUZ.t >= Vizor.ROZA.b)
+        // 2.7.9: Плюс — в самом низу; музыка — наверху по центру, выше скоб визора; оповещение — под музыкой;
+        // нижних скоб нет; субтитры при айфоне лёжа (окно с 1363) не заходят на камеру
+        assertTrue(Vizor.PL.b >= Vizor.H - 10f)
+        assertTrue(Vizor.MUZ.t < Vizor.SKOBA_OTSTUP && Vizor.MUZ.b <= Vizor.VERH + 12f)
+        assertEquals(Vizor.W / 2f, (Vizor.MUZ.l + Vizor.MUZ.r) / 2f, 0.01f)
+        assertTrue(Opoveshchenie.VERH >= Vizor.MUZ.b)
+        assertTrue(Vizor.skoby().all { it.b < Vizor.H / 2f })
         assertTrue(Vizor.titryX(1363f) + Vizor.TW <= 1363f)
         // левый верх не доходит до налёта
         assertTrue(Vizor.LV.r <= Vizor.NALET_PILYULYA.l)

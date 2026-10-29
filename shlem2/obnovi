@@ -160,6 +160,13 @@ for f in $FAJLY; do
   fi
 done
 echo "Обновлено файлов: $n."
+# Транзитор и Фарватер Александра (29.10) — соведущей в её папку: полный текст для каждой третьей реплики
+VED_PAPKA=${OBNOVI_VED_PAPKA:-/root/.vedushchiy}
+for f in deep-transitor.md farvater.md; do
+  if curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f" 2> /dev/null && [ -s "$T/$f" ] && ! cmp -s "$T/$f" "$VED_PAPKA/$f"; then
+    mkdir -p "$VED_PAPKA" && cp "$T/$f" "$VED_PAPKA/$f" && echo "$f: соведущей — новая версия"
+  fi
+done
 if curl -fsSL "$B/CLAUDE.md?t=$(date +%s)" -o "$T/CLAUDE.md" 2> /dev/null && ! cmp -s "$T/CLAUDE.md" "$PRAVILA" &&
    ! cmp -s "$T/CLAUDE.md" "$BAZA/CLAUDE.md"; then
   echo "Вышли новые правила (CLAUDE.md). Ставит Александр сам: «! obnovi pravila», потом /exit."

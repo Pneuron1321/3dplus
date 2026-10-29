@@ -17,7 +17,9 @@
   gosti vpusk avto | ruchnoy — впускать сами или ждать модератора / Александра
   gosti mest 1|2|3        — мест в кадре (по умолчанию 2)
   gosti razmer ИМЯ 175    — плитка гостя в кадре: % обычного (50–200); +75 / -25 — от нынешнего
-  gosti cvet ИМЯ ЦВЕТ     — рамка плитки: мандарин | фиолетовый | зелёный | жёлтый | красный | мятный | avto
+  gosti prozrachnost [ИМЯ] N — прозрачность плиток гостей, % (0–90; было 15): без имени — всем
+  gosti cvet ИМЯ ЦВЕТ     — рамка плитки: мандарин | фиолетовый | зелёный | жёлтый | рубиновый | белый | шоколадный |
+                            песочный | мятный | avto (гостю цвет выпадает случайно из восьми, модератору — мандариново-грейпфрутовый)
   gosti gromkost 80       — гости в шлеме, % (0–300; тихий голос гостя мост и так выравнивает сам)
   gosti efir 100          — гости в эфире, % (0–200)
   gosti kartinka vkl | vykl — картинка эфира гостям (выкл — только звук: раздача тесная)
@@ -356,6 +358,8 @@ def status():
             p.append('камера ' + ('выкл модератором' if u.get('kamera_zapret') else ('вкл' if u['kamera'] else 'выкл')))
             if u.get('raciya'):
                 p.append('рация (слышно, только пока держит кнопку)')
+            if u.get('prozrachnost') is not None and int(u['prozrachnost']) != 15:
+                p.append('прозрачность %s %%' % u['prozrachnost'])
             if u.get('razmer') and abs(float(u['razmer']) - 1) > 0.01:
                 p.append('плитка %d %%' % round(float(u['razmer']) * 100))
             if u.get('govorit'):
@@ -403,10 +407,12 @@ def upr(chto, kto=None, dop=None):
 
 
 CVETA = {'mandarin': 'mandarin', 'мандарин': 'mandarin', 'мандариновый': 'mandarin', 'оранжевый': 'mandarin',
-         'коралловый': 'mandarin', 'грейпфрут': 'mandarin', 'fiolet': 'fiolet', 'фиолетовый': 'fiolet',
-         'zelenyy': 'zelenyy', 'зелёный': 'zelenyy', 'зеленый': 'zelenyy', 'zheltyy': 'zheltyy', 'жёлтый': 'zheltyy',
-         'желтый': 'zheltyy', 'krasnyy': 'krasnyy', 'красный': 'krasnyy', 'myatnyy': 'myatnyy', 'мятный': 'myatnyy',
-         'avto': 'avto', 'авто': 'avto', 'обычный': 'avto'}
+         'коралловый': 'mandarin', 'грейпфрут': 'mandarin', 'грейпфрутовый': 'mandarin',
+         'fiolet': 'fiolet', 'фиолетовый': 'fiolet', 'zelenyy': 'zelenyy', 'зелёный': 'zelenyy', 'зеленый': 'zelenyy',
+         'zheltyy': 'zheltyy', 'жёлтый': 'zheltyy', 'желтый': 'zheltyy', 'krasnyy': 'krasnyy', 'красный': 'krasnyy',
+         'рубиновый': 'krasnyy', 'belyy': 'belyy', 'белый': 'belyy', 'shokoladnyy': 'shokoladnyy',
+         'шоколадный': 'shokoladnyy', 'pesochnyy': 'pesochnyy', 'песочный': 'pesochnyy', 'myatnyy': 'myatnyy',
+         'мятный': 'myatnyy', 'avto': 'avto', 'авто': 'avto', 'обычный': 'avto', 'случайный': 'avto'}
 
 
 def razmer(kto, n):
@@ -435,7 +441,8 @@ def cvet(kto, c):
     """Цвет рамки плитки гостя (2.7.8)."""
     k = CVETA.get(c.lower())
     if not k:
-        print('Цвета: мандарин, фиолетовый, зелёный, жёлтый, красный, мятный; avto — как было.'); return 1
+        print('Цвета: мандарин (грейпфрутовый), фиолетовый, зелёный, жёлтый, рубиновый, белый, шоколадный, песочный, мятный; '
+              'avto — модератору мандарин, гостю снова случайный.'); return 1
     return upr('cvet', kto, k)
 
 
@@ -481,6 +488,14 @@ def main(a):
         return upr('kamera_vkl' if ost[-1] == 'vkl' else 'kamera_vykl', ' '.join(ost[:-1]))
     if c == 'razmer' and len(ost) >= 2:
         return razmer(' '.join(ost[:-1]), ost[-1])
+    if c == 'prozrachnost' and ost:                     # 2.7.9: gosti prozrachnost [ИМЯ] N (%, 0–90)
+        n = ost[-1].rstrip('%')
+        if not re.fullmatch(r'\d{1,2}', n):
+            print('Прозрачность — числом 0–90: gosti prozrachnost 40 (всем) или gosti prozrachnost ИМЯ 40.'); return 1
+        k = upr('prozrachnost', ' '.join(ost[:-1]) or None, n)
+        if k == 0:
+            print('Плитки %s — прозрачность %s %%.' % (('гостя ' + ' '.join(ost[:-1])) if ost[:-1] else 'всех гостей', n))
+        return k
     if c == 'cvet' and len(ost) >= 2:
         return cvet(' '.join(ost[:-1]), ost[-1])
     if c == 'novaya':

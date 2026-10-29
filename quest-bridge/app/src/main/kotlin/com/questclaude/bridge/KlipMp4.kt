@@ -23,11 +23,15 @@ object KlipMp4 {
     const val MAKS_SEK = 185
 
     /** Ответ JSON: {"ok":true,"put":"Movies/Plus/…mp4","sek":150,"mb":88} или {"oshibka":"…"}. */
-    fun sohranit(ctx: Context, z: KlipZapis, sek: Int, nachalo: String = "plus-klip"): String {
+    fun sohranit(ctx: Context, z: KlipZapis, sek: Int, nachalo: String = "plus-klip"): String =
+        sohranitSnimok(ctx, { z.snimok(sek.coerceIn(5, MAKS_SEK)) }, nachalo)
+
+    /** То же для готового снимка (2.7.9: два клипа на одно время — снимки режет KlipSinhron). */
+    fun sohranitSnimok(ctx: Context, snimok: () -> KlipZapis.Snimok?, nachalo: String, imya0: String? = null): String {
         if (!zanyat.compareAndSet(false, true)) return "{\"oshibka\":\"клип уже сохраняется\"}"
         try {
-            val s = z.snimok(sek.coerceIn(5, MAKS_SEK)) ?: return "{\"oshibka\":\"${if (nachalo.contains("efir")) "эфира не было" else "камера ещё ничего не прислала"} — клипа нет\"}"
-            val imya = "$nachalo-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".mp4"
+            val s = snimok() ?: return "{\"oshibka\":\"${if (nachalo.contains("shlem")) "эфира не было (клип шлема пишется во время эфира)" else "камера ещё ничего не прислала"} — клипа нет\"}"
+            val imya = imya0?.let { "$nachalo-$it.mp4" } ?: "$nachalo-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".mp4"
             val r = ctx.contentResolver
             val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, imya)

@@ -62,6 +62,7 @@ import kotlin.concurrent.thread
  *                              1 — с отступом 3 % высоты; bok=4 — отступ сбоку, % ширины (0 — вплотную; 2.3.8)
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}
  *   GET /opoveshchenie?vid=follow|sub|raid&kto=НИК -> плашка сверху эфира на 6 с (2.7.8): «NEW FOLLOWER» и ник
+ *   GET /klip/upr[?rezhim=otdelno|efir|vykl] -> клип шлема: свой кодировщик без окна камеры (уступает игре) | сам эфир | нет
  *   GET /klip                -> «клип клип клип» (2.7.8): клипы камеры и эфира по 3 минуты в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
  *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 150) с видео телефона — MP4 в «Фильмы/Plus»
  *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}
@@ -411,6 +412,11 @@ class FrameServer(
                 if (op == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())
                 else reply(out, 200, "application/json; charset=utf-8",
                     op.pokazat(query["vid"] ?: "follow", Titry.dekod(query["kto"] ?: "")).toByteArray(Charsets.UTF_8))
+            }
+            "/klip/upr" -> {                              // 2.7.9: как писать клип шлема — otdelno | efir | vykl
+                val f = Hub.klipUpr
+                if (f == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8", f(query).toByteArray(Charsets.UTF_8))
             }
             "/klip" -> {                                  // 2.7.8: «клип клип клип» — камера и эфир по 3 минуты
                 val f = Hub.klipKlip

@@ -150,7 +150,6 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
     // ---------- плашки: настоящий код ----------
     pole(rz, "kameraNs", System.nanoTime())
     zvat(n, "risovat", Nalozhenie.Pokaz(), "obychno", now)
-    zvat(n, "radar", now + 7_000)                                   // роза — повернувшись, как через 7 с эфира
     val ek = g.naEkrane()
     val plitki = if (v.vnizu) null else ek.mapTo(HashSet()) { it.first.golos }      // как шаг «субтитры»
     val vse = titry.seychas(gostiVnizu = v.vnizu, uPlitok = plitki)
@@ -190,10 +189,9 @@ private fun kadr(v: Varyant, dir: File): ABitmap {
     val bmp = { imya: String -> vzyat<ABitmap>(n, imya) }
     // слои — в порядке развилки; места — как plashkaNa
     kc.drawBitmap(bmp("bmp"), (W - Nalozhenie.W - m).toFloat(), m.toFloat(), null)                      // pv
-    kc.drawBitmap(bmp("radarBmp"), m.toFloat(), (H - m - Nalozhenie.RH).toFloat(), null)                // ln
     kc.drawBitmap(bmp("igraBmp"), m.toFloat(), m.toFloat(), null)                                       // lv
     if (ts.isNotEmpty()) {
-        val levo = m + Nalozhenie.RW
+        val levo = m                                                  // розы нет (2.7.9)
         val pravo = minOf(W - m, r[0] - m)
         val c = Raskladka.centrNiza(W, levo, pravo, Nalozhenie.TW)
         kc.drawBitmap(bmp("titrBmp"), (c - Nalozhenie.TW / 2).toFloat(), (H - H * 5 / 100 - Nalozhenie.TH).toFloat(), null)  // nc

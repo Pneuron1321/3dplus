@@ -33,7 +33,8 @@ class Efir(
     private val razvilka: Razvilka,
     private val o: Opts,
     nastroyki: List<Ploshchadki.Nastroyka>,
-    /** Круг клипа эфира (2.7.8, «клип клип клип»): то же сжатое видео и звук, что уходят на Twitch, — без пережатия. */
+    /** Круг клипа шлема (2.7.8, «клип клип клип»): сюда — звук эфира как есть; видео кладёт KlipShlem (2.7.9: со слоями
+     *  эфира, но без окна камеры — своим кодировщиком) или, в режиме «efir klip efir», сам эфир (klipVideo). */
     private val klip: KlipZapis? = null,
 ) {
     class Opts(val url: String, val w: Int, val h: Int, val fps: Int, val kbps: Int, val akbps: Int = 160,
@@ -76,6 +77,9 @@ class Efir(
 
     /** Громкость голоса в эфире — меняется на ходу (`efir mic 4`). */
     @Volatile var mikrofon = o.mic
+
+    /** Клип шлема — сам эфир (режим «efir klip efir»: ноль лишней нагрузки, но с окном камеры). */
+    @Volatile var klipVideo = false
 
     /** Частота и поток, которые выбрал Александр (меняются на ходу: `efir 60`, `efir potok 10`). */
     @Volatile var celFps = o.fps
@@ -123,6 +127,9 @@ class Efir(
     @Volatile private var kadrov = 0L
     /** Потерянные кадры эфира всего (по всем площадкам) — диспетчеру «тесно». */
     val drops: Long get() = otpravka.drops
+    /** Эфир сам на 30 к/с, потому что тесно игре (автооткат). */
+    val avto30: Boolean get() = tesnoS != 0L
+
     /** Сеть не успевает (площадка теряет кадры или очередь полна) — картинка гостям ждёт (2.7.6). */
     val tesnoSet: Boolean get() = otpravka.tesnoSet
     private var lastSent = 0L
@@ -311,6 +318,18 @@ class Efir(
         threads += thread(name = "efir-video", isDaemon = true) { videoLoop(c) }
     }
 
+    /**
+     * Ключевой кадр эфира в то же мгновение, что у камеры (2.7.9, KlipSinhron): зовёт камера на каждом своём ключевом;
+     * не чаще раза в 1,9 с — ритм эфира остаётся «раз в 2 с», как советует Twitch.
+     */
+    fun klyuchevoyKlipa() {
+        val now = System.nanoTime()
+        if (now - klipKlyuchNs < 1_900_000_000L) return
+        klipKlyuchNs = now
+        klyuchevoy()
+    }
+    @Volatile private var klipKlyuchNs = 0L
+
     private fun klyuchevoy() {
         try { venc?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }) } catch (e: Exception) { }
     }
@@ -334,7 +353,7 @@ class Efir(
                     val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     kadrov++
                     otpravka.video(Flv.video(Flv.avcc(a), key), info.presentationTimeUs, key)
-                    try { klip?.video(a, info.presentationTimeUs, key) } catch (e: Exception) { }
+                    if (klipVideo) try { klip?.video(a, info.presentationTimeUs, key) } catch (e: Exception) { }
                 }
             }
         }
@@ -344,7 +363,7 @@ class Efir(
         val (sps, pps) = Flv.spsPps(annexB)
         if (sps != null && pps != null) {
             otpravka.videoConfig = Flv.video(Flv.avcConfig(sps, pps), key = true, config = true)
-            try { klip?.golova(sps, pps, o.w, o.h) } catch (e: Exception) { }
+            if (klipVideo) try { klip?.golova(sps, pps, o.w, o.h) } catch (e: Exception) { }
         }
     }
 

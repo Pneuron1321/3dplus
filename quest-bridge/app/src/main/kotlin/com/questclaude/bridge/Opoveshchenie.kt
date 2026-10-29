@@ -7,6 +7,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.RectF
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -17,8 +19,10 @@ import kotlin.concurrent.thread
  * стоит [DERZHAT_MS], уходит за 0,5 с; несколько подряд — по очереди. Слой развилки "al". Без эфира — некуда
  * рисовать, событие пропускается. Кто шлёт: donaty (фоловеры StreamElements, подписки и рейды из чата) —
  * GET /opoveshchenie?vid=follow|sub|raid&kto=НИК.
+ * Звук (Александр 29.10, свой — из его ролика): assets/zvuki/folover.mp3 вместе с плашкой; играет как медиа с захватом —
+ * его слышат и эфир, и шлем.
  */
-class Opoveshchenie(ctx: Context, private val razvilka: () -> Razvilka?) {
+class Opoveshchenie(private val ctx: Context, private val razvilka: () -> Razvilka?) {
     private class Sobytie(val vid: String, val kto: String)
 
     private val k = VizorKist(ctx)
@@ -51,6 +55,7 @@ class Opoveshchenie(ctx: Context, private val razvilka: () -> Razvilka?) {
 
     private fun pokazatOdno(s: Sobytie) {
         val rz = razvilka() ?: return
+        zvuk()
         val t0 = System.currentTimeMillis()
         val vsego = VYEZD_MS + DERZHAT_MS + UHOD_MS
         while (true) {
@@ -67,6 +72,20 @@ class Opoveshchenie(ctx: Context, private val razvilka: () -> Razvilka?) {
         }
         rz.sloy("al", null)
         pokazano++
+    }
+
+    private fun zvuk() {
+        try {
+            val p = MediaPlayer()
+            ctx.assets.openFd(ZVUK).use { p.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
+            p.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL).build())     // эфир его захватывает
+            p.setOnCompletionListener { it.release() }
+            p.setOnErrorListener { mp, _, _ -> mp.release(); true }
+            p.prepare()
+            p.start()
+        } catch (e: Exception) { Pamyat.zapis("оповещение: звук не сыгран (${e.message})") }
     }
 
     private fun narisovat(s: Sobytie, sdvig: Float, a: Float) {
@@ -89,13 +108,14 @@ class Opoveshchenie(ctx: Context, private val razvilka: () -> Razvilka?) {
     }
 
     companion object {
+        const val ZVUK = "zvuki/folover.mp3"
         const val W = 720
         const val H = 130
         const val VYEZD_MS = 400L
         const val DERZHAT_MS = 5500L
         const val UHOD_MS = 500L
-        /** Сверху по центру, верх плашки — столько точек 1080p от верха кадра (ниже скоб визора). */
-        const val VERH = 44f
+        /** Сверху по центру, верх плашки — столько точек 1080p от верха кадра (2.7.9: под «сейчас играет»). */
+        val VERH = Vizor.MUZ.b + 8f
         val METKI = mapOf("follow" to "NEW FOLLOWER", "sub" to "NEW SUBSCRIBER", "raid" to "RAID")
         private val ZNAKI = mapOf("follow" to "♥", "sub" to "★", "raid" to "»")
     }

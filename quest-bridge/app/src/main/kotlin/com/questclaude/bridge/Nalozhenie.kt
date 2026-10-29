@@ -129,7 +129,9 @@ class Nalozhenie(
     private val zver by lazy { ZverLico(kartinka(ctx, "zver-lico.png"), kartinka(ctx, "zver-chelyust.png")) }   // vid lico zver
     private val pvV by lazy { Bitmap.createBitmap(Vizor.PV_W, Vizor.PV_H, Bitmap.Config.ARGB_8888) }
     private val cV by lazy { Canvas(pvV) }
-    private val lvV by lazy { Bitmap.createBitmap(Vizor.LV_W, Vizor.LV_H, Bitmap.Config.ARGB_8888) }
+    private val plV by lazy { Bitmap.createBitmap(Vizor.PL_W, Vizor.PL_H, Bitmap.Config.ARGB_8888) }   // 2.7.9: Плюс внизу слева
+    private val cPl by lazy { Canvas(plV) }
+    private val lvV by lazy { Bitmap.createBitmap((Vizor.LV_W * Vizor.LV_K).toInt(), (Vizor.LV_H * Vizor.LV_K).toInt(), Bitmap.Config.ARGB_8888) }
     private val chatV by lazy { Bitmap.createBitmap(Vizor.CW, Vizor.CH, Bitmap.Config.ARGB_8888) }
     private val titrV by lazy { Bitmap.createBitmap(Vizor.TW, Vizor.TH, Bitmap.Config.ARGB_8888) }
     private val mzV by lazy { Bitmap.createBitmap(Vizor.MZW, Vizor.MZH, Bitmap.Config.ARGB_8888) }
@@ -186,7 +188,6 @@ class Nalozhenie(
         potok = thread(name = "nalozhenie", isDaemon = true) {
             var tikMs = System.currentTimeMillis() + 1000
             var bylo = ""
-            var radarBylo = ""
             var titrBylo = ""
             var igraBylo = ""
             var itogiBylo = ""
@@ -195,7 +196,6 @@ class Nalozhenie(
             var sostBylo = ""
             var liceMs = 0L
             var mimikaBylo = ""
-            var rozaMs = 0L
             var chatMs = 0L
             var glazaBylo = 0
             var gostiBylo = ""
@@ -212,15 +212,14 @@ class Nalozhenie(
                     val st = if (v) "viz" else "staryj"
                     if (st != stilBylo) {
                         stilBylo = st                                 // и споткнувшись — не пробовать каждые 70 мс
-                        bylo = ""; radarBylo = ""; titrBylo = ""; igraBylo = ""; chatBylo = ""; muzBylo = ""; itogiBylo = ""
+                        bylo = ""; titrBylo = ""; igraBylo = ""; chatBylo = ""; muzBylo = ""; itogiBylo = ""
                         puzyriBylo = ""; gostiBylo = ""
                         if (v) {
                             val vv = Bitmap.createBitmap(Vizor.W, Vizor.RAMKA_H, Bitmap.Config.ARGB_8888)
-                            val vn = Bitmap.createBitmap(Vizor.W, Vizor.RAMKA_H, Bitmap.Config.ARGB_8888)
-                            viz.ramka(vv, vn)
-                            razvilka.sloy("vv", vv); razvilka.sloy("vn", vn)      // развилка взяла копии
-                            vv.recycle(); vn.recycle()
-                        } else { razvilka.sloy("vv", null); razvilka.sloy("vn", null) }
+                            viz.ramka(vv)
+                            razvilka.sloy("vv", vv); razvilka.sloy("vn", null)    // развилка взяла копию; нижних скоб нет (2.7.9)
+                            vv.recycle()
+                        } else { razvilka.sloy("vv", null); razvilka.sloy("vn", null); razvilka.sloy("pl", null) }
                     }
                 }
                 val sost = sostoyanie(now)
@@ -243,7 +242,10 @@ class Nalozhenie(
                 val klyuch = "${p.lico} ${p.nalet} ${nalet.vsegoSek} ${nalet.efirSek} ${nalet.sotnyaVidna(now)} ${cel.status()}"
                 // каждая плашка — сама по себе: споткнулась одна (лицо, роза) — чат, субтитры и остальные живут
                 shag("лицо") {
-                    if (!p.lico && !p.nalet && (v || !cel.vidna)) { if (bylo != "net") razvilka.plashka(null); bylo = "net" }
+                    if (!p.lico && !p.nalet && (v || !cel.vidna)) {
+                        if (bylo != "net") { razvilka.plashka(null); razvilka.sloy("pl", null) }
+                        bylo = "net"
+                    }
                     else {
                         val mim = "$morgaet $ulybka ${Oformlenie.lico} ${prisedKadr(now)}"
                         val shagMs = when {
@@ -253,18 +255,13 @@ class Nalozhenie(
                             else -> 200L
                         }
                         if (klyuch != bylo || sost != sostBylo || mim != mimikaBylo || (anim && now - liceMs >= shagMs)) {
-                            if (v) { risovatViz(p, sost, now); razvilka.plashka(pvV) }
+                            if (v) { risovatViz(p, sost, now); razvilka.plashka(pvV); razvilka.sloy("pl", plV) }
                             else { risovat(p, sost, now); razvilka.plashka(bmp) }
                             bylo = klyuch; sostBylo = sost; mimikaBylo = mim; liceMs = now
                         }
                     }
                 }
-                shag("роза") {
-                    if (!p.radar) { if (radarBylo != "net") razvilka.sloy("ln", null); radarBylo = "net" }
-                    else if (radarBylo == "net" || (!razgovor && !tesnoIgre && now - rozaMs >= ROZA_MS)) {   // разговор, тесно — стоит
-                        radar(now); razvilka.sloy("ln", radarBmp); radarBylo = ""; rozaMs = now
-                    }
-                }
+                // роза ветров (слой "ln") убрана в 2.7.9 (Александр 29.10): на её месте — Плюс во весь рост (слой "pl")
                 val w = Hub.lastWakeMs
                 if (w != vyzovBylo) { itogi.vyzovov++; vyzovBylo = w }
                 shag("субтитры") {
@@ -370,7 +367,7 @@ class Nalozhenie(
                         scenaBylo = sKlyuch
                     }
                 }
-                Thread.sleep(if (anim || p.radar || Hub.fon?.plashkaVidna(now) == true) 70 else 200)                // шаг 70 мс; что перерисовать — решают плашки
+                Thread.sleep(if (anim || Hub.fon?.plashkaVidna(now) == true) 70 else 200)                // шаг 70 мс; что перерисовать — решают плашки
             }
         }
     }
@@ -393,7 +390,7 @@ class Nalozhenie(
         rabotaet = false
         potok?.join(1000)
         kompas.stop()
-        try { for (u in listOf("pv", "ln", "lv", "nc", "pc", "vse", "lg", "lb", "mz", "vv", "vn", "sc")) razvilka.sloy(u, null) } catch (e: Exception) { }
+        try { for (u in listOf("pv", "pl", "lv", "nc", "pc", "vse", "lg", "lb", "mz", "vv", "vn", "sc")) razvilka.sloy(u, null) } catch (e: Exception) { }
         itogiBmp?.recycle(); itogiBmp = null
         scenaBmp?.recycle(); scenaBmp = null
         Oformlenie.sbros()                                            // следующий эфир — без прошлой заставки
@@ -424,18 +421,19 @@ class Nalozhenie(
         if (cel.vidna) celPodPlechami()
     }
 
-    /** Визор: налёт пилюлей слева от головы, бюст Плюса (крупнее, прямые щёки), плашка «PLUS co-host». */
+    /** Визор: налёт пилюлей в правом верхнем углу (слой "pv"); Плюс во весь рост и знак «++3» — внизу слева (слой "pl", 2.7.9). */
     private fun risovatViz(p: Pokaz, sost: String, now: Long) {
-        val c = cV
+        cV.drawColor(0, PorterDuff.Mode.CLEAR)
+        if (p.nalet) viz.nalet(cV, Vizor.PV.l, Vizor.PV.t, now)
+        val c = cPl
         c.drawColor(0, PorterDuff.Mode.CLEAR)
-        val dx = Vizor.PV.l
-        val dy = Vizor.PV.t
-        if (p.nalet) viz.nalet(c, dx, dy, now)
+        val dx = Vizor.PL.l
+        val dy = Vizor.PL.t
         if (p.lico && Oformlenie.lico == "plus" && telo != null) {
-            teloViz(c, sost, now, Vizor.TELO_X - dx, Vizor.TELO_Y - dy, Vizor.KT, Vizor.PV_W.toFloat(), Vizor.PV_H.toFloat())
+            teloViz(c, sost, now, Vizor.TELO_X - dx, Vizor.TELO_Y - dy, Vizor.KT, Vizor.PL_W.toFloat(), Vizor.PL_H.toFloat())
             viz.plashkaPlyusa(c, dx, dy)
         } else if (p.lico) licoPryamoe?.let {
-            golova(it, sost, now, c, Vizor.D_LICA, Vizor.LICO_X - dx, Vizor.LICO_Y - dy, Vizor.PV_W.toFloat(), Vizor.PV_H.toFloat())
+            golova(it, sost, now, c, Vizor.D_LICA, Vizor.LICO_X - dx, Vizor.LICO_Y - dy, Vizor.PL_W.toFloat(), Vizor.PL_H.toFloat())
             viz.plashkaPlyusa(c, dx, dy)
         }
     }
@@ -884,7 +882,7 @@ class Nalozhenie(
             if (!p.video) { strokaGostya(u, r, cvet); continue }
             val rad = Raskladka.RADIUS
             if (!g.videoVidno(u.id)) {                                            // без камеры — буква
-                gp.style = Paint.Style.FILL; gp.color = Color.argb(225, 18, 20, 30)
+                gp.style = Paint.Style.FILL; gp.color = Color.argb((225 * nepr(u)).toInt(), 18, 20, 30)
                 lgc.drawRoundRect(r, rad, rad, gp)
                 gp.color = cvet
                 val kr = p.s * 0.21f
@@ -895,8 +893,10 @@ class Nalozhenie(
             }
             gp.style = Paint.Style.STROKE
             if (u.govorit) {                                                      // свечение: три мягких кольца
+                val ya = if (u.rol == "moder") 1.25f else 1f                   // 2.7.9: модератор — свечение на 25 % ярче
                 for ((w, a) in listOf(14f to 40, 9f to 80, 5f to 255)) {
-                    gp.strokeWidth = w; gp.color = Color.argb(a, Color.red(cvet), Color.green(cvet), Color.blue(cvet))
+                    gp.strokeWidth = w * (if (ya > 1f) 1.15f else 1f)
+                    gp.color = Color.argb((a * ya).toInt().coerceAtMost(255), Color.red(cvet), Color.green(cvet), Color.blue(cvet))
                     lgc.drawRoundRect(r, rad, rad, gp)
                 }
             } else {
@@ -930,9 +930,15 @@ class Nalozhenie(
      * ширину столбика: слева огонёк голоса его цвета (говорит — горит и светится, молчит — тусклый), имя,
      * справа значок выключенного микрофона.
      */
+    /** Множитель плотности подложки плитки по прозрачности гостя (2.7.9; 1 — как было при 15 %). */
+    private fun nepr(u: Komnata.Uchastnik): Float {
+        val p = gosti?.komnata?.prozrachnost(u) ?: (1f - Raskladka.VIDEO_A)
+        return ((1f - p) / Raskladka.VIDEO_A).coerceIn(0.1f, 1.15f)
+    }
+
     private fun strokaGostya(u: Komnata.Uchastnik, r: RectF, cvet: Int) {
         val rad = r.height() / 2f
-        gp.style = Paint.Style.FILL; gp.color = Color.argb(120, 14, 16, 24)
+        gp.style = Paint.Style.FILL; gp.color = Color.argb((120 * nepr(u)).toInt(), 14, 16, 24)
         lgc.drawRoundRect(r, rad, rad, gp)
         val (cr, cg, cb) = Triple(Color.red(cvet), Color.green(cvet), Color.blue(cvet))
         gp.style = Paint.Style.STROKE

@@ -13,7 +13,7 @@ import java.io.File
 class VizVaryant(val imya: String, val vid: Okno.Vid, val muzyka: Boolean = true, val sotnya: Boolean = false,
                  val niz: List<Triple<String, String, String>> = emptyList(), val lico: String = "plus",
                  val sost: String = "obychno", val morgaet: Boolean = false, val t: Long = 0L,
-                 val prisedT: Long = -1L, val ulybka: Boolean = false)
+                 val prisedT: Long = -1L, val ulybka: Boolean = false, val gostey: Int = 0)
 
 fun kadryVizor(out: File) {
     val ya = Okno.Vid("ugol", "pn", 0.25f, 90, true, 4f)                // айфон стоя, снизу вплотную (как у Александра)
@@ -22,6 +22,9 @@ fun kadryVizor(out: File) {
         VizVaryant("vizor-efir", ya, niz = listOf(
             Triple("plus", "Саша, слева полиция — сверни во двор", "Sasha, police on the left — turn into the yard"),
             Triple("ya", "Держись, сейчас уйдём через мост!", "Hold on, we're losing them over the bridge!"))),
+        // 2.7.9: Плюс внизу слева, над ним — плитки гостей (места — Raskladka.plitki; рамки и имена — в gosti-maket)
+        VizVaryant("vizor-gosti-2", ya, gostey = 2),
+        VizVaryant("vizor-gosti-3", ya, gostey = 3),
         VizVaryant("vizor-efir-bokom", bokom, muzyka = false, sotnya = true, niz = listOf(
             Triple("ya", "Макс, прикрой слева, я захожу на крышу, а ты держи вертолёт подальше от нас",
                 "Max, cover the left, I'm going up to the roof, keep the chopper away from us"))),
@@ -88,14 +91,13 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     val kamTop = H - r[1] - r[3]
     val kameraVerhGl = r[1] + r[3] + maxOf(2, H / 360)
     val zazor = Vizor.ZAZOR.toInt()
-    val chatNiz = H - kameraVerhGl - zazor                                                      // музыка — слева под розой
+    val chatNiz = H - kameraVerhGl - zazor                                                      // музыка — слева под Плюсом
     val chatVerh = Vizor.CHAT_VERH.toInt()
     s.rz.chatMesto = (chatNiz - chatVerh).coerceIn(0, Vizor.CH)
 
     // ---------- плашки: настоящий код ----------
     val vv = ABitmap.createBitmap(W, Vizor.RAMKA_H, ABitmap.Config.ARGB_8888)
-    val vn = ABitmap.createBitmap(W, Vizor.RAMKA_H, ABitmap.Config.ARGB_8888)
-    viz.ramka(vv, vn)
+    viz.ramka(vv)
     Oformlenie.licoUpr(v.lico)
     if (v.morgaet) pole(n, "morgaet", true)
     if (v.ulybka) pole(n, "ulybka", true)
@@ -104,7 +106,7 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     zvat(n, "risovatViz", Nalozhenie.Pokaz(), v.sost, tt)
     Oformlenie.licoUpr("plus")
     val pv = zvat(n, "getPvV") as ABitmap
-    zvat(n, "radar", now + 7_000)
+    val pl = zvat(n, "getPlV") as ABitmap
     val lv = zvat(n, "getLvV") as ABitmap
     viz.levyVerh(lv)
     val chatB = zvat(n, "getChatV") as ABitmap
@@ -125,15 +127,19 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     val kc = ACanvas(kadr)
     val sk = kc.sk()
     igraFon(sk, W, H)
-    kc.drawBitmap(vv, 0f, 0f, null)                                                            // vv, vn — под всем
-    kc.drawBitmap(vn, 0f, (H - Vizor.RAMKA_H).toFloat(), null)
+    kc.drawBitmap(vv, 0f, 0f, null)                                                            // vv — под всем (нижних скоб нет)
     chelovek(sk, r[0].toFloat(), kamTop.toFloat(), r[2].toFloat(), r[3].toFloat(), 0xFF3D4656.toInt(), 0xFF1F2430.toInt(),
         shlem = true, radius = 0f)
     val zol = org.jetbrains.skia.Paint().apply { color = Vizor.ZOLOTO }
     for (p in Vizor.skobyKamery(r[0], r[1], r[2], r[3], 1f))                                  // золотые скобы окна
         sk.drawRect(org.jetbrains.skia.Rect.makeXYWH(p[0].toFloat(), (H - p[1] - p[3]).toFloat(), p[2].toFloat(), p[3].toFloat()), zol)
+    for (p in Raskladka.plitki(v.gostey, v.gostey)) {                                          // плитки гостей (lg)
+        sk.saveLayer(p.x, p.y, p.pravo, p.niz, org.jetbrains.skia.Paint().apply { alpha = (255 * Raskladka.VIDEO_A).toInt() })
+        chelovek(sk, p.x, p.y, p.s, p.s, 0xFF2D4B5E.toInt(), 0xFF16222C.toInt(), naushniki = true, radius = Raskladka.RADIUS)
+        sk.restore()
+    }
     kc.drawBitmap(pv, Vizor.PV.l, Vizor.PV.t, null)                                            // pv
-    kc.drawBitmap(vzyat<ABitmap>(n, "radarBmp"), Vizor.ROZA.l, Vizor.ROZA.t, null)              // ln
+    kc.drawBitmap(pl, Vizor.PL.l, Vizor.PL.t, null)                                            // pl (2.7.9: вместо розы)
     kc.drawBitmap(lv, Vizor.LV.l, Vizor.LV.t, null)                                            // lv
     if (ts.isNotEmpty()) kc.drawBitmap(titrB, Vizor.titryX(minOf(Vizor.PRAVO, r[0].toFloat())), Vizor.TITRY_VERH, null)  // nc
     if (s.rz.chatMesto >= 60) {                                                                 // pc

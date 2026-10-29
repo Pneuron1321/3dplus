@@ -73,7 +73,7 @@ class Razvilka(private val w: Int, private val h: Int) {
     /** Выход: своя поверхность EGL и размер; кадр не чаще раза в gapNs; stamp — ставить время кадра (кодировщику);
      *  sloi — рисовать поверх окно камеры (эфир). */
     private class Out(val surface: Surface, val egl: EGLSurface, var gapNs: Long, val stamp: Boolean, val w: Int, val h: Int,
-                      val sloi: Boolean) {
+                      val sloi: Boolean, val bezKamery: Boolean = false) {
         var next = 0L
         var lastTs = 0L
     }
@@ -106,7 +106,8 @@ class Razvilka(private val w: Int, private val h: Int) {
     private var aTex2 = 0
     private var uMtx2 = 0
     /**
-     * Плашки поверх эфира: "pv" — правый верх (лицо и налёт), "ln" — левый низ (роза ветров),
+     * Плашки поверх эфира: "pv" — правый верх (лицо и налёт; в визоре — только налёт), "pl" — левый низ (визор, 2.7.9:
+     * Плюс во весь рост на месте розы ветров; розы больше нет),
      * "lv" — левый верх (топ-донатор и табло соведущего), "nc" — низ по центру (субтитры), "pc" — чат справа,
      * "vse" — весь кадр (итоги); визор (2.7.0): "mz" — «сейчас играет», "vv", "vn" — скобы и линия, "sc" — сцена.
      */
@@ -173,10 +174,11 @@ class Razvilka(private val w: Int, private val h: Int) {
     }
 
     /** Добавить выход: fps — сколько кадров в секунду ему отдавать; ow×oh — его размер (масштаб — видеокарта). */
-    fun add(surface: Surface, fps: Int, stamp: Boolean, ow: Int = w, oh: Int = h, sloi: Boolean = false) = sync {
+    fun add(surface: Surface, fps: Int, stamp: Boolean, ow: Int = w, oh: Int = h, sloi: Boolean = false,
+            bezKamery: Boolean = false) = sync {
         val egl = EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
         check(egl != EGL14.EGL_NO_SURFACE) { "EGL: поверхность выхода не создана (0x${Integer.toHexString(EGL14.eglGetError())})" }
-        outs += Out(surface, egl, 1_000_000_000L / fps.coerceIn(1, 120), stamp, ow, oh, sloi)
+        outs += Out(surface, egl, 1_000_000_000L / fps.coerceIn(1, 120), stamp, ow, oh, sloi, bezKamery)
     }
 
     /** Поверхность для декодера камеры (одна; повторный вызов — та же). */
@@ -406,7 +408,8 @@ class Razvilka(private val w: Int, private val h: Int) {
         aTex2 = GLES20.glGetAttribLocation(program2, "aTex")
         uMtx2 = GLES20.glGetUniformLocation(program2, "uMtx")
         fun sh(p: Int) = Sh(p, GLES20.glGetAttribLocation(p, "aPos"), GLES20.glGetAttribLocation(p, "aTex"),
-            GLES20.glGetUniformLocation(p, "uMtx"), GLES20.glGetUniformLocation(p, "uRazmer"), GLES20.glGetUniformLocation(p, "uR"))
+            GLES20.glGetUniformLocation(p, "uMtx"), GLES20.glGetUniformLocation(p, "uRazmer"), GLES20.glGetUniformLocation(p, "uR"),
+            GLES20.glGetUniformLocation(p, "uA"))
         shOes = sh(program(VERTEX_PLITKA, FRAGMENT_PLITKA))
         sh2d = sh(program(VERTEX_PLITKA, FRAGMENT_PLITKA_2D))
         try {                                         // не собралась — окно камеры рисуем как раньше
@@ -484,14 +487,14 @@ class Razvilka(private val w: Int, private val h: Int) {
             o.lastTs = ts
             if (!EGL14.eglMakeCurrent(display, o.egl, o.egl, context)) continue
             GLES20.glViewport(0, 0, o.w, o.h)
-            if (o.sloi && vid.rezhim == "krupno" && kameraVidna()) {
+            if (o.sloi && !o.bezKamery && vid.rezhim == "krupno" && kameraVidna()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f)
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             } else if (o.sloi && igra) kvadrat(itex, imtx)
             else kvadrat(tex, mtx)
             if (o.sloi) {
                 for (u in RAMKA) sloi[u]?.let { plashkaNa(o, u, it) }      // скобы визора — под всем
-                okno(o)
+                if (!o.bezKamery) okno(o)                                    // клип шлема (2.7.9) — без окна камеры
                 plitkiNa(o)
                 for ((ugol, sl) in sloi) if (ugol !in POZZHE) plashkaNa(o, ugol, sl)
                 sloi["vse"]?.let { plashkaNa(o, "vse", it) }               // итоги вечера — поверх всего
@@ -564,7 +567,7 @@ class Razvilka(private val w: Int, private val h: Int) {
 
     /**
      * Место слоя в стиле «Визор» (Vizor, точки 1080p от верха → GL от низа): в x0Viz, y0Viz. false — не рисовать
-     * (чату нет места). Чат — правый столбец между Плюсом и окном камеры; «сейчас играет» — слева под розой.
+     * (чату нет места). Чат — правый столбец между налётом и окном камеры; «сейчас играет» — наверху по центру.
      */
     private fun mestoViz(o: Out, ugol: String, sl: Sloy, w: Int, h: Int): Boolean {
         val s = o.h / 1080f
@@ -576,12 +579,12 @@ class Razvilka(private val w: Int, private val h: Int) {
             "vn" -> { x = 0; y = 0 }
             "pv" -> { x = (Vizor.PV.l * s).toInt(); y = gl(Vizor.PV.t) }
             "lv" -> { x = (Vizor.LV.l * s).toInt(); y = gl(Vizor.LV.t) }
-            "ln" -> { x = (Vizor.ROZA.l * s).toInt(); y = gl(Vizor.ROZA.t) }
+            "pl" -> { x = (Vizor.PL.l * s).toInt(); y = gl(Vizor.PL.t) }                     // 2.7.9: Плюс — на месте розы
             "nc" -> { x = (titryLevo(o) * s).toInt(); y = gl(Vizor.TITRY_VERH) }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
             "al" -> { x = (o.w - w) / 2; y = gl(Opoveshchenie.VERH) }                      // 2.7.8: оповещение — сверху по центру
-            "mz" -> { x = (Vizor.MUZ.l * s).toInt(); y = gl(Vizor.MUZ.t) }   // слева внизу под розой (2.7.5)
+            "mz" -> { x = (Vizor.MUZ.l * s).toInt(); y = gl(Vizor.MUZ.t) }   // наверху по центру (2.7.9)
             "pc" -> {
                 val zazor = (Vizor.ZAZOR * s).toInt()
                 val verh = o.h - (Vizor.CHAT_VERH * s).toInt()
@@ -629,7 +632,7 @@ class Razvilka(private val w: Int, private val h: Int) {
     }
 
     /**
-     * Центр нижних субтитров (2.5.0): между розой (если она есть) и окном камеры внизу справа (или
+     * Центр нижних субтитров (2.5.0; старый стиль): от левого края (розы с 2.7.9 нет) до окна камеры внизу справа (или
      * слева) — длинная строка не уходит под окно.
      */
     private fun nizCentr(o: Out, shir: Int): Int {
@@ -759,6 +762,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             GLES20.glUniformMatrix4fv(sh.uMtx, 1, false, g.mtxKrop, 0)
             GLES20.glUniform2f(sh.uRazmer, st.toFloat(), st.toFloat())
             GLES20.glUniform1f(sh.uR, Raskladka.RADIUS * s)
+            if (sh.uA >= 0) GLES20.glUniform1f(sh.uA, p.a)              // 2.7.9: прозрачность плитки — gosti prozrachnost
             quad.position(0)
             GLES20.glVertexAttribPointer(sh.aPos, 2, GLES20.GL_FLOAT, false, 16, quad)
             GLES20.glEnableVertexAttribArray(sh.aPos)
@@ -770,7 +774,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         GLES20.glDisable(GLES20.GL_BLEND)
     }
 
-    private class Sh(val p: Int, val aPos: Int, val aTex: Int, val uMtx: Int, val uRazmer: Int, val uR: Int)
+    private class Sh(val p: Int, val aPos: Int, val aTex: Int, val uMtx: Int, val uRazmer: Int, val uR: Int, val uA: Int = -1)
 
     /** Верх окна камеры (GL — от низа кадра, с рамкой), если окно справа внизу и видно; иначе null. */
     private fun kameraVerh(o: Out): Int? {
@@ -916,7 +920,8 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vUv;
             uniform samplerExternalOES sTex;
             $MASKA
-            void main() { float a = maska() * ${Raskladka.VIDEO_A}; gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
+            uniform float uA;
+            void main() { float a = maska() * uA; gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
         """.trimIndent()
         private val FRAGMENT_PLITKA_2D = """
             precision mediump float;
@@ -924,7 +929,8 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vUv;
             uniform sampler2D sTex;
             $MASKA
-            void main() { float a = maska() * ${Raskladka.VIDEO_A}; gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
+            uniform float uA;
+            void main() { float a = maska() * uA; gl_FragColor = vec4(texture2D(sTex, vTex).rgb * a, a); }
         """.trimIndent()
 
         /** Квадрат из середины кадра w×h: матрица текстурных координат (по столбцам), умножается справа. */

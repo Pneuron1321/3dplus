@@ -41,6 +41,7 @@ VECHER = os.environ.get('DONATY_VECHER', '/tmp/donaty-vecher.jsonl')
 SE_JWT = os.environ.get('DONATY_SE_JWT', '/root/.se-jwt')
 SE_POSL = os.environ.get('DONATY_SE_POSL', '/root/.donaty-se-posl')
 SE_FOLLOW_POSL = os.environ.get('DONATY_SE_FOLLOW_POSL', '/root/.donaty-se-follow-posl')
+ZVUK_SEK = float(os.environ.get('DONATY_ZVUK_SEK', 3.5))       # звук плашки фоловера в мосте (assets/zvuki/folover.mp3)
 SE_URL = os.environ.get('DONATY_SE_URL', 'https://api.streamelements.com/kappa/v2')
 POROG = os.environ.get('DONATY_POROG', '/root/.donaty-porog')
 VYZOVY = os.environ.get('DONATY_VYZOVY', '/root/.vedushchiy/vyzovy-donat.jsonl')
@@ -311,6 +312,8 @@ def obrabotat(d):
         try:
             get('/opoveshchenie?vid=%s&kto=%s' % (vid, urllib.parse.quote(kto)))
             zapis['plashka'] = True
+            if ist == 'follow':
+                time.sleep(ZVUK_SEK)                       # звук фоловера (≈4 с) — договорит, потом «спасибо»
         except Exception:
             pass
     if rech:

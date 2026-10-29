@@ -696,13 +696,15 @@ def klip_gotov(t):
     except ValueError:
         d = {}
     chasti = []
-    for kto, imya in (('kamera', 'камеры'), ('efir', 'эфира')):
+    for kto, imya in (('kamera', 'камеры'), ('efir', 'шлема')):
         r = d.get(kto) or {}
         if r.get('ok'):
             chasti.append('клип %s — %d секунд' % (imya, int(r.get('sek') or 0)))
         else:
             chasti.append('клипа %s нет' % imya)
     tekst = 'Сохранил: ' + ', '.join(chasti) + '. Они в «Фильмы/Plus».' if d else 'Клип не вышел: мост не ответил.'
+    if d.get('sinhron'):                     # 2.7.9: оба на одно время
+        tekst += ' Оба с одной секунды, расхождение %d миллисекунд.' % int(d.get('rashozhdenie_ms') or 0)
     print(time.strftime('%H:%M:%S'), 'клип клип клип:', t[:300], flush=True)
     try:
         os.makedirs(G_Q, exist_ok=True)

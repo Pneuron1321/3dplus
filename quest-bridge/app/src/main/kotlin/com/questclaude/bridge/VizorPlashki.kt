@@ -33,7 +33,8 @@ class VizorPlashki(
     // ---------- скобы и линия ----------
 
     /** Слои "vv" (верх кадра) и "vn" (низ): скобы визора по углам и тонкая золотая линия сверху. */
-    fun ramka(vv: Bitmap, vn: Bitmap) {
+    /** Скобы по верхним углам и золотая линия (слой "vv"); нижних скоб с 2.7.9 нет. */
+    fun ramka(vv: Bitmap) {
         val o = Vizor.SKOBA_OTSTUP
         val w = Vizor.W.toFloat()
         Canvas(vv).apply {
@@ -45,12 +46,6 @@ class VizorPlashki(
             p.shader = LinearGradient(l, 0f, r, 0f, intArrayOf(0, 0x73F2C230, 0), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
             drawRect(l, y - 1.5f, r, y + 1.5f, p.apply { alpha = 60 })                    // свечение
             drawRect(l, y - 0.5f, r, y + 0.5f, p.apply { alpha = 255 })
-        }
-        val h = vn.height.toFloat()
-        Canvas(vn).apply {
-            drawColor(0, PorterDuff.Mode.CLEAR)
-            kist.skoba(this, o, h - o, 1f, -1f)
-            kist.skoba(this, w - o, h - o, -1f, -1f)
         }
     }
 
@@ -71,6 +66,8 @@ class VizorPlashki(
     fun levyVerh(b: Bitmap) {
         val c = Canvas(b)
         c.drawColor(0, PorterDuff.Mode.CLEAR)
+        val k = b.width / Vizor.LV_W.toFloat()                         // 2.7.9: картинка слоя меньше рисунка (Vizor.LV_K)
+        c.scale(k, k)
         if (top.vidna || cel.vidna) kartaTopa(c)
         if (igra.vidna) tablo(c)
     }

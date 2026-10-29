@@ -22,6 +22,8 @@ class KlipZapis(
     private val dir: File,
     private val derzhatMs: Long = 200_000,                 // 2.7.8: клип до 3 минут (было 160 с под 2,5 мин)
     private val kuskomMs: Long = 10_000,
+    /** Часы шлема, мкс (2.7.9): общие для всех кругов — по ним два клипа режутся на одно и то же время. */
+    private val chasyUs: () -> Long = { System.nanoTime() / 1000 },
 ) {
     class Golova(val sps: ByteArray, val pps: ByteArray, val w: Int, val h: Int)
 
@@ -30,6 +32,8 @@ class KlipZapis(
     private class Kusok(val file: File, val otUs: Long) {
         var doUs = otUs
         var dlina = 0L
+        /** Часы шлема минус время кадра: наименьшее за кусок (камера — по приходу, меньше всего задержки сети). */
+        var ofsUs = Long.MAX_VALUE
     }
 
     /** Что собрать: файлы и сколько байт каждого (писатель дописывает дальше — это не трогаем). */
@@ -48,7 +52,7 @@ class KlipZapis(
                     DataInputStream(Ogranichennyi(FileInputStream(f), n).buffered(1 shl 16)).use { d ->
                         while (true) {
                             val o = chitat(d) ?: break
-                            if (o.ptsUs >= otUs) sdelat(o)
+                            if (o.ptsUs >= otUs && o.ptsUs <= doUs) sdelat(o)
                         }
                     }
                 }
@@ -90,7 +94,37 @@ class KlipZapis(
         val tek = kuski.lastOrNull()
         if (key && (tek == null || ptsUs - tek.otUs >= kuskomMs * 1000 || ptsUs < tek.doUs - 5_000_000)) novyKusok(ptsUs)
         if (out == null) return@synchronized                 // ждём первый ключевой
+        val k = kuski.last()
+        k.ofsUs = minOf(k.ofsUs, chasyUs() - ptsUs)
         zapisat(Obrazec(true, ptsUs, key, annexB))
+    }
+
+    // ---------- 2.7.9: общее время — два клипа (камера и эфир) от одного мгновения до другого ----------
+
+    /** Ключевые кадры круга по часам шлема (мкс), по порядку. */
+    fun klyuchevyeVremya(): List<Long> = synchronized(lock) {
+        kuski.filter { it.ofsUs != Long.MAX_VALUE }.flatMap { k -> klyuchevye[k.file].orEmpty().map { it + k.ofsUs } }
+    }
+
+    /** Последний кадр круга по часам шлема; null — пусто. */
+    fun konecVremya(): Long? = synchronized(lock) { kuski.lastOrNull()?.takeIf { it.ofsUs != Long.MAX_VALUE }?.let { it.doUs + it.ofsUs } }
+
+    /**
+     * Снимок от ключевого кадра [otKlyuchWall] до [doWall] (часы шлема): начало — ровно этот ключевой кадр, конец —
+     * последний кадр не позже doWall. null — такого ключевого кадра в круге нет.
+     */
+    fun snimokVremya(otKlyuchWall: Long, doWall: Long): Snimok? = synchronized(lock) {
+        val g = golova ?: return@synchronized null
+        val k0 = kuski.firstOrNull { k -> k.ofsUs != Long.MAX_VALUE && klyuchevye[k.file].orEmpty().any { kotlin.math.abs(it + k.ofsUs - otKlyuchWall) < 1000 } }
+            ?: return@synchronized null
+        val otUs = klyuchevye[k0.file]!!.first { kotlin.math.abs(it + k0.ofsUs - otKlyuchWall) < 1000 }
+        val doUs = doWall - (kuski.last().ofsUs.takeIf { it != Long.MAX_VALUE } ?: k0.ofsUs)
+        if (doUs <= otUs) return@synchronized null
+        try { out?.flush() } catch (e: Exception) { }
+        val nuzhnye = kuski.filter { it.doUs >= otUs && it.otUs <= doUs }.map { it.file to it.dlina }
+        if (nuzhnye.isEmpty()) return@synchronized null
+        chitayut++
+        Snimok(g, asc, nuzhnye, otUs, doUs) { synchronized(lock) { chitayut--; obrezat() } }
     }
 
     fun zvuk(aac: ByteArray, ptsUs: Long) = synchronized(lock) {

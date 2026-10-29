@@ -111,6 +111,7 @@ class Kamera(
 
     override fun kadr(annexB: ByteArray, ptsUs: Long, key: Boolean) = synchronized(lock) {
         klip.video(annexB, ptsUs, key)                   // круг клипа — и без эфира
+        if (key) try { Hub.klyuchevoyEfira?.invoke() } catch (e: Exception) { }   // 2.7.9: эфиру — ключевой в то же мгновение
         slomalsya?.let {                                 // поток подачи упал — новый декодер, с ключевого кадра
             oshibka = it; slomalsya = null
             ostanovit(); zapustit()

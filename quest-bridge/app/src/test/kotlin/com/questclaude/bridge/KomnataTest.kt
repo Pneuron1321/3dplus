@@ -270,14 +270,20 @@ class KomnataTest {
         val (g, gs) = voyti(kl.gost, "Макс")
         k.upr(null, "vpustit", g!!.id)
         assertEquals("mandarin", Komnata.ramkaImya(m!!))
-        assertEquals("zelenyy", Komnata.ramkaImya(g))                      // второе место
+        assertTrue(Komnata.ramkaImya(g) in Komnata.SLUCHAYNYE)            // гостю — случайный из восьми
+        assertTrue(gs.posl("sostav")!!.contains("\"ramka\":\"${Komnata.ramkaHex(g)}\""))
         assertTrue(Komnata.RAMKI.values.none { it == 0xFF8CC8 })           // розового нет
+        k.upr(null, "mest", null, "3")                                     // третье место — для второго гостя
+        val (g2, _) = voyti(kl.gost, "Лена")                               // второй гость — другой цвет, пока есть свободные
+        k.upr(null, "vpustit", g2!!.id)
+        assertNotEquals(Komnata.ramkaImya(g), Komnata.ramkaImya(g2))
         assertTrue(k.upr(null, "cvet", g.id, "krasnyy").contains("\"ok\":true"))
-        assertEquals(0xF0303A, Komnata.ramkaRgb(g))
-        assertTrue(gs.posl("sostav")!!.contains("\"ramka\":\"#f0303a\""))
+        assertEquals(0xD3134F, Komnata.ramkaRgb(g))                        // рубиново-красный
+        assertTrue(gs.posl("sostav")!!.contains("\"ramka\":\"#d3134f\""))
+        assertEquals(0xFF4520, Komnata.ramkaRgb(m))                        // модератор — мандариново-грейпфрутовый
         assertTrue(k.upr(null, "cvet", g.id, "rozovyy").contains("\"ok\":false"))
         assertTrue(k.upr(null, "cvet", g.id, "avto").contains("\"ok\":true"))
-        assertEquals("zelenyy", Komnata.ramkaImya(g))
+        assertTrue(Komnata.ramkaImya(g) in Komnata.SLUCHAYNYE)
         assertTrue(k.upr(null, "razmer", m.id, "1.75").contains("\"ok\":true"))
         assertEquals(1.75f, m.razmer, 0.001f)
         k.upr(null, "razmer", m.id, "9")

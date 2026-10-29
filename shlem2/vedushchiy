@@ -244,6 +244,10 @@ ZADANIE += (
 # режиме третьей реплики, чтобы две другие не платили за него токенами.
 TRANZITOR_V2 = os.path.join(PAPKA, 'tranzitor-v2.md')         # сжатое ядро «Глубокого Транзитора v2» (Александр 17.10)
 TRANZITOR_POLNYY = '/root/deep-transitor.md'                  # полный файл: берём, если ядра нет рядом
+# 29.10 (Александр прислал полные тексты): «Глубокий Транзитор — модель v2» и «Фарватер» — процедура по ней;
+# obnovi кладёт их в папку соведущей. Транзитор → ∿: сначала тип границы, потом три хода Фарватера.
+TRANZITOR_PAPKA = os.path.join(PAPKA, 'deep-transitor.md')
+FARVATER = os.path.join(PAPKA, 'farvater.md')
 TRANZITOR_GOLOVA = (
     'РЕЖИМ: ТРАНЗИТОР (Александр 16.10, v2 — 17.10) — эта реплика рождается через модель границы, а не через пять козырей.\n'
     'Найди в объекте взгляда РЕАЛЬНУЮ границу: правило платформы (Twitch и др.), закон, стримерскую практику, правило '
@@ -279,7 +283,7 @@ def tranzitor_tekst():
     """Промпт Транзитора: голова + ядро v2 + хвост. Ядро читаем из файла при КАЖДОМ вызове (правка файла
     действует сразу): сжатое рядом с книгой, иначе полный /root/deep-transitor.md, иначе запасное в коде."""
     yadro = ''
-    for f in (TRANZITOR_V2, TRANZITOR_POLNYY):
+    for f in (TRANZITOR_PAPKA, TRANZITOR_V2, TRANZITOR_POLNYY):
         try:
             yadro = open(f, encoding='utf-8').read().strip()
         except OSError:
@@ -288,7 +292,14 @@ def tranzitor_tekst():
             yadro = yadro[:16000]
             break
         yadro = ''
-    return TRANZITOR_GOLOVA + (yadro + '\n' if yadro else TRANZITOR_YADRO) + TRANZITOR_HVOST
+    try:
+        farvater = open(FARVATER, encoding='utf-8').read().strip()[:10000]
+    except OSError:
+        farvater = ''
+    if farvater:
+        farvater = ('ФАРВАТЕР (процедура по модели выше: Транзитор → ∿ — тип границы, потом три хода; в ответе — '
+                    'только итог, без терминов):\n' + farvater + '\n')
+    return TRANZITOR_GOLOVA + (yadro + '\n' if yadro else TRANZITOR_YADRO) + farvater + TRANZITOR_HVOST
 
 
 
@@ -1380,6 +1391,25 @@ def _otkaz_samodostatochnosti(o, rech, d):
     return ''
 
 
+# Запреты Александра (заметки ne_govorit, 17.10) — теперь и в коде, не только в промпте (отчёт 25.10, п. 2):
+# не про цель $700 / Quest 3 для отца, не про трек, плейлист и громкость, не приказы «сделай X сегодня».
+ZAPRET_CEL_RE = re.compile(r'\$\s?700|\b700\s*(?:dollars|bucks|usd|\$)|quest\s*3\s*for\s*(?:dad|(?:his|your)\s+(?:dad|father))'
+                           r'|donation goal|\bthe goal bar\b', re.I)
+ZAPRET_MUZYKA_RE = re.compile(r'\b(?:this|the|that)\s+(?:track|song|tune|playlist)\b|\bvolume\b|\bmusic is (?:too|so)\b', re.I)
+ZAPRET_PRIKAZ_RE = re.compile(r'\b(?:label|tag|name|try|make|call|start|keep)\b[^.!?]{0,70}\btonight\b', re.I)
+
+
+def _otkaz_pravil(rech):
+    """Запреты Александра. Причина или ''. Действуют и на последней попытке: лучше промолчать."""
+    if ZAPRET_CEL_RE.search(rech):
+        return 'про цель доната ($700, Quest 3 для отца) не говорим — запрет Александра'
+    if ZAPRET_MUZYKA_RE.search(rech):
+        return 'про трек, плейлист и громкость не говорим — запрет Александра'
+    if ZAPRET_PRIKAZ_RE.search(rech):
+        return 'никаких приказов «сделай X сегодня» — своя мысль или наблюдение, не задание Александру'
+    return ''
+
+
 def podgotovit(o, d, rech, pam, pusto, final, tranzitor=False):
     """Проверить реплику. Возвращает (текст или '', причина отказа, поменять ли действие на kozyr).
     Не последняя попытка — отказ за повтор, язык и т. п.; последняя — говорит всё равно, кроме опасного.
@@ -1394,6 +1424,9 @@ def podgotovit(o, d, rech, pam, pusto, final, tranzitor=False):
     if bukv and len(re.findall(r'[А-Яа-яЁё]', rech)) > 0.15 * len(bukv):
         return '', 'реплика не по-английски — говори только по-английски', d
     rech = ukorotit(rech, MAX_SLOV_BOY if o.get('boy') else MAX_SLOV)
+    pr = _otkaz_pravil(rech)
+    if pr:
+        return '', pr, d
     if d == 'stavka':
         pr = _otkaz_stavki(o, rech)
         if pr:

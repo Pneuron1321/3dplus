@@ -39,6 +39,10 @@ object Hub {
     @Volatile var gostiZvuchat = false
     /** «Клип клип клип» (2.7.8): сохранить клипы камеры и эфира по 3 минуты; ставит служба глаз. Ответ — JSON. */
     @Volatile var klipKlip: (() -> String)? = null
+    /** Камера получила ключевой кадр — эфиру тоже (2.7.9: клипы на одно время); ставит служба глаз на время эфира. */
+    @Volatile var klyuchevoyEfira: (() -> Unit)? = null
+    /** Режим клипа шлема (2.7.9): otdelno | efir | vykl; ставит служба глаз. */
+    @Volatile var klipUpr: ((Map<String, String>) -> String)? = null
     /** Оповещение в эфире (2.7.8): новый фоловер, подписка, рейд — плашка сверху; ставит служба глаз. */
     @Volatile var opoveshchenie: Opoveshchenie? = null
     /** Речь для субтитров по каждому голосу (2.5.0): фразы — демону sinhron (/titry/rech). */
