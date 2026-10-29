@@ -69,6 +69,24 @@ VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
 # /root/.golos-pol: «m» (по умолчанию) или «zh» (снова Ава); `golos pol m|zh`. Свой GOLOS_VOICE — сильнее файла.
 VOICE_M = os.environ.get('GOLOS_VOICE_M', 'en-US-AndrewMultilingualNeural')
 POL = os.environ.get('GOLOS_POL', '/root/.golos-pol')
+# 29.10 (Александр: «найди других мужских голосов») — какой мужской: `golos muzhskoy brian` (файл /root/.golos-muzhskoy);
+# образцы — docs/golosa в 3dplus. Многоязычные говорят и по-русски, и по-английски; Дмитрий — только по-русски.
+MUZHSKOY = os.environ.get('GOLOS_MUZHSKOY', '/root/.golos-muzhskoy')
+MUZHSKIE = {'andrew': 'en-US-AndrewMultilingualNeural', 'brian': 'en-US-BrianMultilingualNeural',
+            'william': 'en-AU-WilliamMultilingualNeural', 'florian': 'de-DE-FlorianMultilingualNeural',
+            'remy': 'fr-FR-RemyMultilingualNeural', 'giuseppe': 'it-IT-GiuseppeMultilingualNeural',
+            'dmitry': 'ru-RU-DmitryNeural', 'christopher': 'en-US-ChristopherNeural', 'ryan': 'en-GB-RyanNeural',
+            'guy': 'en-US-GuyNeural', 'eric': 'en-US-EricNeural', 'thomas': 'en-GB-ThomasNeural'}
+
+
+def muzhskoy():
+    if 'GOLOS_VOICE_M' in os.environ:
+        return VOICE_M
+    try:
+        g = open(MUZHSKOY).read().strip()
+        return MUZHSKIE.get(g.lower(), g if re.fullmatch(r'[a-z]{2}-[A-Z]{2}-\w+Neural', g) else VOICE_M)
+    except OSError:
+        return VOICE_M
 
 
 def pol():
@@ -82,7 +100,7 @@ def golos_plusa():
     """Голос edge-tts для Плюса (и запасной, когда свой голос ElevenLabs недоступен)."""
     if 'GOLOS_VOICE' in os.environ:
         return VOICE
-    return VOICE if pol() == 'zh' else VOICE_M
+    return VOICE if pol() == 'zh' else muzhskoy()
 
 
 # 2.7.8 (Александр 26.10: «чтобы Плюс говорил моим голосом, но немного ниже»): свой голос — клон в ElevenLabs.
@@ -1567,6 +1585,16 @@ if __name__ == '__main__':
         else:
             print('Голос Плюса: %s (со следующей фразы). Соведущая — как была.' % (
                 'свой (ElevenLabs, ниже на %s полутона)' % eleven_nizhe() if a[1] == 'moy' else golos_plusa()))
+        sys.exit(0)
+    if a and a[0] in ('muzhskoy', 'muzh'):
+        if len(a) < 2 or not (a[1].lower() in MUZHSKIE or re.fullmatch(r'[a-z]{2}-[A-Z]{2}-\w+Neural', a[1])):
+            print('golos muzhskoy ИМЯ — %s; сейчас: %s' % (', '.join(MUZHSKIE), muzhskoy()))
+            sys.exit(1)
+        open(MUZHSKOY, 'w').write(a[1])
+        if pol() != 'm':
+            open(POL, 'w').write('m')
+        print('Мужской голос Плюса: %s (со следующей фразы).%s' % (muzhskoy(), ' Этот голос говорит только по-русски — '
+              'английские фразы прозвучат с акцентом.' if muzhskoy().startswith('ru-') else ''))
         sys.exit(0)
     if a and a[0] == 'moy':                          # ID голоса ElevenLabs (не секрет) и насколько ниже
         if len(a) >= 2 and re.fullmatch(r'[A-Za-z0-9]{8,40}', a[1]):
