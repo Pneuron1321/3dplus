@@ -235,6 +235,11 @@ DOSLUH_KTO = os.environ.get('GOLOS_DOSLUH_KTO', '/tmp/golos.dosluh-kto')
 VED_POROG_F = os.environ.get('GOLOS_VED_POROG', '/root/.ved-porog')
 VED_POROG = 38
 VED_TISHINA = 1.0
+# 30.10 (Александр: «не остановился… и делает очень большие паузы»): Плюс, замолчавший из-за Александра, продолжает
+# сам, когда тот замолчал PLUS_TISHINA с (раньше ждал «дальше» от ушей — а на простую речь без «плюс плюс» его нет,
+# и пауза тянулась до PAUZA_MAKS). Микрофона нет — продолжает через PLUS_BEZ_MIK с.
+PLUS_TISHINA = 1.2
+PLUS_BEZ_MIK = 3.0
 VED_ZHDAT = 30.0
 VED_PEREBIT = 2                    # замеров подряд (по 0,15 с) громче порога, пока она говорит, — он перебил
 # 29.10 (Александр: «он разговаривает в то же время, что и я»): Плюс замолкает так же, как соведущая, — Александр
@@ -890,6 +895,7 @@ class Golos:
         self.mik_podryad = 0       # замеров подряд, где Александр громче порога, пока звучит соведущая
         self.perebil_plus = 0.0    # 29.10: когда Александр заговорил поверх Плюса (Плюс замолкает до «плюс плюс»)
         self.perebil_plus_uchten = 0.0
+        self.perebil_zhdu = 0.0    # 30.10: Плюс молчит из-за Александра (время) — продолжит, когда тот замолчит
         self.mik_plus = 0
         self.perebil = 0.0         # когда Александр заговорил поверх соведущей (её обрываем)
         self.perebil_uchten = 0.0
@@ -1123,9 +1129,19 @@ class Golos:
                 proshlo = time.time() - getattr(ig, 't0', time.time())
                 self.stop_igrok()
                 self.s_prervannoy(ig, proshlo)   # «плюс плюс» — продолжит с прерванной фразы
-                self.vnesh = time.time()         # пауза: ждём «дальше» (фраза услышана) или не договариваем
+                self.vnesh = time.time()         # пауза: продолжит, когда Александр замолчит (или «дальше»)
                 self.zhdu_dosluh = False
+                self.perebil_zhdu = self.mik_gromko = time.time()
                 log('Плюс замолчал: Александр заговорил')
+        if self.perebil_zhdu:
+            now = time.time()
+            if self.dl >= self.perebil_zhdu or self.pz > self.perebil_zhdu:
+                self.perebil_zhdu = 0.0          # уже «дальше» или вызов «плюс плюс» — решают уши
+            elif now - self.mik_gromko >= (PLUS_TISHINA if self.mik_ot is not None else PLUS_BEZ_MIK) \
+                    and now - self.perebil_zhdu >= PLUS_TISHINA:
+                self.perebil_zhdu = 0.0
+                self.dl = now
+                log('Александр замолчал — Плюс продолжает')
         dl = vremya(DALSHE)
         if dl > self.dl:
             self.dl = dl
@@ -1315,7 +1331,7 @@ class Golos:
                 log('соведущая звучала: микрофон медиана %d, громче всего %d дБ (%d замеров)' % (
                     v[len(v) // 2], v[0], len(v)))
             with self.cv:
-                nado = any(k.golos == VOICE_VED for k in self.q) or zvuchit_plus
+                nado = any(k.golos == VOICE_VED for k in self.q) or zvuchit_plus or bool(self.perebil_zhdu)
             if not nado:
                 self.mik_ot = None
                 time.sleep(0.2)
@@ -1329,6 +1345,8 @@ class Golos:
                     self.mik_ot = now
                 if db <= ved_porog() and ig is None:   # пока звучит голос, микрофон слышит его эхо, не Александра
                     self.mik_gromko = now
+                if self.perebil_zhdu and ig is None and db <= golos_porog():
+                    self.mik_gromko = now      # Плюс молчит из-за Александра: тот ещё говорит
                 if zvuchit_ved:
                     self.mik_ved.append(db)
                     # 19.10 эфир: пока говорит соведущая, микрофон — 90 (её эха в нём нет), а громче порога — только
