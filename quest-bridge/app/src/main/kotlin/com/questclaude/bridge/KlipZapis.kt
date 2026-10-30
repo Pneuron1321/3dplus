@@ -214,7 +214,8 @@ class KlipZapis(
         if (chitayut == 0) kuski.forEach { it.file.delete() }
         kuski.clear()
         klyuchevye.clear()
-        asc = null
+        // заголовок звука не трогаем (2.8.0): он приходит раньше видео, и сброс по первому заголовку видео стирал его —
+        // клип эфира выходил без звука (Александр 29.10). Новый звук сам пришлёт новый заголовок.
     }
 
     companion object {

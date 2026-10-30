@@ -88,6 +88,20 @@ class KlipZapisTest {
         assertEquals(1080, z.snimok(10)!!.golova.w)
     }
 
+    /** 2.8.0 (Александр 29.10: «клип с эфира сохранился без звука»): заголовок звука эфира приходит раньше видео —
+     *  первый заголовок видео не должен его стирать. */
+    @Test fun zvukDoVideoNeTeryaetsya() {
+        val z = KlipZapis(papka())
+        z.zvukGolova(byteArrayOf(0x12, 0x10))                  // звук эфира заговорил первым
+        z.golova(sps, pps, 1920, 1080)
+        zapisat(z, 5)
+        val s = z.snimok(5)!!
+        assertNotNull(s.asc)
+        var zvuk = 0
+        s.obrazcy { o -> if (!o.video) zvuk++ }
+        assertTrue("звука $zvuk", zvuk >= 90)
+    }
+
     @Test fun bezGolovyNichego() {
         val z = KlipZapis(papka())
         zapisat(z, 5)

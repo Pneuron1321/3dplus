@@ -134,12 +134,14 @@ class CaptureService : Service() {
             val t1 = listOfNotNull(kz.konecVremya(), efirKlip.konecVremya()).takeIf { it.size == 2 }?.minOrNull()
             val para = t1?.let { KlipSinhron.vybrat(kz.klyuchevyeVremya(), efirKlip.klyuchevyeVremya(), it - (KlipMp4.MAKS_SEK - 5) * 1_000_000L) }
             if (t1 != null && para != null) {
-                val k = KlipMp4.sohranitSnimok(this, { kz.snimokVremya(para.kamera, t1) }, "plus-klip-kamera", vremya)
+                // 2.8.0 (Александр 29.10): у камеры звука не надо — звук общий, в клипе эфира (два видео на одно время)
+                val k = KlipMp4.sohranitSnimok(this, { kz.snimokVremya(para.kamera, t1) }, "plus-klip-kamera", vremya, zvuk = false)
                 val e = KlipMp4.sohranitSnimok(this, { efirKlip.snimokVremya(para.efir, t1) }, "plus-klip-shlem", vremya)
                 return "{\"kamera\":$k,\"efir\":$e,\"sinhron\":true,\"rashozhdenie_ms\":${para.rashozhdenieMs}}"
             }
         }
-        val k = kz?.let { KlipMp4.sohranit(this, it, KlipMp4.MAKS_SEK - 5, "plus-klip-kamera") }
+        val efirEst = !shlemNet && efirKlip.sekund > 0                // звук — в клипе эфира; эфира нет — у камеры свой звук
+        val k = kz?.let { KlipMp4.sohranit(this, it, KlipMp4.MAKS_SEK - 5, "plus-klip-kamera", zvuk = !efirEst) }
             ?: "{\"oshibka\":\"камера не подключена\"}"
         val e = if (shlemNet) "{\"oshibka\":\"клип шлема выключен (efir klip efir — включить)\"}"
             else KlipMp4.sohranit(this, efirKlip, KlipMp4.MAKS_SEK - 5, "plus-klip-shlem")

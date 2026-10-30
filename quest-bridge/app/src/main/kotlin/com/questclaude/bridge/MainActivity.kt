@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -36,8 +35,7 @@ class MainActivity : Activity() {
     private var kameraDo = 0L                  // адрес с ключом на экране — до этого времени
     @Volatile private var klipyStatus = ""
     private var klipyPokazDo = 0L              // клипы во время эфира: адрес с ключом показан до этого времени
-    private lateinit var efirBtn: Button
-    private lateinit var efir720: CheckBox
+    private lateinit var efirShtorka: EfirShtorka
     private lateinit var status: TextView
     private val ui = Handler(Looper.getMainLooper())
     private val refresh = object : Runnable {
@@ -46,7 +44,7 @@ class MainActivity : Activity() {
             if (kameraStatus.startsWith("КАМЕРА ТЕЛЕФОНА") && System.currentTimeMillis() > kameraDo) kameraStatus = ""
             status.text = listOf(klipyEkran(), kameraStatus, efirStatus, Hub.karta?.kratko().orEmpty(), CaptureService.status, EarService.status, sleepStatus, plusStatus, Shlem.termuxReply)
                 .filter { it.isNotEmpty() }.joinToString("\n\n")
-            efirBtn.text = if (efirIdyot()) "ЭФИР: закончить" else "ЭФИР: начать (Twitch)"
+            efirShtorka.obnovit()
             ui.postDelayed(this, 1000)
         }
     }
@@ -65,10 +63,8 @@ class MainActivity : Activity() {
             setPadding(40, 40, 40, 40)
             addView(status)
             addView(button("ВСЁ СРАЗУ: глаза, уши, Плюс") { allInOne = true; noEyes = false; askPermissions() })
-            efirBtn = button("ЭФИР: начать (Twitch)") { efirKnopka() }
-            addView(efirBtn)
-            efir720 = CheckBox(this@MainActivity).apply { text = "Эфир в 720p — легче для сети (обычно 1080p)" }
-            addView(efir720)
+            // 2.8.0: шторка эфира — галочки Twitch, Kick, YouTube и «начать / закончить»
+            efirShtorka = EfirShtorka(this@MainActivity) { t -> efirStatus = t }.also { it.vstavit(this) }
             addView(button("ИТОГИ ВЕЧЕРА: показать / убрать (тёмный экран в эфире)") { itogiKnopka() })
             Pleer(this@MainActivity).vstavit(this)                // мини-плеер (2.5.7): шторка под кнопкой
             addView(button("КАМЕРА ТЕЛЕФОНА: подключить айфон") { kameraKnopka() }.apply {
@@ -92,30 +88,6 @@ class MainActivity : Activity() {
     }
 
     private fun efirIdyot() = Hub.efir?.status()?.contains("\"state\":\"off\"") == false
-
-    /**
-     * Кнопка эфира — то же, что `efir` / `efir stop` в Termux. Ключ приложение помнит после
-     * первого `efir` (из `kluch twitch`); захват должен идти — кадр раздваивается из него.
-     */
-    private fun efirKnopka() {
-        val e = Hub.efir
-        if (e == null) {
-            efirStatus = "Эфир: сначала «Начать захват» (или «ВСЁ СРАЗУ»)."
-            return
-        }
-        val on = efirIdyot()
-        efirStatus = if (on) "Эфир: заканчиваю…" else "Эфир: начинаю…"
-        thread(isDaemon = true) {
-            val r = if (on) e.stop() else e.start(if (efir720.isChecked) mapOf("size" to "720", "kbps" to "4500") else emptyMap())
-            val err = try { org.json.JSONObject(r).optString("oshibka") } catch (x: Exception) { "" }
-            efirStatus = when {
-                err.isNotEmpty() && err != "null" -> "Эфир: $err"
-                on -> "Эфир закончен (Twitch получил «трансляция окончена», не обрыв)."
-                else -> "Эфир: подключаюсь к Twitch…"
-            }
-            if (!on) ui.postDelayed({ if (efirIdyot() && efirStatus.startsWith("Эфир: подключаюсь")) efirStatus = "" }, 15000)
-        }
-    }
 
     /** Итоги вечера — тёмный экран во весь кадр эфира (то же, что `itogi` у Плюса). */
     private fun itogiKnopka() {

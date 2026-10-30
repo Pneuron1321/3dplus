@@ -23,11 +23,11 @@ object KlipMp4 {
     const val MAKS_SEK = 185
 
     /** Ответ JSON: {"ok":true,"put":"Movies/Plus/…mp4","sek":150,"mb":88} или {"oshibka":"…"}. */
-    fun sohranit(ctx: Context, z: KlipZapis, sek: Int, nachalo: String = "plus-klip"): String =
-        sohranitSnimok(ctx, { z.snimok(sek.coerceIn(5, MAKS_SEK)) }, nachalo)
+    fun sohranit(ctx: Context, z: KlipZapis, sek: Int, nachalo: String = "plus-klip", zvuk: Boolean = true): String =
+        sohranitSnimok(ctx, { z.snimok(sek.coerceIn(5, MAKS_SEK)) }, nachalo, zvuk = zvuk)
 
     /** То же для готового снимка (2.7.9: два клипа на одно время — снимки режет KlipSinhron). */
-    fun sohranitSnimok(ctx: Context, snimok: () -> KlipZapis.Snimok?, nachalo: String, imya0: String? = null): String {
+    fun sohranitSnimok(ctx: Context, snimok: () -> KlipZapis.Snimok?, nachalo: String, imya0: String? = null, zvuk: Boolean = true): String {
         if (!zanyat.compareAndSet(false, true)) return "{\"oshibka\":\"клип уже сохраняется\"}"
         try {
             val s = snimok() ?: return "{\"oshibka\":\"${if (nachalo.contains("shlem")) "эфира не было (клип шлема пишется во время эфира)" else "камера ещё ничего не прислала"} — клипа нет\"}"
@@ -43,7 +43,7 @@ object KlipMp4 {
             try {
                 r.openFileDescriptor(uri, "rw")!!.use { fd ->
                     val m = MediaMuxer(fd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                    try { bait = sobrat(m, s) } finally { try { m.release() } catch (e: Exception) { } }
+                    try { bait = sobrat(m, s, zvuk) } finally { try { m.release() } catch (e: Exception) { } }
                 }
                 r.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             } catch (e: Exception) {
@@ -52,18 +52,18 @@ object KlipMp4 {
                 return "{\"oshibka\":${FrameServer.json("клип не собрался: ${e.message ?: e.javaClass.simpleName}")}}"
             }
             return "{\"ok\":true,\"put\":${FrameServer.json("$PAPKA/$imya")},\"sek\":${s.sek},\"mb\":${bait shr 20}," +
-                "\"zvuk\":${s.asc != null}}"
+                "\"zvuk\":${zvuk && s.asc != null}}"
         } finally { zanyat.set(false) }
     }
 
-    private fun sobrat(m: MediaMuxer, s: KlipZapis.Snimok): Long {
+    private fun sobrat(m: MediaMuxer, s: KlipZapis.Snimok, zvuk: Boolean = true): Long {
         val g = s.golova
         val vf = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, if (g.w > 0) g.w else 1920, if (g.h > 0) g.h else 1080).apply {
             setByteBuffer("csd-0", ByteBuffer.wrap(Flv.sRazdelitelem(g.sps)))
             setByteBuffer("csd-1", ByteBuffer.wrap(Flv.sRazdelitelem(g.pps)))
         }
         val vt = m.addTrack(vf)
-        val at = s.asc?.let { asc ->
+        val at = s.asc?.takeIf { zvuk }?.let { asc ->
             val (hz, kan) = KlipZapis.aac(asc)
             m.addTrack(MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, hz, kan).apply {
                 setByteBuffer("csd-0", ByteBuffer.wrap(asc))
