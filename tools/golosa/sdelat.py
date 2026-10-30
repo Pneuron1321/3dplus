@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Образцы мужских голосов для Плюса. 29.10 — шесть голосов как есть; 30.10 (Александр: «какие-то феминизированные») —
 те же голоса НИЖЕ (edge-tts pitch, как `golos nizhe N` у Плюса): docs/golosa/nizhe/*.mp3. Многоязычные говорят и
-по-русски, и по-английски; Дмитрий — только по-русски."""
+по-русски, и по-английски; Дмитрий — только по-русски.
+30.10 вечером (Александр: «ниже, но осталась нотка женская… найдёшь ещё?») — `sdelat.py docs/golosa/glubzhe glubzhe`:
+ВСЕ мужские многоязычные голоса сервиса (список берётся у него самого) на 45 Гц ниже + Брайан и Эндрю на 60."""
 import asyncio
 import os
 import sys
@@ -21,9 +23,24 @@ GOLOSA = [   # (имя файла, голос, на сколько ниже, Г�
 ]
 
 
+async def glubzhe():
+    """Все мужские многоязычные голоса сервиса — на 45 Гц ниже; Брайан и Эндрю ещё и на 60 (предел golos nizhe)."""
+    vse = await edge_tts.list_voices()
+    muzh = sorted(v['ShortName'] for v in vse if v.get('Gender') == 'Male' and 'Multilingual' in v['ShortName'])
+    spisok = [('%d-%s-nizhe-45' % (i + 1, g.split('-')[2].replace('MultilingualNeural', '').lower()), g, 45)
+              for i, g in enumerate(muzh)]
+    spisok += [('%d-brian-nizhe-60' % (len(spisok) + 1), 'en-US-BrianMultilingualNeural', 60),
+               ('%d-andrew-nizhe-60' % (len(spisok) + 2), 'en-US-AndrewMultilingualNeural', 60)]
+    return spisok, muzh
+
+
 async def main(out):
     os.makedirs(out, exist_ok=True)
     sdelano = []
+    global GOLOSA
+    if len(sys.argv) > 2 and sys.argv[2] == 'glubzhe':
+        GOLOSA, muzh = await glubzhe()
+        sdelano.append('Мужские многоязычные голоса сервиса (%d): %s' % (len(muzh), ', '.join(muzh)))
     for imya, g, hz in GOLOSA:
         for popytka in range(3):
             try:
