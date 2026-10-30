@@ -1891,7 +1891,10 @@
        ============================================================ */
     const TELO = opts.telo === 'setka' && global.PixelMechTeloSetka;
     if (TELO) {
-      const G = global.PixelMechTeloSetka;
+      // 30.10: --opt=teloCvet=v6 — цвет с кирпичной v6 (tools/forma/cvet_v6.py); =detali — цвет листа заливкой по деталям
+      // (tools/forma/cvet_detali.py)
+      const G = (opts.teloCvet === 'v6' && global.PixelMechTeloSetkaV6) || (opts.teloCvet === 'detali' && global.PixelMechTeloSetkaD) ||
+        global.PixelMechTeloSetka;
       root.traverse(q => { if (q.isMesh || q.isLine || q.isPoints) q.visible = false; });   // прежние детали — не видны (группы нужны раскладке)
       Object.values(faceParts).forEach(o => o.traverse(q => { if (q.isMesh) q.scale.setScalar(1e-4); }));   // мимика прежней головы сама включает рот — сжать в точку
       const bin = b64 => { const t = (typeof atob === 'function') ? atob(b64) : Buffer.from(b64, 'base64').toString('binary'); const u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
