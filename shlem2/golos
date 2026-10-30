@@ -67,7 +67,7 @@ MOST = os.environ.get('GOLOS_MOST', 'http://localhost:8766')   # приложе�
 VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
 # 2.7.8 (Санёк 25.10): голос Плюса — мужской (Эндрю), соведущая — женский (Серафина). Переключатель — файл
 # /root/.golos-pol: «m» (по умолчанию) или «zh» (снова Ава); `golos pol m|zh`. Свой GOLOS_VOICE — сильнее файла.
-VOICE_M = os.environ.get('GOLOS_VOICE_M', 'en-US-BrianMultilingualNeural')   # 30.10: Александр выбрал Брайана, ниже на 30
+VOICE_M = os.environ.get('GOLOS_VOICE_M', 'en-US-AndrewMultilingualNeural')   # 30.10 вечером: Александр выбрал Эндрю, ниже на 30
 POL = os.environ.get('GOLOS_POL', '/root/.golos-pol')
 # 29.10 (Александр: «найди других мужских голосов») — какой мужской: `golos muzhskoy brian` (файл /root/.golos-muzhskoy);
 # образцы — docs/golosa в 3dplus. Многоязычные говорят и по-русски, и по-английски; Дмитрий — только по-русски.
@@ -82,7 +82,7 @@ MUZHSKIE = {'andrew': 'en-US-AndrewMultilingualNeural', 'brian': 'en-US-BrianMul
 # 30.10 (Александр: «голоса какие-то феминизированные»): тон голоса Плюса ниже — `golos nizhe 25` (Гц, 0–60; по умолчанию
 # 30, выбор Александра 30.10), файл /root/.golos-ton. Синтез сам опускает высоту голоса (edge-tts pitch), темп и чёткость те же. Соведущую не трогает.
 TON = os.environ.get('GOLOS_TON', '/root/.golos-ton')
-TON_UMOLCHANIE = 30                                              # 30.10: выбор Александра — Брайан, ниже на 30
+TON_UMOLCHANIE = 30                                              # 30.10: выбор Александра — Эндрю, ниже на 30
 
 
 def ton():
@@ -1665,13 +1665,13 @@ if __name__ == '__main__':
         sys.exit(proba(' '.join(a[1:]) or 'Привет, я Плюс. Так я звучу.'))
     if a and a[0] == 'pol':
         if len(a) < 2 or a[1] not in ('m', 'zh', 'moy'):
-            print('golos pol m | zh | moy — голос Плюса: мужской (Брайан), женский или свой (ElevenLabs); сейчас: %s'
+            print('golos pol m | zh | moy — голос Плюса: мужской (Эндрю), женский или свой (ElevenLabs); сейчас: %s'
                   % (pol() or 'm'))
             sys.exit(1)
         with open(POL, 'w') as f:
             f.write(a[1])
         if a[1] == 'moy' and not eleven_golos():
-            print('Свой голос включён, но нет %s: `! kluch eleven` (ключ API) и `golos moy ID_ГОЛОСА`. Пока — голос Брайана.'
+            print('Свой голос включён, но нет %s: `! kluch eleven` (ключ API) и `golos moy ID_ГОЛОСА`. Пока — голос Эндрю.'
                   % ('ключа' if not os.path.exists(ELEVEN_KEY) else 'ID голоса'))
         else:
             print('Голос Плюса: %s (со следующей фразы). Соведущая — как была.' % (
