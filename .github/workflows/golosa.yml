@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install edge-tts
-      - run: python3 tools/golosa/sdelat.py docs/golosa
+      - run: python3 tools/golosa/sdelat.py docs/golosa/nizhe
       - name: Положить mp3 в репозиторий
         run: |
           git config user.name "github-actions[bot]"
