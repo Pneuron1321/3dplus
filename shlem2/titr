@@ -33,11 +33,13 @@ KIRILL = re.compile('[А-Яа-яЁёІіЇїЄєҐґ]')
 # 19.10: а Александра перевод звал в женском роде («ты выиграла», «любопытной») — он мужчина
 PLUS_ONA = ('Plus is female: in Russian she speaks of herself in feminine forms (я поняла, я уверена) and addresses '
             'Alexander informally as «ты», never «вы». Alexander is male: "you" is always masculine in Russian '
-            '(ты выиграл, ты вышел, ты сам), never feminine. ')
+            '(ты выиграл, ты вышел, ты сам), never feminine. Every past-tense verb about "you" ends in -л / -ли, '
+            'NEVER -ла: "you opened the timer" -> «ты открыл таймер» (not «ты открыла»), "you got it" -> «ты понял». ')
 # 2.7.8: голос Плюса — мужской (файл /root/.golos-pol: «m» по умолчанию, «zh» — снова женский); соведущая — всегда женский
 PLUS_ON = ('Plus is male: in Russian he speaks of himself in masculine forms (я понял, я уверен) and addresses '
            'Alexander informally as «ты», never «вы». Alexander is male: "you" is always masculine in Russian '
-           '(ты выиграл, ты вышел, ты сам), never feminine. ')
+           '(ты выиграл, ты вышел, ты сам), never feminine. Every past-tense verb about "you" ends in -л / -ли, '
+            'NEVER -ла: "you opened the timer" -> «ты открыл таймер» (not «ты открыла»), "you got it" -> «ты понял». ')
 POL = os.environ.get('TITR_POL', '/root/.golos-pol')
 # соведущая грузит titr модулем из своего процесса (vedushchiy) — её переводы всегда в женском роде
 VEDUSHCHAYA = 'vedushchiy' in os.path.basename(sys.argv[0] if sys.argv and sys.argv[0] else '')

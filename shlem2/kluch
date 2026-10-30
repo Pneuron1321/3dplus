@@ -77,7 +77,7 @@ if [ "$1" = kick ]; then
       # адрес приёма: только rtmps://<свой>.global-contribute.live-video.net[:443]/app — без хвоста (туда мог попасть ключ)
       h=${k#rtmps://}; h=${h%%/*}; p=${k#rtmps://$h}; h=${h%:443}
       case "$h" in *[!a-z0-9.-]*|'') h= ;; *.global-contribute.live-video.net) ;; *) h= ;; esac
-      if [ -z "$h" ] || { [ "$p" != /app ] && [ "$p" != /app/ ]; }; then
+      if [ -z "$h" ] || { [ "$p" != /app ] && [ "$p" != /app/ ] && [ "$p" != / ] && [ -n "$p" ]; }; then
         echo "В буфере не адрес Kick: нужен «Stream URL» вида rtmps://….global-contribute.live-video.net/app (без ключа в конце)."
         exit 1
       fi

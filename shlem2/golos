@@ -241,6 +241,7 @@ VED_TISHINA = 1.0
 PLUS_TISHINA = 1.2
 PLUS_BEZ_MIK = 3.0
 VED_ZHDAT = 30.0
+VED_DOGOVOR = 2.0                  # с тишины, после которой соведущая договаривает оборванное (21.10); ждёт не дольше VED_ZHDAT
 VED_PEREBIT = 2                    # замеров подряд (по 0,15 с) громче порога, пока она говорит, — он перебил
 # 29.10 (Александр: «он разговаривает в то же время, что и я»): Плюс замолкает так же, как соведущая, — Александр
 # громче порога 0,3 с (два замера), даже если говорит не ему. Прерванное не теряется: «плюс плюс» — и Плюс продолжит
@@ -899,6 +900,7 @@ class Golos:
         self.mik_plus = 0
         self.perebil = 0.0         # когда Александр заговорил поверх соведущей (её обрываем)
         self.perebil_uchten = 0.0
+        self.ved_ostatok = None    # uid реплики соведущей, оборванной Александром: остаток договорит после тишины
 
     # --- приём ---
     def chitat_rezhim(self):
@@ -1117,11 +1119,13 @@ class Golos:
             self.perebil_uchten = self.perebil
             k = getattr(self.igrok, 'kusok', None)
             if k is not None and k.golos == VOICE_VED:
-                uid = k.uid
+                uid, igrok = k.uid, self.igrok
+                proshlo = time.time() - getattr(igrok, 't0', time.time())
                 self.stop_igrok()
-                self.vybrosit(lambda x: x.uid == uid)   # реплику целиком: договаривать её потом — уже не к месту
+                self.s_prervannoy(igrok, proshlo)       # остаток — с прерванной фразы; договорит после тишины (21.10)
+                self.ved_ostatok, self.ved_zhdu = uid, None
                 self.zhdu_dosluh = False
-                log('соведущая замолчала: Александр заговорил')
+                log('соведущая замолчала: Александр заговорил — договорит после тишины')
         if self.perebil_plus > self.perebil_plus_uchten:
             self.perebil_plus_uchten = self.perebil_plus
             ig = self.igrok
@@ -1142,6 +1146,7 @@ class Golos:
                 self.perebil_zhdu = 0.0
                 self.dl = now
                 log('Александр замолчал — Плюс продолжает')
+        self.ostatok_ustarel()
         dl = vremya(DALSHE)
         if dl > self.dl:
             self.dl = dl
@@ -1161,6 +1166,22 @@ class Golos:
             self.dl = time.time()
             log('пауза затянулась — прерванное не договариваю')
         self.novyy_efir()
+
+    def ostatok_ustarel(self):
+        """Остаток оборванной реплики соведущей не договариваем, если уже есть новая реплика соведущей
+        или ответ Плюса (звучит или ждёт в очереди); чат вслух не в счёт. Сам остаток кончился — забываем."""
+        uid = self.ved_ostatok
+        if uid is None:
+            return
+        with self.cv:
+            est = any(k.uid == uid for k in self.q)
+            drugoy = any(k.uid != uid and not k.chat for k in self.q)
+        if not est:
+            self.ved_ostatok = None
+        elif drugoy:
+            self.vybrosit(lambda x: x.uid == uid)
+            self.ved_ostatok = None
+            log('остаток соведущей не договариваю: уже есть новая реплика')
 
     def pauza(self):
         return max(self.pz, self.vnesh) > self.dl
@@ -1376,8 +1397,9 @@ class Golos:
         ot = self.mik_ot
         if ot is None and now - self.ved_zhdu[1] > 0.6:
             return True                    # поток спросил, а данных нет — мост молчит про микрофон
-        if ot is not None and now - max(ot, self.mik_gromko) >= VED_TISHINA:
-            if now - self.ved_zhdu[1] > VED_TISHINA + 0.5:
+        tishina = VED_DOGOVOR if k.uid == self.ved_ostatok else VED_TISHINA
+        if ot is not None and now - max(ot, self.mik_gromko) >= tishina:
+            if now - self.ved_zhdu[1] > tishina + 0.5:
                 log('соведущая дождалась паузы: %.1f с' % (now - self.ved_zhdu[1]))
             self.ved_zhdu = None
             return True

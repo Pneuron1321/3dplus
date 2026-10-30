@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import queue
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -1628,8 +1629,15 @@ def kick_nomera(kanal):
             return int(chasti[1]), (int(chasti[2]) if len(chasti) > 2 and chasti[2].isdigit() else None)
     except OSError:
         pass
-    d = json.loads(urllib.request.urlopen(urllib.request.Request(KICK_API + kanal, headers=dict(BRAUZER, Accept='application/json')),
-                                          timeout=20).read().decode('utf-8', 'replace'))
+    # 30.10: ник с «_» (3xsks_fu_gun) — в адресе Kick «-» (kick.com/3xsks-fu-gun); не нашёлся как есть — пробуем так
+    for i, imya in enumerate(dict.fromkeys([kanal, kanal.replace('_', '-')])):
+        try:
+            d = json.loads(urllib.request.urlopen(urllib.request.Request(KICK_API + imya, headers=dict(
+                BRAUZER, Accept='application/json')), timeout=20).read().decode('utf-8', 'replace'))
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 404 or imya == kanal.replace('_', '-'):
+                raise
     kan = d.get('id')
     return int((d.get('chatroom') or {})['id']), (int(kan) if str(kan).isdigit() else None)
 
