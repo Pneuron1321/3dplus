@@ -1500,7 +1500,13 @@ PL_IMYA = {'kick': 'Kick', 'yt': 'YouTube'}
 KICK_KANAL = os.environ.get('USHI_KICK_KANAL', '/root/.kick-kanal')
 YT_KANAL = os.environ.get('USHI_YT_KANAL', '/root/.youtube-kanal')
 KICK_API = os.environ.get('USHI_KICK_API', 'https://kick.com/api/v2/channels/')
-KICK_WS = os.environ.get('USHI_KICK_WS', 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false')
+# 30.10: Kick в октябре сменил ключ Pusher — старый 32cbd69e… сервер закрывает сразу (pusher:error 4001). Ключ и кластер
+# спрашиваем у самого Kick (web.kick.com/api/v1/realtime/connection, без входа); не ответил — известный новый.
+KICK_WS = os.environ.get('USHI_KICK_WS')           # задан — так и подключаемся (проверки)
+KICK_REALTIME = os.environ.get('USHI_KICK_REALTIME', 'https://web.kick.com/api/v1/realtime/connection')
+KICK_PUSHER = ('34bf7a0ff419a2a775b9', 'us2')       # запасной: ключ и кластер, 10.2026
+KICK_WS_SHABLON = 'wss://ws-{cl}.pusher.com/app/{key}?protocol=7&client=js&version=8.4.0&flash=false'
+_kick_ws_kesh = []
 YT_BAZA = os.environ.get('USHI_YT_BAZA', 'https://www.youtube.com')
 BRAUZER = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
            'Accept-Language': 'en-US,en;q=0.9', 'Cookie': 'SOCS=CAI; CONSENT=YES+cb'}   # без окна согласия ЕС
@@ -1642,6 +1648,44 @@ def kick_nomera(kanal):
     return int((d.get('chatroom') or {})['id']), (int(kan) if str(kan).isdigit() else None)
 
 
+def kick_pusher():
+    """(ключ, кластер) Pusher, который Kick сейчас раздаёт; не вышло — KICK_PUSHER."""
+    try:
+        zag = dict(BRAUZER, Accept='application/json', **{'Content-Type': 'application/json'})
+        d = json.loads(urllib.request.urlopen(urllib.request.Request(
+            KICK_REALTIME, data=json.dumps({'accepted_providers': ['pusher']}).encode(), headers=zag),
+            timeout=15).read().decode('utf-8', 'replace'))
+        key = cl = None
+        stek = [d]
+        while stek:
+            x = stek.pop()
+            if isinstance(x, dict):
+                for k, v in x.items():
+                    kl = k.lower().replace('_', '')
+                    if isinstance(v, str) and kl in ('key', 'appkey') and re.fullmatch(r'[0-9a-f]{20}', v):
+                        key = key or v
+                    elif isinstance(v, str) and kl == 'cluster' and re.fullmatch(r'[a-z]{2}\d?', v):
+                        cl = cl or v
+                    else:
+                        stek.append(v)
+            elif isinstance(x, list):
+                stek.extend(x)
+        if key:
+            return key, cl or 'us2'
+    except Exception as x:
+        print(time.strftime('%H:%M:%S'), 'чат Kick: ключ у Kick не узнал (%s) — беру известный' % type(x).__name__, flush=True)
+    return KICK_PUSHER
+
+
+def kick_ws_url(zanovo=False):
+    if KICK_WS:
+        return KICK_WS
+    if zanovo or not _kick_ws_kesh:
+        key, cl = kick_pusher()
+        _kick_ws_kesh[:] = [KICK_WS_SHABLON.format(cl=cl, key=key)]
+    return _kick_ws_kesh[0]
+
+
 def kick_chatroom(kanal):
     return kick_nomera(kanal)[0]
 
@@ -1718,7 +1762,7 @@ class ChatKick(threading.Thread):
             ws = None
             try:
                 room, kan = kick_nomera(kanal)
-                ws = Ws(KICK_WS, timeout=200)
+                ws = Ws(kick_ws_url(), timeout=200)
                 kanaly = ['chatrooms.%d.v2' % room] + (['channel.%d' % kan, 'channel_%d' % kan] if kan else [])
                 for ch in kanaly:                 # чат + события канала: фоловеры, сабы, подарки, рейды (29.10)
                     ws.poslat(json.dumps({'event': 'pusher:subscribe', 'data': {'auth': '', 'channel': ch}}))
@@ -1726,9 +1770,13 @@ class ChatKick(threading.Thread):
                     sost_plosh('kick_sobytiya', 'номер канала неизвестен — фоловеров Kick не вижу (chat kanal kick ИМЯ ЧАТ КАНАЛ)')
                 sost_plosh('kick', 'слушаю kick.com/%s' % kanal)
                 print(time.strftime('%H:%M:%S'), 'чат Kick: слушаю', kanal, flush=True)
-                pauza = 5
                 while prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+)?') == k:
                     stroka = ws.poluchit()
+                    if '"pusher:error"' in stroka:      # 30.10: ключ сменили (4001) — в следующий раз спросить заново
+                        _kick_ws_kesh[:] = []
+                        raise OSError('Kick отказал: ' + stroka[:160])
+                    if '"pusher_internal:subscription_succeeded"' in stroka or '"pusher:connection_established"' in stroka:
+                        pauza = 5                     # подключились по-настоящему — повтор снова скорый
                     if '"pusher:ping"' in stroka:
                         ws.poslat(json.dumps({'event': 'pusher:pong', 'data': {}}))
                         continue

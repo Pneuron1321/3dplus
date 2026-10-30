@@ -238,7 +238,11 @@ VED_TISHINA = 1.0
 # 30.10 (Александр: «не остановился… и делает очень большие паузы»): Плюс, замолчавший из-за Александра, продолжает
 # сам, когда тот замолчал PLUS_TISHINA с (раньше ждал «дальше» от ушей — а на простую речь без «плюс плюс» его нет,
 # и пауза тянулась до PAUZA_MAKS). Микрофона нет — продолжает через PLUS_BEZ_MIK с.
-PLUS_TISHINA = 1.2
+PLUS_TISHINA = 2.0                 # 30.10 вечером (Александр: «начинает сразу, а я могу продолжить») — было 1,2
+# Ответ Плюса начинается, только когда Александр молчит PLUS_PERED с (он мог просто перевести дух); говорит дольше
+# PLUS_PERED_MAKS — Плюс всё равно начинает (ответ не теряется).
+PLUS_PERED = 1.0
+PLUS_PERED_MAKS = 12.0
 PLUS_BEZ_MIK = 3.0
 VED_ZHDAT = 30.0
 VED_DOGOVOR = 2.0                  # с тишины, после которой соведущая договаривает оборванное (21.10); ждёт не дольше VED_ZHDAT
@@ -897,6 +901,7 @@ class Golos:
         self.perebil_plus = 0.0    # 29.10: когда Александр заговорил поверх Плюса (Плюс замолкает до «плюс плюс»)
         self.perebil_plus_uchten = 0.0
         self.perebil_zhdu = 0.0    # 30.10: Плюс молчит из-за Александра (время) — продолжит, когда тот замолчит
+        self.plus_zhdu = None      # 30.10: (uid, с какого времени) — начало ответа ждёт секунду тишины
         self.mik_plus = 0
         self.perebil = 0.0         # когда Александр заговорил поверх соведущей (её обрываем)
         self.perebil_uchten = 0.0
@@ -1302,6 +1307,8 @@ class Golos:
         if k.golos == VOICE_VED and not self.ved_mozhno(k):
             self.plus_vperyod()            # ждёт тишины — ответ Плюса (если есть) не держит
             return
+        if k.golos != VOICE_VED and not self.plus_mozhno(k):
+            return
         if k.pervyy:
             metka('zvuk', k.uid, self.rezhim)
             k.pervyy = False
@@ -1352,7 +1359,8 @@ class Golos:
                 log('соведущая звучала: микрофон медиана %d, громче всего %d дБ (%d замеров)' % (
                     v[len(v) // 2], v[0], len(v)))
             with self.cv:
-                nado = any(k.golos == VOICE_VED for k in self.q) or zvuchit_plus or bool(self.perebil_zhdu)
+                nado = any(k.golos == VOICE_VED for k in self.q) or zvuchit_plus or bool(self.perebil_zhdu) or \
+                    (ig is None and any(k.golos != VOICE_VED and k.pervyy for k in self.q))
             if not nado:
                 self.mik_ot = None
                 time.sleep(0.2)
@@ -1366,8 +1374,8 @@ class Golos:
                     self.mik_ot = now
                 if db <= ved_porog() and ig is None:   # пока звучит голос, микрофон слышит его эхо, не Александра
                     self.mik_gromko = now
-                if self.perebil_zhdu and ig is None and db <= golos_porog():
-                    self.mik_gromko = now      # Плюс молчит из-за Александра: тот ещё говорит
+                if ig is None and db <= golos_porog():
+                    self.mik_gromko = now      # тишина — ничего не звучит: громко — это Александр говорит
                 if zvuchit_ved:
                     self.mik_ved.append(db)
                     # 19.10 эфир: пока говорит соведущая, микрофон — 90 (её эха в нём нет), а громче порога — только
@@ -1385,6 +1393,24 @@ class Golos:
                 else:
                     self.mik_plus = 0
             time.sleep(shag)
+
+    def plus_mozhno(self, k):
+        """30.10: начало ответа Плюса — после секунды тишины Александра (PLUS_PERED). Продолжение ответа, микрофона
+        нет или ждём дольше PLUS_PERED_MAKS — можно."""
+        if not k.pervyy or not self.mik_zhiv:
+            return True
+        now = time.time()
+        if self.plus_zhdu is None or self.plus_zhdu[0] != k.uid:
+            self.plus_zhdu = (k.uid, now)
+        zhdu = now - self.plus_zhdu[1]
+        ot = self.mik_ot
+        if (ot is None and zhdu > 0.6) or zhdu > PLUS_PERED_MAKS:
+            return True
+        if ot is not None and now - max(ot, self.mik_gromko) >= PLUS_PERED:
+            if zhdu > PLUS_PERED + 0.5:
+                log('Плюс дождался тишины: %.1f с' % zhdu)
+            return True
+        return False
 
     def ved_mozhno(self, k):
         """Можно ли начать порцию соведущей: Александр молчит VED_TISHINA с. Нет потока или данных микрофона —
