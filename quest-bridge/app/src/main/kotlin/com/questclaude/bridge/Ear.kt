@@ -13,6 +13,7 @@ import kotlin.concurrent.withLock
  *          "wake" — услышал вызов (Ава замолкает, пока говоришь ты); text "dosluh" — заговорил в
  *                   секунду после ответа Плюса, без «плюс плюс» (2.3.1); фраза — с how "dosluh"
  *          "tiho" — «плюс тихо»
+ *          "zahvat" — захват оборвался (2.8.1): text "oborvan" | "zastyl", с « efir», если шёл эфир — Плюс скажет вслух
  */
 class Ear(private val keep: Int = 20, private val keepAudio: Int = 3) {
     /** audio — фраза после вызова, PCM 16 бит моно 16 кГц: её точнее распознаёт Whisper в Termux.

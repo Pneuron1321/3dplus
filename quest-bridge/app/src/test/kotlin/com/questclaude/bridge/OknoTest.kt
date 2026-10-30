@@ -33,11 +33,12 @@ class OknoTest {
         assertEquals("lv", v.gde)                                  // чужое — прежнее
         assertEquals(0.5f, v.dolya)                                // не больше половины
         val s = Okno.Vid.izStroki(Okno.Vid("ugol", "pv", 0.3f).toString())
-        assertEquals("ugol pv 0.3 0 1 4.0", s.toString())
-        assertEquals("ugol pn 0.25 0 1 4.0", Okno.Vid.izStroki("мусор").toString())
-        assertEquals("ugol pn 0.25 0 1 4.0", Okno.Vid.izStroki("ugol pn 0.25").toString())     // файл старой версии
+        val R = " 70.00,70.00,96.00,100.00"                        // 2.8.1: в конце — края своего окна
+        assertEquals("ugol pv 0.3 0 1 4.0$R", s.toString())
+        assertEquals("ugol pn 0.25 0 1 4.0$R", Okno.Vid.izStroki("мусор").toString())
+        assertEquals("ugol pn 0.25 0 1 4.0$R", Okno.Vid.izStroki("ugol pn 0.25").toString())     // файл старой версии
         val p = Okno.Vid.iz(mapOf("pov" to "90", "kray" to "0"), Okno.Vid())
-        assertEquals("ugol pn 0.25 90 0 4.0", p.toString())
+        assertEquals("ugol pn 0.25 90 0 4.0$R", p.toString())
         assertEquals(90, Okno.Vid.izStroki(p.toString()).povorot)
         assertEquals(90, Okno.Vid.iz(mapOf("pov" to "45"), p).povorot)                      // чужой угол — прежний
         assertEquals(false, Okno.Vid.iz(mapOf("kray" to "1"), p).vplotnuyu)

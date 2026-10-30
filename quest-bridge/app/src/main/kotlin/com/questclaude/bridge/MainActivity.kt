@@ -65,6 +65,10 @@ class MainActivity : Activity() {
             addView(button("ВСЁ СРАЗУ: глаза, уши, Плюс") { allInOne = true; noEyes = false; askPermissions() })
             // 2.8.0: шторка эфира — галочки Twitch, Kick, YouTube и «начать / закончить»
             efirShtorka = EfirShtorka(this@MainActivity) { t -> efirStatus = t }.also { it.vstavit(this) }
+            // 2.8.1: отдельное окно чата (Twitch, Kick, YouTube) — поставить в поле зрения рядом с игрой
+            addView(button("💬 ОКНО ЧАТА: открыть отдельным окном") {
+                startActivity(Intent(this@MainActivity, ChatOkno::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            })
             addView(button("ИТОГИ ВЕЧЕРА: показать / убрать (тёмный экран в эфире)") { itogiKnopka() })
             Pleer(this@MainActivity).vstavit(this)                // мини-плеер (2.5.7): шторка под кнопкой
             addView(button("КАМЕРА ТЕЛЕФОНА: подключить айфон") { kameraKnopka() }.apply {

@@ -1,5 +1,7 @@
 package com.questclaude.bridge
 
+import kotlin.math.roundToInt
+
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
@@ -234,13 +236,15 @@ class Kamera(
             "\"pokazano\":$pokazano,\"klip_sek\":${klip.sekund},\"propushcheno\":$propushcheno,\"v_efire\":${dec != null}," +
             "\"vid\":\"${v.rezhim}\",\"gde\":\"${v.gde}\",\"dolya\":${v.dolya}," +
             "\"povorot\":${v.povorot},\"vplotnuyu\":${v.vplotnuyu},\"sboku\":${v.sboku}," +
+            "\"ramka\":[${v.ramka.joinToString(",") { "%.1f".format(java.util.Locale.ROOT, it) }}]," +
             "\"slushaet\":${priyom.slushaet},\"popytok\":${priyom.popytok},\"perezapuskov\":${priyom.perezapuskov}," +
             "\"adres\":${ip?.let { FrameServer.json("rtmp://$it:${RtmpPriyom.PORT}/kamera") } ?: "null"}," +
             "\"oshibka\":${(oshibka ?: priyom.oshibka ?: klip.oshibka)?.let { FrameServer.json(it) } ?: "null"}}"
     }
 
     override fun vid(q: Map<String, String>): String {
-        val v = Okno.Vid.iz(q, vid)
+        val ar = if (w > 0 && h > 0) Okno.proporcii(w, h, vid.povorot) else 16f / 9f
+        val v = Okno.izmenit(Okno.Vid.iz(q, vid), q, ar)
         vid = v
         razvilka?.vid = v
         try { File(dir, VID).writeText(v.toString()) } catch (e: Exception) { }
@@ -319,6 +323,9 @@ class Kamera(
         fun opisanie(v: Okno.Vid): String = when (v.rezhim) {
             "krupno" -> "во весь кадр"
             "skryt" -> "скрыта"
+            "svoe" -> "своё окно: слева ${v.ramka[0].roundToInt()} %, сверху ${v.ramka[1].roundToInt()} %, " +
+                "справа ${(100 - v.ramka[2]).roundToInt()} %, снизу ${(100 - v.ramka[3]).roundToInt()} % от краёв кадра" +
+                (if (v.povorot != 0) ", повёрнута на ${v.povorot}°" else "")
             else -> "угол " + (if (v.gde.startsWith("l")) "слева" else "справа") + " " +
                 (if (v.gde.endsWith("n")) "внизу" else "вверху") + ", ${(v.dolya * 100).toInt()} %" +
                 (if (v.povorot != 0) ", повёрнута на ${v.povorot}°" else "") +

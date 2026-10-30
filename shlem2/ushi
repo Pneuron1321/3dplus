@@ -969,6 +969,40 @@ def vedushchey(ost, prod):
         return False
 
 
+# 2.8.1 (Александр 30.10: «эфир оборвался — я и не понял»): мост сказал, что захват оборвался или застыл —
+# Плюс говорит вслух сразу и ещё раз через ZAHVAT_NAPOMNIT с, если захват так и не подняли.
+ZAHVAT_NAPOMNIT = float(os.environ.get('USHI_ZAHVAT_NAPOMNIT', 90))
+
+
+def zahvat_fraza(t):
+    efir = 'efir' in t
+    if t.startswith('zastyl'):
+        return ('Санёк, захват застыл%s. В мосте нажми «Остановить», потом «Начать захват».'
+                % (' — эфир стоит' if efir else ''))
+    return 'Санёк, захват оборвался%s. Открой мост и нажми «Начать захват».' % (' — эфир не идёт' if efir else '')
+
+
+def zahvat_idyot():
+    try:
+        with urllib.request.urlopen(EAR.rsplit('/ear', 1)[0] + '/status', timeout=2) as r:
+            d = json.loads(r.read().decode('utf-8', 'replace'))
+        return bool(d.get('capturing')) and not d.get('stale')
+    except Exception:
+        return None
+
+
+def zahvat_oborvan(t):
+    fraza = zahvat_fraza(t)
+    print(time.strftime('%H:%M:%S'), 'захват:', t, flush=True)
+    say(fraza)
+
+    def napomnit():
+        time.sleep(ZAHVAT_NAPOMNIT)
+        if zahvat_idyot() is False:
+            say('Санёк, напоминаю: захват так и не запущен. Нажми в мосте «Начать захват».')
+    threading.Thread(target=napomnit, daemon=True).start()
+
+
 def handle(e, sluh):
     kind = e['kind']
     t = e.get('text', '').strip()
@@ -1067,6 +1101,8 @@ def handle(e, sluh):
         plenka('7' if t == '7' else '13', e.get('ms'))
     elif kind == 'klip':
         klip_gotov(t)
+    elif kind == 'zahvat':
+        zahvat_oborvan(t)
     elif kind == 'compact':
         compact(t)
     elif kind == 'text' and low in ('компакт', 'compact'):

@@ -206,6 +206,8 @@ class CaptureService : Service() {
         p.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
                 status = "Захват остановлен системой."
+                // 2.8.1 (Александр 30.10: эфир оборвался через 54 мин, а он не понял): уши — Плюсу, тот скажет вслух
+                Hub.ear.post("zahvat", if (Hub.efir != null) "oborvan efir" else "oborvan")
                 stopSelf()
             }
         }, handler)
@@ -303,6 +305,7 @@ class CaptureService : Service() {
             } else if (silent > 2 * STALE_MS && !revived) {
                 revived = true
                 status = "ЗАХВАТ ЗАСТЫЛ\nнажми «Остановить», потом «Начать захват»"
+                Hub.ear.post("zahvat", if (Hub.efir != null) "zastyl efir" else "zastyl")   // 2.8.1: Плюс скажет вслух
                 getSystemService(NotificationManager::class.java)
                     .notify(1, notification("Захват застыл — открой и нажми «Начать захват»"))
             }

@@ -88,6 +88,7 @@ class Razvilka(private val w: Int, private val h: Int) {
     private var ksurf: Surface? = null
     private val kmtx = FloatArray(16)
     private val kmtxPov = FloatArray(16)                     // kmtx × поворот окна (Okno.povorot)
+    private val kmtxTmp = FloatArray(16)                     // 2.8.1: × обрезка своего окна (Okno.obrezka)
     @Volatile private var kameraNs = 0L
     @Volatile private var kw = 0
     @Volatile private var kh = 0
@@ -812,6 +813,10 @@ class Razvilka(private val w: Int, private val h: Int) {
         }
         GLES20.glViewport(r[0], r[1], r[2], r[3])
         android.opengl.Matrix.multiplyMM(kmtxPov, 0, kmtx, 0, Okno.povorot(v.povorot), 0)
+        if (v.rezhim == "svoe" && r[3] > 0) {                // 2.8.1: своё окно — картинка заполняет, края срезаны
+            System.arraycopy(kmtxPov, 0, kmtxTmp, 0, 16)
+            android.opengl.Matrix.multiplyMM(kmtxPov, 0, kmtxTmp, 0, Okno.obrezka(r[2].toFloat() / r[3], ar), 0)
+        }
         if (shKamera.p == 0) return kvadrat(ktex, kmtxPov)
         val umen = maxOf(r[2], r[3]) < maxOf(kw, kh)      // кадр телефона больше окна — уменьшаем
         kvadratKamery(kmtxPov, if (umen) 0.25f / r[2] else 0f, if (umen) 0.25f / r[3] else 0f)

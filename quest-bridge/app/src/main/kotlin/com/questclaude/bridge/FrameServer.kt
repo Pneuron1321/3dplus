@@ -436,6 +436,7 @@ class FrameServer(
             }
             "/titr", "/cel", "/cel/upr", "/itogi", "/itogi/upr", "/igra", "/igra/upr", "/top", "/top/upr",
             "/chat", "/chat/upr" -> {
+                if (path == "/chat/upr") ChatLenta.upr(query)        // 2.8.1: окно «Плюс · Чат» — и без захвата
                 val p = plashki()
                 if (p == null) reply(out, 503, "application/json", "{\"oshibka\":\"нет захвата\"}".toByteArray())
                 else reply(out, 200, "application/json", when (path) {
@@ -459,8 +460,10 @@ class FrameServer(
                     while (got < length) { val n = reader.read(ch, got, length - got); if (n < 0) break; got += n }
                     String(ByteArray(got) { ch[it].code.toByte() }, Charsets.UTF_8)
                 } else ""
+                val pachka = stroki(telo)
+                ChatLenta.pachka(pachka)                              // 2.8.1: окно «Плюс · Чат» — и без захвата
                 if (p == null) reply(out, 503, "application/json", "{\"oshibka\":\"нет захвата\"}".toByteArray())
-                else reply(out, 200, "application/json", p.chatPachka(stroki(telo)).toByteArray(Charsets.UTF_8))
+                else reply(out, 200, "application/json", p.chatPachka(pachka).toByteArray(Charsets.UTF_8))
             }
             "/nalet", "/nalet/upr" -> {
                 val n = nalet()

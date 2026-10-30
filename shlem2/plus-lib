@@ -468,13 +468,17 @@ def kamera_skazat(telo):
     s, o = d.get('state'), d.get('oshibka') or ''
     g = d.get('gde') or 'pn'
     mesto = {'krupno': 'во весь кадр', 'skryt': 'окно скрыто'}.get(d.get('vid'))
+    rm = d.get('ramka')
+    if d.get('vid') == 'svoe' and isinstance(rm, list) and len(rm) == 4:     # 2.8.1: своё окно, края в % кадра
+        mesto = 'своё окно: от левого края %g %%, от верхнего %g %%, от правого %g %%, от нижнего %g %% кадра' % (
+            round(rm[0]), round(rm[1]), round(100 - rm[2]), round(100 - rm[3]))
     if mesto is None:
         mesto = 'угол %s %s, %s %%' % ('слева' if g[0] == 'l' else 'справа', 'внизу' if g[1] == 'n' else 'вверху',
                                        '%g' % round(float(d.get('dolya') or 0.25) * 100 + 1e-6, 1))
     if d.get('povorot'):
         mesto += ', повёрнута на %s° по часовой' % d['povorot']
     b = d.get('sboku')
-    if d.get('vid') not in ('krupno', 'skryt'):
+    if d.get('vid') not in ('krupno', 'skryt', 'svoe'):
         if b is None:                                  # приложение до 2.3.8: отступ сбоку как снизу
             if d.get('vplotnuyu'):
                 mesto += ', вплотную к углу'
@@ -514,7 +518,8 @@ def kamera_skazat(telo):
 
 def kamera(a):
     """kamera — как камера; svyaz; ugol pn|ln|pv|lv [0.25]; bolshe|menshe [15]; povorot 90|180|270|0;
-    vplotnuyu|otstup; sboku 4; snizu vplotnuyu|otstup; krupno; skryt; klip [60]."""
+    vplotnuyu|otstup; sboku 4; snizu vplotnuyu|otstup; krupno; skryt; klip [60];
+    2.8.1: rastyani|szhat vlevo|vpravo|vverh|vniz N; sdvin vlevo|vpravo|vverh|vniz N; ramka Л В П Н (% кадра)."""
     a = list(a)
     U = os.environ.get('KAMERA_URL') or APP
     c = a[0] if a else ''
@@ -566,12 +571,41 @@ def kamera(a):
                 return 1, ['kamera ugol pn 0.3 — доля ширины числом 0.1–0.5.'], None
             q += '&r=' + ost[0]
         return vid(q)
+    # 2.8.1 (Александр 30.10: «растяни влево настолько-то, вниз, вправо… в процентах»): своё окно — любой край
+    # растянуть / сжать и всё окно сдвинуть, в % кадра (по горизонтали — ширины, по вертикали — высоты)
+    STORONY = {'vlevo': 'vlevo', 'vpravo': 'vpravo', 'vverh': 'vverh', 'vniz': 'vniz', 'levo': 'vlevo',
+               'pravo': 'vpravo', 'verh': 'vverh', 'niz': 'vniz'}
+    if c in ('rastyani', 'rastyanut', 'szhat', 'szhmi', 'sozhmi', 'sdvin', 'sdvinut', 'podvin'):
+        kuda = STORONY.get(a2)
+        n = (a[2] if len(a) > 2 else '5').replace(',', '.').rstrip('%')
+        if kuda is None or not re.fullmatch(r'\d+(\.\d+)?', n):
+            return 1, ['kamera rastyani vlevo 10 — левый край на 10 % кадра дальше (vpravo, vverh, vniz); '
+                       'kamera szhat vniz 5 — нижний край на 5 % ближе; kamera sdvin vpravo 10 — всё окно.'], None
+        if c.startswith('sd') or c == 'podvin':
+            q = 'sdvin=%s:%s' % (kuda, n)
+        else:
+            q = 'rastyani=%s:%s%s' % (kuda, '-' if c in ('szhat', 'szhmi', 'sozhmi') else '', n)
+        r = zapros(U, '/kamera/vid?' + q, 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if '"ramka"' not in r[1] and '"state"' in r[1]:
+            return 0, ['Это приложение ещё не умеет своё окно камеры: нужна версия 2.8.1.'], None
+        return kamera_skazat(r[1]) + (None,)
+    if c == 'ramka':
+        kr = [x.replace(',', '.').rstrip('%') for x in a[1:5]]
+        if len(kr) != 4 or not all(re.fullmatch(r'\d+(\.\d+)?', x) for x in kr):
+            return 1, ['kamera ramka 60 50 98 100 — края окна в % кадра: левый, верхний, правый, нижний '
+                       '(от левого верхнего угла).'], None
+        return vid('ramka=' + ','.join(kr))
     if c in ('bolshe', 'menshe'):
         if re.search(r'[^0-9.]', a2):
             return 1, ['kamera bolshe 15 — на 15 % больше (число процентов).'], None
         r = zapros(U, '/kamera', 5)
         if r is None:
             return 1, [MOLCHIT], None
+        if (razobrat(r[1]) or {}).get('vid') == 'svoe':          # 2.8.1: своё окно — больше / меньше от его центра
+            p = float(a2) / 100 if a2 else 0.15
+            return vid('masshtab=%s' % round((1 + p) if c == 'bolshe' else 1 / (1 + p), 4))
         try:
             d = float((razobrat(r[1]) or {}).get('dolya') or 0.25)
             b = c == 'bolshe'
@@ -606,7 +640,8 @@ def kamera(a):
         return kamera_skazat(r[1]) + (None,)
     return 0, ['kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera '
                'bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera sboku 4; kamera '
-               'snizu vplotnuyu|otstup; kamera krupno; kamera skryt; kamera klip [60] — клип камеры в полном качестве.'], None
+               'snizu vplotnuyu|otstup; kamera krupno; kamera skryt; kamera klip [60] — клип камеры в полном качестве; '
+               'kamera rastyani|szhat vlevo|vpravo|vverh|vniz 10; kamera sdvin vniz 5; kamera ramka Л В П Н (% кадра).'], None
 
 
 # ---------- karta: звук карты захвата (2.6.0) ----------

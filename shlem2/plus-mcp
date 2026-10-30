@@ -44,7 +44,9 @@ TOOLS = [
     {'name': 'kamera',
      'description': 'Камера телефона в эфире — как команда kamera: komanda пусто — как камера; svyaz; ugol '
                     'pn|ln|pv|lv [0.25]; bolshe|menshe [15]; povorot 90|180|270|0; vplotnuyu|otstup; '
-                    'sboku 4; snizu vplotnuyu|otstup; krupno; skryt; klip [60] — клип камеры (полное качество, в галерею).',
+                    'sboku 4; snizu vplotnuyu|otstup; krupno; skryt; klip [60] — клип камеры (полное качество, в галерею); '
+                    'своё окно (2.8.1): rastyani|szhat vlevo|vpravo|vverh|vniz 10 — край на 10 % кадра; sdvin vniz 5 — '
+                    'всё окно; ramka Л В П Н — края в % кадра от левого верхнего угла.',
      'inputSchema': {'type': 'object', 'properties': {'komanda': {'type': 'string'}, 'skazat': SKAZAT}}},
     {'name': 'efir',
      'description': 'Эфир: komanda status (или пусто) — как идёт; mic 4 | mic +25% | mic -20% — голос в эфире.',

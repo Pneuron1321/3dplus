@@ -51,6 +51,19 @@
             </intent-filter>
         </activity>
 
+        <!-- 2.8.1: «Плюс · Чат» — отдельное окно (своя задача) с чатом всех площадок; есть и в библиотеке приложений -->
+        <activity
+            android:name=".ChatOkno"
+            android:exported="true"
+            android:label="Плюс · Чат"
+            android:taskAffinity="com.questclaude.bridge.chat"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- Карту вставили и в «Choose an app» выбрали мост: Android сам даёт мосту доступ к карте (своё окно
              «Разрешить» Quest не показывает, 21.10). Мост ставит картинку карты и открывает HDMI Link. -->
         <activity
