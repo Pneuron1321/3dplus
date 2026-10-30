@@ -19,11 +19,27 @@ from scipy import ndimage
 SETKA, VIDY_D, OUT = sys.argv[1:4]
 arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
 TREUG, TEX, STEP = arg('--treug', 80000), arg('--tex', 4096), arg('--step', 8.0)
+# --tochno: сетка собрана по этим же видам (sborka.py) — лицо к +z, без поиска: рамка фигуры = рамка силуэта, без 3/4
+TOCHNO = '--tochno' in sys.argv
 
 # ---------- 1. упрощение (Blender в отдельном процессе) и развёртка ----------
 tmp = tempfile.mkdtemp()
-src = trimesh.load(SETKA, force='mesh')
-if len(src.faces) > TREUG * 1.1:
+FCOL = FNOGA = None
+if TOCHNO:
+    # сборка: детали отдельными узлами — у каждой грани свой цвет детали (для мест, невидимых ни с одного вида)
+    # и признак «нога» (вид сбоку по высоте с видом спереди не согласован в ногах — с бока ноги не красим)
+    sc = trimesh.load(SETKA, force='scene'); vv, ff, cc, nn, n0 = [], [], [], [], 0
+    for node in sc.graph.nodes_geometry:
+        T, g = sc.graph[node]; gm = sc.geometry[g]
+        bc = np.asarray(gm.visual.material.baseColorFactor[:3], float); bc = bc / 255 if bc.max() > 1 else bc
+        vv.append(trimesh.transform_points(gm.vertices, T)); ff.append(gm.faces + n0); n0 += len(gm.vertices)
+        cc.append(np.tile(np.where(bc <= 0.0031308, bc * 12.92, 1.055 * bc ** (1 / 2.4) - 0.055) * 255, (len(gm.faces), 1)))
+        nn.append(np.full(len(gm.faces), node.startswith(('bedro', 'koleno', 'golen', 'lodyzhka', 'tapok'))))
+    src = trimesh.Trimesh(np.concatenate(vv), np.concatenate(ff), process=False)
+    FCOL, FNOGA = np.concatenate(cc), np.concatenate(nn)
+else:
+    src = trimesh.load(SETKA, force='mesh')
+if not TOCHNO and len(src.faces) > TREUG * 1.1:
     src.export(tmp + '/in.ply')
     subprocess.run([sys.executable, '-c', '''
 import bpy, sys
@@ -114,6 +130,8 @@ def sovmestit(mk, Vr, toch=False):
         return (sil & mks).sum() / max((sil | mks).sum(), 1)
     x = [s, ox, oy, 1.0]
     best = iou(*x)
+    if TOCHNO:
+        return (best, *x)
     for shag in ((16.0, 0.02), (8.0, 0.01), (4.0, 0.005), (2.0, 0.0025)):
         luchshe = True
         while luchshe:
@@ -131,8 +149,8 @@ vidy = {k: Image.open(os.path.join(VIDY_D, k + '.png')).convert('RGB') for k in 
 maski = {k: maska(im) for k, im in vidy.items()}
 # поворот сетки вокруг y, при котором вид смотрит на неё: front — лицо к камере (+z к зрителю)
 # left: лицо смотрит влево на картинке → камера видит правый бок фигуры; right — наоборот; v34 — ~40° между front и одним боком
-varianty = {}
-for lico in (0.0, math.pi):                                   # 0 — лицо сетки к +z, π — к −z
+varianty = {0.0: {'left': 1.0}} if TOCHNO else {}
+for lico in (() if TOCHNO else (0.0, math.pi)):                                   # 0 — лицо сетки к +z, π — к −z
     sc = {}
     for k, u in (('left', -math.pi / 2), ('right', math.pi / 2)):
         R = povorot(lico + u)
@@ -141,8 +159,8 @@ for lico in (0.0, math.pi):                                   # 0 — лицо �
     print('лицо', 'к +z' if lico == 0 else 'к −z', {k: round(v, 3) for k, v in sc.items()})
 LICO = max(varianty, key=lambda l: sum(varianty[l].values()))
 # v34: угол перебором
-best34 = None
-for g in range(5, 61, 5):
+best34 = ((0, 1, 0, 0, 1), 0.0) if TOCHNO else None
+for g in (() if TOCHNO else range(5, 61, 5)):
     for zn in (1, -1):
         R = povorot(LICO + zn * math.radians(g))
         r = sovmestit(maski['v34'], V @ R.T)
@@ -150,6 +168,8 @@ for g in range(5, 61, 5):
             best34 = (r, zn * math.radians(g))
 print('3/4: угол %.0f°, IoU %.3f' % (math.degrees(best34[1]), best34[0][0]))
 UGLY = {'front': LICO, 'back': LICO + math.pi, 'left': LICO - math.pi / 2, 'right': LICO + math.pi / 2, 'v34': LICO + best34[1]}
+if TOCHNO:
+    del UGLY['v34']
 
 kamery = {}
 for k, u in UGLY.items():
@@ -176,7 +196,19 @@ for k, c in kamery.items():
     cosv = Nr[:, 2]                                           # камера смотрит вдоль −z, зритель на +z
     px = proekt(Pr, c['s'], c['ox'], c['oy'], c['H'], c['sx'])
     xi = np.clip(px[:, 0].astype(int), 0, c['W'] - 1); yi = np.clip(px[:, 1].astype(int), 0, c['H'] - 1)
-    vis = (cosv > 0.05) & (-Pr[:, 2] <= c['zb'][yi, xi] + eps) & c['mk'][yi, xi]
+    vis = (cosv > 0.05) & (-Pr[:, 2] <= c['zb'][yi, xi] + eps)
+    if FNOGA is not None and k in ('left', 'right'):
+        # ноги на боковых видах ниже, чем на виде спереди (бедро на 140 точек): цвет берём по опорным высотам
+        # (вид спереди → вид слева: бедро, низ бедра, колено, верх и низ голени, верх тапка, подошва)
+        PF = np.array([776, 905, 945, 975, 1100, 1185, 1383.]); PL = np.array([915, 1060, 1093, 1118, 1210, 1235, 1409.])
+        ys_, = np.nonzero(c['mk'].any(1)); verh, niz = ys_.min(), ys_.max()
+        PL = verh + (PL - 43) * (niz - verh) / 1366                  # для вида справа — по его рамке
+        yF = 1383 - P[:, 1] * 1000
+        noga = FNOGA[ti]
+        yk = np.where(noga, np.interp(yF, PF, PL), px[:, 1])
+        px = np.stack([px[:, 0], yk], 1)
+        yi = np.clip(px[:, 1].astype(int), 0, c['H'] - 1)
+    vis &= c['mk'][yi, xi]
     # цвет — билинейно
     fx = np.clip(px[:, 0] - .5, 0, c['W'] - 1.001); fy = np.clip(px[:, 1] - .5, 0, c['H'] - 1.001)
     x0 = fx.astype(int); y0 = fy.astype(int); ax = (fx - x0)[:, None]; ay = (fy - y0)[:, None]
@@ -199,6 +231,8 @@ ok = wsum > 0
 tex[yy[ok], xx[ok]] = cvet[ok]; est[yy[ok], xx[ok]] = True
 print('окрашено %.1f %% текселей сетки' % (100 * ok.mean()))
 # невидимые и поля вокруг островов развёртки — ближайший окрашенный
+if FCOL is not None:                                          # невидимое ни с одного вида — цвет своей детали
+    tex[yy[~ok], xx[~ok]] = FCOL[ti[~ok]]; est[yy, xx] = True
 _, (iy, ix) = ndimage.distance_transform_edt(~est, return_indices=True)
 tex = tex[iy, ix]
 Image.fromarray(np.clip(tex, 0, 255).astype(np.uint8)).save(OUT.rsplit('.', 1)[0] + '-tex.png')
