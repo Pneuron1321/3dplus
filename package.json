@@ -1,0 +1,14 @@
+{
+  "name": "pixel-mech",
+  "version": "2.0.0",
+  "private": true,
+  "description": "PIXEL MECH — модульная фигурка из кирпичиков: генератор 3D-модели, вьювер и экспорт GLB",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "renders": "node tools/build.mjs --renders-only"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.55.0",
+    "three": "0.128.0"
+  }
+}

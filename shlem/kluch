@@ -1,0 +1,30 @@
+#!/bin/sh
+# kluch — ключ из буфера обмена шлема в файл, не показывая его.
+#   ! kluch          — ключ Groq (console.groq.com/keys) → /root/.groq-key
+#   ! kluch twitch   — ключ трансляции Twitch (dashboard.twitch.tv → Настройки →
+#                      Трансляция → Основной ключ) → /root/.twitch-key, для retr
+# Ключ — секрет: не печатать, не читать вслух, не заливать, не в кадр.
+T=/data/data/com.termux/files/usr/bin
+k=$(timeout 15 $T/termux-clipboard-get 2> /dev/null | tr -d ' \r\n')
+[ -n "$k" ] || { echo "Буфер пуст или Termux:API не ответил. Скопируй ключ ещё раз."; exit 1; }
+umask 077
+if [ "$1" = twitch ]; then
+  case "$k" in live_?*) ;; *) echo "В буфере не ключ Twitch: он начинается с live_."; exit 1 ;; esac
+  printf '%s\n' "$k" > /root/.twitch-key
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  echo "Ключ Twitch сохранён (${#k} знаков). Буфер очищен. Если стрим через ретранслятор уже идёт — через секунду он уйдёт на Twitch, канал в эфире."
+  exit 0
+fi
+case "$k" in gsk_?*) ;; *) echo "В буфере не ключ Groq: он начинается с gsk_."; exit 1 ;; esac
+printf '%s\n' "$k" > /root/.groq-key
+timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null   # стереть ключ из буфера
+h=$(mktemp)
+printf 'Authorization: Bearer %s\n' "$k" > "$h"
+c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H @"$h" https://api.groq.com/openai/v1/models)
+rm -f "$h"
+case "$c" in
+  200) echo "Ключ сохранён и работает (${#k} знаков). Буфер очищен." ;;
+  401) echo "Ключ сохранён, но Groq его не принял (401). Скопируй ключ заново." ;;
+  403) echo "Ключ сохранён, но Groq отказал (403): возможно, страна недоступна." ;;
+  *) echo "Ключ сохранён; Groq не ответил (код $c) — проверь интернет." ;;
+esac

@@ -1,0 +1,2460 @@
+#!/usr/bin/env python3
+# ushi — уши Плюса в Ubuntu. Берёт услышанное
+# quest-bridge (/ear) и вписывает фразу в Claude
+# (tmux-сессия «plus»). «Плюс плюс» ставит Аву
+# на паузу, после фразы она договаривает (+25 %);
+# «тихо» глушит её. «В ухо» / «вслух» — режим
+# голоса. «Зум зум» — сам берёт кадр.
+# «Компакт» — подготовка, «компакт плюс» — сжатие.
+# Фразу точнее распознаёт Whisper (sluh), если
+# он поставлен; иначе — текст Vosk из приложения.
+# Запускает plus; лог — /tmp/ushi.log (время
+# Whisper на фразу). Последние 10 фраз — в
+# /tmp/frazy: sluh-test сравнит на них модели.
+# Обновили ushi, sluh, /root/.sluh-model,
+# .sluh-threads или .ushi-pauza — уши
+# перезапускаются сами.
+import fcntl
+import glob
+import json
+import os
+import re
+import select
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+import time
+import queue
+import urllib.error
+import urllib.parse
+import urllib.request
+
+EAR = os.environ.get('USHI_EAR', 'http://localhost:8766/ear')   # приложение 2 (1.0 — 8765)
+FRAZY = '/tmp/frazy'
+# «копи копи» в конце фразы (как «приём» в рации):
+# приложение уже отправило фразу, слова Плюсу не нужны.
+# Два слова подряд в конце срезаем всегда (в речи так не
+# бывает), одно — только если приложение отметило stop;
+# «копик», «копейку» — быстрое «копи копи» одним словом.
+KOPI = (r'(?:капи|копи|капі|копі|кэпи|капе|копе|капий'
+        r'|копий|копия|copy|coppy|kopi|kapi|cappy|capi)')
+KAPI = re.compile(r'(?:[\s,.!?…—-]*\b' + KOPI
+                  + r'\b){1,2}[\s.!?…]*$', re.I)
+KAPI2 = re.compile(r'(?:(?:[\s,.!?…—-]*\b' + KOPI
+                   + r'\b){2}|[\s,.!?…—-]*\b(?:копик|копейку)\b)'
+                   r'[\s.!?…]*$', re.I)
+PAUZA = '/root/.ushi-pauza'   # тишина конца фразы, с
+MAKS = '/root/.ushi-maks'     # самая длинная фраза, с
+# Секунда после ответа Плюса (2.3.1): сколько слушать
+# без «плюс плюс» (0 — не слушать) и порог громкости
+# (дБ ниже полной шкалы: меньше — нужен громче голос).
+DOSLUH = os.environ.get('USHI_DOSLUH', '/root/.ushi-dosluh')
+DOSLUH_DB = os.environ.get('USHI_DOSLUH_DB',
+                           '/root/.ushi-dosluh-db')
+NASTROYKI = ((PAUZA, 'pause', float), (MAKS, 'max', float),
+             (DOSLUH, 'dosluh', float), (DOSLUH_DB, 'db', int))
+# Фраза в секунду после ответа — Плюс знает, что это
+# ответ на её слова (или на реплику соведущего).
+POSLE = '(голосом, сразу после твоих слов) '
+G_PAUZA = '/tmp/golos.pauza'  # голос: пауза на вызов
+G_DALSHE = '/tmp/golos.dalshe'  # голос: продолжить
+G_Q = os.environ.get('GOLOS_Q', '/tmp/golos/q')    # очередь голоса-демона
+G_LOCK = os.environ.get('GOLOS_LOCK', '/tmp/golos-demon.lock')
+G_POSL = os.environ.get('GOLOS_POSL', '/tmp/golos.posl')   # последний ответ Плюса
+G_DOSLUH_KTO = os.environ.get('GOLOS_DOSLUH_KTO', '/tmp/golos.dosluh-kto')   # чей голос открыл «дослух»
+POVTORI = ('повтори', 'повтори пожалуйста', 'ещё раз', 'еще раз',
+           'повтори ещё раз', 'повтори еще раз')
+REZHIM = os.environ.get('GOLOS_REZHIM',
+                        '/root/.golos-rezhim')  # uho|vsluh
+ZAMER = '/tmp/zamer.log'      # метки задержки (zamer)
+# Рация (raciya): мозг Плюса в фоновой сессии — фразы ей файлами, не в окно.
+RACIYA_Q = os.environ.get('RACIYA_Q', '/tmp/raciya/q')
+RACIYA_PID = os.environ.get('RACIYA_PID', '/tmp/raciya.pid')
+# «реклама», «радио» — так Whisper слышал «рацию» в шлеме (06.10)
+RACIYA = ('рация', 'рацию', 'рации', 'режим рация', 'включи рацию', 'реклама',
+          'радио', 'radio')
+OKNO = ('окно', 'окна', 'режим окно', 'выключи рацию', 'window')
+REZHIMY = {'в ухо': 'uho', 'ухо': 'uho', 'вухо': 'uho',
+           'уши': 'uho', 'в уши': 'uho',    # 16.10, Александр: «можно и ухо, и уши»
+           'in ear': 'uho', 'ear': 'uho', 'ears': 'uho', 'in ears': 'uho',
+           'вслух': 'vsluh', 'в слух': 'vsluh',
+           'aloud': 'vsluh', 'out loud': 'vsluh'}
+# Выдумки Whisper на тишине и шуме (из субтитров,
+# на которых его учили). Короткая фраза целиком из
+# них — не Александр: Плюсу не отправляем.
+GALLYU = re.compile(
+    r'субтитр|корректор|продолжение следует|'
+    r'спасибо за (?:просмотр|внимание)|'
+    r'подписывайтесь|ставьте лайк|dimatorzok|'
+    r'диматорзок|диматург|thanks? (?:you )?for '
+    r'watching|amara\.org|дякую за перегляд|'
+    r'музыка|аплодисменты', re.I)
+PLUS2 = re.compile(r'^\s*(?:плюс|plus)[\s,.!-]+'
+                   r'(?:плюс|plus)\b[\s,.!-]*', re.I)
+# Приложение 2 отдаёт Whisper звук с начала слов
+# вызова (lead > 0): слитно «плюс плюсокно» конец
+# вызова у Vosk попадал внутрь «окно». Тогда «плюс
+# плюс» в тексте есть всегда — срезаем и с мусором
+# до них (хвост Авы, шорох — до 20 знаков), и
+# «плюсплюс», «++», «люс плюс»; одно «плюс» — тоже.
+PLUS_T = r'(?:п?люс|plus|\+)'
+PLUS_LEAD = re.compile(r'^.{0,20}?' + PLUS_T + r'[\s,.!-]*'
+                       + PLUS_T + r'(?!\w)[\s,.!?…-]*',
+                       re.I | re.S)
+PLUS1 = re.compile(r'^\s*' + PLUS_T + r'(?!\w)[\s,.!?…-]*',
+                   re.I)
+# «В ухо» / «уши» (16.10): Vosk приложения подгонял под «в ухо»
+# и «уши» в разговоре, а вызов — и «с плюсом». Режим «в ухо»
+# по фразе со словами вызова (lead > 0) — только если и Whisper
+# услышал «плюс» в её начале.
+PLUS_SLYSHEN = re.compile(r'^.{0,25}?' + PLUS_T, re.I | re.S)
+
+
+def bez_vyzova(w, lead):
+    """Текст Whisper без слов вызова в начале."""
+    if not lead:
+        return PLUS2.sub('', w)
+    w2 = PLUS_LEAD.sub('', w, count=1)
+    return w2 if w2 != w else PLUS1.sub('', w, count=1)
+ME = os.path.abspath(__file__)
+TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
+COMPACT = (
+    '/compact Сохрани: что делаем сейчас, '
+    'принятые решения, открытые задачи, '
+    'договорённости о голосе, глазах и фразах, '
+    'всё из /root/pamyat.md. Выкинь: описания '
+    'старых кадров, вывод команд, повторы.')
+ZOOM = {
+    'x2': ('x2', 'зум зум — кадр вдвое крупнее'),
+    'x4': ('x4', 'зум зум зум — кадр вчетверо крупнее'),
+    'centr': ('centr', 'зум зум центр — центр вида'),
+}
+
+
+def get(url, timeout=3):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
+def metka(imya, uid, ms=None, dop=''):
+    """Метка задержки для zamer: мс, что, чья фраза."""
+    try:
+        with open(ZAMER, 'a') as f:
+            f.write('%d\t%s\t%s\t%s\n' % (
+                ms or time.time() * 1000, imya, uid, dop))
+    except OSError:
+        pass
+
+
+def signal(put):
+    """Голосу: пауза или «дальше» (время в файл)."""
+    try:
+        open(put, 'w').write('%.6f' % time.time())
+    except OSError:
+        pass
+
+
+def demon_zhiv():
+    """Голос-демон держит замок, пока жив."""
+    try:
+        f = open(G_LOCK, 'a')
+    except OSError:
+        return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return False
+    except OSError:
+        return True
+    finally:
+        f.close()
+
+
+def say(text):
+    """Фраза ушей — прямо в очередь демона: без запуска
+    Python (skazhi) на каждую фразу. Демона нет — skazhi
+    поднимет его или скажет по-старому."""
+    if demon_zhiv():
+        try:
+            os.makedirs(G_Q, exist_ok=True)
+            put = '%s/%d.txt' % (G_Q, time.time_ns())
+            open(put + '.tmp', 'w').write(text)
+            os.replace(put + '.tmp', put)
+            return
+        except OSError:
+            pass
+    subprocess.run(['skazhi', text])
+
+
+def povtori():
+    """«Плюс плюс повтори» — последний ответ Плюса ещё раз,
+    без Claude."""
+    try:
+        t = open(G_POSL).read().strip()
+    except OSError:
+        t = ''
+    say(t or 'Ещё нечего повторить.')
+
+
+def raciya_zhiva():
+    """Рация включена: её процесс жив."""
+    try:
+        os.kill(int(open(RACIYA_PID).read()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def v_raciyu(text):
+    """Фраза — в рацию (файлом, порядок по имени)."""
+    os.makedirs(RACIYA_Q, exist_ok=True)
+    put = '%s/%d.txt' % (RACIYA_Q, time.time_ns())
+    open(put + '.tmp', 'w').write(text)
+    os.replace(put + '.tmp', put)
+
+
+def raciya(vkl):
+    """«Плюс плюс рация» / «окно»: рация встаёт в окно
+    Плюса на место Claude или Claude возвращается туда с
+    тем же разговором (переключает сама raciya)."""
+    if vkl == raciya_zhiva():
+        say('Рация уже включена.' if vkl else 'Окно и так открыто.')
+        return
+    say('Рация.' if vkl else 'Окно.')
+    if not vkl:                # сразу в очередь рации: без запуска Python
+        v_raciyu('/окно')
+        return
+    r = subprocess.run(['raciya', 'vkl'], capture_output=True, text=True)
+    print(time.strftime('%H:%M:%S'), 'рация:',
+          (r.stdout or r.stderr).strip()[:80], flush=True)
+
+
+def iz_prosmotra():
+    """Окно Плюса пролистано вверх (tmux в режиме просмотра —
+    колесо, джойстик): набранное ушло бы в просмотр, а не в
+    Claude, и Enter закрыл бы просмотр вместо «отправить».
+    Сначала выйти."""
+    r = subprocess.run(['tmux', 'display-message', '-p', '-t',
+                        'plus', '#{pane_in_mode}'],
+                       capture_output=True, text=True)
+    if r.stdout.strip() == '1':
+        subprocess.run(['tmux', 'send-keys', '-t', 'plus', '-X',
+                        'cancel'])
+
+
+def keys(*args):
+    iz_prosmotra()
+    subprocess.run(['tmux', 'send-keys', '-t', 'plus']
+                   + list(args))
+
+
+TMUX = threading.Lock()   # голос и чат пишут по очереди
+# Вопрос Claude Code на экране («Do you want to proceed?
+# ❯ 1. Yes»): фраза и Enter, вписанные вслепую, ответят
+# на него «да» — голосом Александра или пачкой чата.
+# Узнаём его по низу экрана tmux.
+DIALOG = re.compile(r'❯ *\d+\.|^ *\d+\. +(?:Yes|No)\b|'
+                    r'Do you want to (?:proceed|make|create|'
+                    r'allow|run)', re.M)
+ZHDUT = []          # фразы голосом, пока экран занят
+ZHDAT_MAKS = 120    # с: дольше — устарела, не вписываем
+
+
+def ekran():
+    """Низ окна Плюса (tmux «plus»), 25 строк."""
+    r = subprocess.run(['tmux', 'capture-pane', '-p',
+                        '-t', 'plus'],
+                       capture_output=True, text=True)
+    return '\n'.join(r.stdout.rstrip().splitlines()[-25:])
+
+
+def ekran_zanyat():
+    if raciya_zhiva():
+        return False           # в рации вопросов на экране нет
+    return bool(DIALOG.search(ekran()))
+
+
+def ne_otpravleno(niz, vpisano):
+    """Фраза ещё стоит в поле ввода: последняя строка
+    с «❯» (поле ввода — самое нижнее) начинается с неё.
+    Отправленная остаётся выше, а поле внизу пустое."""
+    stroki = [x for x in niz.splitlines()
+              if x.lstrip().startswith(('❯', '>'))]
+    if not stroki:
+        return False
+    posl = ' '.join(stroki[-1].lstrip()[1:].split())
+    nachalo = ' '.join(vpisano.split())[:20]
+    return bool(nachalo) and posl.startswith(nachalo)
+
+
+def v_plus(text, metka='(голосом) '):
+    """Вписать фразу в Claude и нажать Enter.
+    Enter — отдельно и с паузой: длинный текст Claude
+    Code принимает за вставку, и Enter сразу за ним
+    становится переносом строки, а не «отправить»
+    (05.10 в шлеме). Фраза осталась в поле — Enter ещё
+    раз. На экране вопрос Claude Code — не вписываем
+    (False): Enter ответил бы на него."""
+    text = text.rstrip(' ;')
+    if raciya_zhiva():
+        v_raciyu(metka + text)
+        return True
+    with TMUX:
+        iz_prosmotra()
+        if ekran_zanyat():
+            return False
+        subprocess.run(['tmux', 'send-keys', '-t', 'plus',
+                        '-l', metka + text])
+        for _ in range(3):
+            time.sleep(0.3)
+            subprocess.run(['tmux', 'send-keys', '-t', 'plus',
+                            'Enter'])
+            time.sleep(0.4)
+            niz = ekran()
+            if DIALOG.search(niz) or \
+                    not ne_otpravleno(niz, metka + text):
+                break
+    return True
+
+
+# Мир сообщает изменения (12.10, этап 2 плана эфира, I.3): к фразе Александра уши приписывают,
+# что изменилось с прошлой фразы — эфир, камера, донаты, чат. Только состояния и числа, без слов
+# зрителей; одной строкой. Плюсу не нужно звать efir и kamera, чтобы это узнать.
+DELTA = os.environ.get('USHI_DELTA', '1') != '0'
+SCHET = {'chat': 0, 'donaty': 0, 'podpiski': 0, 'reydy': 0}
+PROSHLOE = [None]
+
+
+def skolko(n, odin, dva, pyat):
+    k = n % 100
+    slovo = pyat if 11 <= k <= 14 else odin if k % 10 == 1 else dva if 2 <= k % 10 <= 4 else pyat
+    return '%d %s' % (n, slovo)
+
+
+def sostoyanie():
+    """Эфир и камера (у приложения, по полсекунды на ответ) и счётчики ушей."""
+    d = dict(SCHET)
+    for chto in ('efir', 'kamera'):
+        try:
+            with urllib.request.urlopen(EAR.rsplit('/ear', 1)[0] + '/' + chto, timeout=0.5) as r:
+                j = json.loads(r.read())
+        except Exception:
+            j = {}
+        d[chto] = j.get('state')
+        if chto == 'efir' and j.get('state') == 'efir' and 'tesno' in j:   # 2.3.9: «тесно» от бриджа
+            d['tesno'] = j.get('tesno_pochemu') or '' if j.get('tesno') else None
+    return d
+
+
+def delta_stroka(bylo, stalo):
+    """Что изменилось между двумя состояниями — « (с прошлой фразы: …)» или пусто."""
+    ch = []
+    e0, e1 = bylo.get('efir'), stalo.get('efir')
+    if e0 and e1 and e0 != e1:
+        ch.append({'efir': 'эфир идёт', 'off': 'эфир закончился', 'obryv': 'эфир оборвался, переподключается',
+                   'podklyuchayus': 'эфир подключается'}.get(e1, 'эфир: ' + e1))
+    k0, k1 = bylo.get('kamera'), stalo.get('kamera')
+    if k0 and k1 and k0 != k1:
+        ch.append({'idyot': 'камера подключилась', 'zhdu': 'камера отключилась, ждёт телефон'}.get(
+            k1, 'камера выключена'))
+    if 'tesno' in bylo and 'tesno' in stalo and bylo['tesno'] != stalo['tesno']:
+        ch.append('эфиру тесно: %s' % stalo['tesno'] if stalo['tesno'] is not None else 'эфиру снова свободно')
+    for klyuch, formy in (('donaty', ('донат', 'доната', 'донатов')),
+                          ('podpiski', ('подписка', 'подписки', 'подписок')),
+                          ('reydy', ('рейд', 'рейда', 'рейдов')),
+                          ('chat', ('сообщение в чате', 'сообщения в чате', 'сообщений в чате'))):
+        n = stalo.get(klyuch, 0) - bylo.get(klyuch, 0)
+        if n > 0:
+            ch.append('+' + skolko(n, *formy))
+    return ' (с прошлой фразы: %s)' % '; '.join(ch) if ch else ''
+
+
+def golosom(text, pometka='(голосом) '):
+    """Фраза Александра: вписать, а если на экране
+    вопрос — сказать об этом, фраза ждёт (dognat)."""
+    text += ved_pometka()           # о чём он говорил с соведущей — Плюс знает без команд
+    if DELTA:
+        stalo = sostoyanie()
+        if PROSHLOE[0] is not None:
+            text += delta_stroka(PROSHLOE[0], stalo)
+        PROSHLOE[0] = stalo
+    if v_plus(text, pometka):
+        return True
+    if not ZHDUT:
+        say('На экране вопрос разрешения. Ответь в окне '
+            'Termux — фраза подождёт.')
+    ZHDUT.append((time.time(), text, pometka))
+    del ZHDUT[:-5]
+    metka('vopros', '-')       # zamer: вопрос разрешения на экране
+    print(time.strftime('%H:%M:%S'),
+          'на экране вопрос — фраза ждёт', flush=True)
+    return False
+
+
+def dognat():
+    """Экран свободен — вписать ждущие фразы по
+    порядку; старше ZHDAT_MAKS — не вписываем."""
+    while ZHDUT:
+        t, text, pometka = ZHDUT[0]
+        if time.time() - t > ZHDAT_MAKS:
+            print(time.strftime('%H:%M:%S'), 'фраза '
+                  'устарела, не вписываю:', text[:60],
+                  flush=True)
+        elif not v_plus(text, pometka):
+            return
+        ZHDUT.pop(0)
+
+
+# Взгляд (решение Александра 05.10): фраза начинается с
+# «посмотри», «глянь»… — уши сразу говорят «Сейчас
+# посмотрю» и прикладывают кадр момента вопроса (снят
+# на «плюс плюс»). Плюсу остаётся открыть файл: на одно
+# обращение к модели меньше (без решения звать kadr).
+VZGLYAD = re.compile(r'(?:посмотри|глянь|взгляни|смотри|'
+                     r'что (?:там )?на экране|что видишь|'
+                     r'видишь|прочитай|прочти|'
+                     r'что (?:там )?написано)\b')
+VIEW = os.environ.get('USHI_VIEW', '/root/view.jpg')
+KADR_VYZOV = os.environ.get('USHI_KADR_VYZOV',
+                            '/tmp/kadr-vyzov.jpg')
+S_KADROM = ('(голосом; кадр момента вопроса уже в '
+            '/root/view.jpg — открой его, kadr не нужен, '
+            '«Сейчас посмотрю» уже сказано) ')
+
+
+PLUS_LIB = os.environ.get('USHI_PLUS_LIB', '/usr/local/bin/plus-lib')
+
+
+class PlusLib:
+    """plus-lib (kadr) как модуль (12.10, этап 2): кадр вызова на каждое «плюс плюс», «зум зум» и
+    плёнка — в этом же процессе, без sh и двух curl (под proot ≈110 мс процессора на кадр).
+    Нет plus-lib или не загрузился — программа kadr, как раньше. Обновили — перечитаем."""
+    m, mtime, lock = None, 0.0, threading.Lock()
+
+    @classmethod
+    def modul(cls):
+        with cls.lock:
+            try:
+                mt = os.path.getmtime(PLUS_LIB)
+            except OSError:
+                return None
+            if cls.m is None or mt != cls.mtime:
+                cls.mtime = mt
+                try:
+                    import importlib.machinery
+                    import importlib.util
+                    ld = importlib.machinery.SourceFileLoader('plus_lib', PLUS_LIB)
+                    m = importlib.util.module_from_spec(importlib.util.spec_from_loader('plus_lib', ld))
+                    ld.exec_module(m)
+                    cls.m = m if hasattr(m, 'kadr') else None
+                except Exception as e:
+                    print(time.strftime('%H:%M:%S'), 'plus-lib не загрузился:', type(e).__name__, flush=True)
+                    cls.m = None
+            return cls.m
+
+
+def kadr(args=(), out=None):
+    """Кадр: (код, текст ответа kadr). out — в какой файл (по умолчанию /root/view.jpg)."""
+    m = PlusLib.modul()
+    if m is not None:
+        try:
+            kod, stroki, _ = m.kadr(list(args), out=out)
+            return kod, '\n'.join(stroki)
+        except Exception as e:
+            print(time.strftime('%H:%M:%S'), 'plus-lib kadr сломался:', type(e).__name__, flush=True)
+    r = subprocess.run(['kadr'] + list(args), capture_output=True, text=True,
+                       env=dict(os.environ, KADR_OUT=out) if out else None)
+    return r.returncode, r.stdout.strip()
+
+
+UMEET_SEK = float(os.environ.get('USHI_UMEET_SEK', 60))
+UMEET = {'t': -1e9, 'chto': frozenset()}
+
+
+def most_umeet(chto):
+    """Что умеет приложение (2.3.9+: список «umeet» в /status): «kadr_t» — кадр любого момента
+    последних 30 с из плёнки, «chat_pachka» — чат в кадр пачкой. Спрашиваем не чаще раза в
+    UMEET_SEK; старое приложение или нет ответа — не умеет (всё по-старому)."""
+    if time.time() - UMEET['t'] > UMEET_SEK:
+        UMEET['t'] = time.time()
+        try:
+            with urllib.request.urlopen(EAR.rsplit('/ear', 1)[0] + '/status', timeout=2) as r:
+                UMEET['chto'] = frozenset(json.loads(r.read()).get('umeet') or ())
+        except Exception:
+            UMEET['chto'] = frozenset()
+    return chto in UMEET['chto']
+
+
+def kadr_vyzova():
+    """На «плюс плюс» — кадр этого момента, в фоне:
+    понадобится, если фраза окажется «посмотри…».
+    С 2.3.9 не снимаем: кадр момента возьмём из плёнки
+    приложения, и только если фраза — «посмотри» (III.5)."""
+    def snyat():
+        if most_umeet('kadr_t'):
+            return
+        kadr(out=KADR_VYZOV)
+    threading.Thread(target=snyat, daemon=True).start()
+
+
+def vzglyad(text):
+    """«Посмотри…»: «Сейчас посмотрю» сразу, кадр
+    вызова → /root/view.jpg (нет свежего — kadr сейчас),
+    фраза — с пометкой, что кадр уже лежит."""
+    say('Сейчас посмотрю.')
+    est = False
+    ms = VYZOV_MS[0]
+    # плёнка держит 30 с: вызов свежее 25 с — кадр того момента из неё (2.3.9)
+    if ms and time.time() * 1000 - ms < 25000 and most_umeet('kadr_t'):
+        est = kadr(['moment', str(int(ms))], out=VIEW)[0] == 0
+    try:
+        if not est and time.time() - os.path.getmtime(KADR_VYZOV) < 120:
+            shutil.move(KADR_VYZOV, VIEW)
+            est = True
+    except OSError:
+        pass
+    if not est:
+        est = kadr(out=VIEW)[0] == 0
+    return golosom(text, S_KADROM if est else '(голосом) ')
+
+
+def golos_zhiv():
+    """Голос-демон держит синтез тёплым: первый
+    ответ без ожидания запуска."""
+    if not os.path.exists('/usr/local/bin/golos'):
+        return
+    r = subprocess.run(['flock', '-n',
+                        '/tmp/golos-demon.lock', 'true'],
+                       capture_output=True)
+    if r.returncode == 0:
+        subprocess.Popen(
+            ['/usr/local/bin/golos'],
+            stdin=subprocess.DEVNULL,
+            stdout=open('/tmp/golos.log', 'a'),
+            stderr=subprocess.STDOUT,
+            start_new_session=True)
+
+
+def most_igraet():
+    """Приложение умеет играть голос (0.5+)."""
+    try:
+        with urllib.request.urlopen(
+                EAR.rsplit('/', 1)[0] + '/say/status',
+                timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def rezhim(r):
+    """«Плюс плюс в ухо» / «вслух». В ухо — Аву
+    играет приложение со звуком «не записывать»:
+    стрим её не слышит. Право голоса в эфире даёт
+    Александр, поэтому только по его слову."""
+    if r == 'uho' and not most_igraet():
+        say('Режим в ухо требует новое приложение. '
+            'Пока говорю вслух.')
+        return
+    open(REZHIM, 'w').write(r)
+    say('Теперь в ухо.' if r == 'uho' else
+        'Теперь вслух.')
+
+
+def rechi_net(wav, ot=0.0):
+    """Сколько секунд в фразе громче −40 дБ: шум
+    без речи Whisper превращает в выдумки.
+    ot — с какой секунды считать (после слов вызова)."""
+    try:
+        import array
+        import math
+        d = open(wav, 'rb').read()[44 + int(ot * 16000) * 2:]
+        a = array.array('h', d[:len(d) // 2 * 2])
+        step, golos = 480, 0           # 30 мс
+        for i in range(0, len(a) - step, step):
+            s = sum(x * x for x in a[i:i + step:4])
+            rms = math.sqrt(s / (step / 4)) or 1
+            if 20 * math.log10(rms / 32768) > -40:
+                golos += 1
+        return golos * 0.03
+    except Exception:
+        return 99.0
+
+
+class Sluh:
+    """Whisper в своём процессе: модель грузится
+    один раз (первый запуск — скачивание)."""
+    PY = os.environ.get(
+        'SLUH_PY', '/opt/sluh/bin/python')
+    SCRIPT = os.environ.get(
+        'SLUH_SCRIPT', '/usr/local/bin/sluh')
+
+    def __init__(self):
+        self.p, self.ready, self.via = None, False, ''
+        if os.path.exists(self.PY) and \
+                os.path.exists(self.SCRIPT):
+            self.p = subprocess.Popen(
+                [self.PY, self.SCRIPT],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=open('/tmp/sluh.log', 'a'),
+                text=True, bufsize=1)
+            threading.Thread(target=self._ready,
+                             daemon=True).start()
+
+    def _ready(self):
+        line = self.p.stdout.readline()
+        self.ready = '"ready"' in line
+        print(time.strftime('%H:%M:%S'), 'слух:',
+              'готов' if self.ready else 'не запустился',
+              flush=True)
+
+    def hear(self, wav, timeout=25):
+        if not wav or not self.ready or \
+                self.p.poll() is not None:
+            return None
+        try:
+            self.p.stdin.write(wav + '\n')
+            self.p.stdin.flush()
+            out = [self.p.stdout]
+            if not select.select(out, [], [], timeout)[0]:
+                return None
+            d = json.loads(self.p.stdout.readline())
+            self.via = d.get('via', '')
+            return d.get('text', '').strip()
+        except Exception:
+            return None
+
+
+def fetch(event_id):
+    """Скачать WAV фразы, хранить последние 10."""
+    os.makedirs(FRAZY, exist_ok=True)
+    wav = '%s/%d.wav' % (FRAZY, event_id)
+    url = '%s/wav?id=%d' % (EAR, event_id)
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            open(wav, 'wb').write(r.read())
+    except Exception:
+        return None
+    old = sorted(glob.glob(FRAZY + '/*.wav'),
+                 key=os.path.getmtime)[:-10]
+    for f in old:
+        os.remove(f)
+    return wav
+
+
+def pauza():
+    """Пауза конца фразы, самая длинная фраза и секунда
+    после ответа (NASTROYKI) — приложение забывает их
+    при перезапуске; поменяли файл — шлём снова."""
+    q = []
+    for f, k, tip in NASTROYKI:
+        try:
+            q.append('%s=%s' % (k, tip(float(open(f).read()))))
+        except (OSError, ValueError):
+            pass
+    if q:
+        try:
+            print(time.strftime('%H:%M:%S'), 'пауза:',
+                  get('%s/set?%s' % (EAR, '&'.join(q))),
+                  flush=True)
+        except Exception:
+            pass
+
+
+def compact(kind):
+    if kind == 'go':
+        if ekran_zanyat():
+            say('На экране вопрос разрешения — сначала '
+                'ответь на него.')
+            return
+        say('Сжимаю контекст.')
+        if raciya_zhiva():
+            v_raciyu(COMPACT)
+            return
+        keys('-l', COMPACT)
+        keys('Enter')
+    else:
+        golosom('компакт: подготовка')
+
+
+def zoom(kind):
+    arg, what = ZOOM.get(kind, ZOOM['x2'])
+    kod, otv = kadr([arg])
+    if kod == 0:
+        golosom(what + ' уже в /root/view.jpg — '
+                'открой и скажи, что там важно')
+    else:
+        say(otv or 'Кадр не получился.')
+
+
+def klip_gotov(t):
+    """2.7.8: «клип клип клип» — мост сам сохранил два клипа; Александру в ухо коротко, что вышло."""
+    try:
+        d = json.loads(t or '{}')
+    except ValueError:
+        d = {}
+    chasti = []
+    for kto, imya in (('kamera', 'камеры'), ('efir', 'шлема')):
+        r = d.get(kto) or {}
+        if r.get('ok'):
+            chasti.append('клип %s — %d секунд' % (imya, int(r.get('sek') or 0)))
+        else:
+            chasti.append('клипа %s нет' % imya)
+    tekst = 'Сохранил: ' + ', '.join(chasti) + '. Они в «Фильмы/Plus».' if d else 'Клип не вышел: мост не ответил.'
+    if d.get('sinhron'):                     # 2.7.9: оба на одно время
+        tekst += ' Оба с одной секунды, расхождение %d миллисекунд.' % int(d.get('rashozhdenie_ms') or 0)
+    print(time.strftime('%H:%M:%S'), 'клип клип клип:', t[:300], flush=True)
+    try:
+        os.makedirs(G_Q, exist_ok=True)
+        put = os.path.join(G_Q, '%d.uho' % time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(tekst)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
+def plenka(n, ms):
+    """«Чек чек» (7 кадров, ±1,5 с) и «зум чек» (13, ±3 с): плёнка момента
+    команды — Плюсу сразу, как «зум зум». В фоне: приложение ждёт кадры
+    «после», а уши за это время не должны глохнуть."""
+    imya = 'чек чек' if n == '7' else 'зум чек'
+
+    def idti():
+        kod, otv = kadr(['plenka', str(int(ms or time.time() * 1000)), n])
+        if kod == 0:
+            golosom('%s — %s Открой и скажи, что произошло.' % (imya, otv))
+        else:
+            say(otv or 'Плёнка не получилась.')
+    threading.Thread(target=idti, daemon=True).start()
+
+
+VYZOV_MS = [0]      # момент последнего вызова — к нему плёнка «чек чек плюс»
+VYZOV_KAK = ['']    # как позвали: '' — «плюс плюс», 'dosluh' — секунда после ответа, без слов вызова
+
+
+def chek_plus(vopros, ms, uid):
+    """«Чек чек плюс …»: плёнка 7 кадров вокруг команды и 1,5 с речи после
+    неё — Плюсу вместе: картинка момента и вопрос к ней."""
+    def idti():
+        kod, otv = kadr(['plenka', str(int(ms or time.time() * 1000)), '7'])
+        if kod != 0:
+            say(otv or 'Плёнка не получилась.')
+            return
+        v = ('Вопрос Александра: «%s». Открой и ответь.' % vopros if vopros
+             else 'Вопроса не было — открой и скажи, что произошло.')
+        if golosom('чек чек плюс — %s %s' % (otv, v)):
+            metka('vpisal', uid)
+    threading.Thread(target=idti, daemon=True).start()
+
+
+TITR = os.environ.get('USHI_TITR', '/usr/local/bin/titr')
+# 19.10, Александр: команды Плюсу — не в кадр («чтобы люди видели только разговор»). Показывать их снова —
+# файл /root/.titry-komandy (разговор в кадр и так кладёт sinhron).
+TITR_KOMANDY = os.environ.get('USHI_TITR_KOMANDY', '/root/.titry-komandy')
+
+
+class TitrModul:
+    """titr как модуль (12.10, этап 1): перевод и показ — в этом же процессе, без запуска
+    программы на каждую фразу; соединение с Groq живёт с ушами. Обновили titr — перечитаем."""
+    m, mtime, lock = None, 0.0, threading.Lock()
+
+    @classmethod
+    def vzyat(cls):
+        try:
+            mt = os.path.getmtime(TITR)
+        except OSError:
+            return None
+        with cls.lock:
+            if cls.m is None or mt != cls.mtime:
+                try:
+                    import importlib.machinery
+                    import importlib.util
+                    loader = importlib.machinery.SourceFileLoader('titr_modul', TITR)
+                    spec = importlib.util.spec_from_loader('titr_modul', loader)
+                    m = importlib.util.module_from_spec(spec)
+                    loader.exec_module(m)
+                    cls.m = m if hasattr(m, 'subtitr') else None
+                except Exception:
+                    cls.m = None
+                cls.mtime = mt
+            return cls.m
+
+
+def titr_ya(t):
+    """Фраза Александра — субтитром в эфир (перевод и показ — в фоне; без эфира — молча)."""
+    m = TitrModul.vzyat()
+    if m is None:
+        if os.path.exists(TITR):              # старый titr — программой, как раньше
+            try:
+                subprocess.Popen([TITR, 'ya', '--', t], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            except OSError:
+                pass
+        return
+
+    def idti():
+        try:
+            if m.efir_idyot():
+                m.subtitr('ya', t, m.perevod(t))
+        except Exception:
+            pass
+    threading.Thread(target=idti, daemon=True).start()
+
+
+def nastroyki_st():
+    """Когда менялись файлы настроек ушей."""
+    st = []
+    for f, _, _ in NASTROYKI:
+        try:
+            st.append(os.path.getmtime(f))
+        except OSError:
+            st.append(0)
+    return st
+
+
+# ---------- прямой разговор с соведущей (17.10, Александр) ----------
+# Фраза, начинающаяся со «соведущая/соведущий» (и как слышит Whisper: «со ведущая», «со-ведущий»), — прямо ей,
+# минуя Плюса: `vedushchiy sprosi`, Плюсу ничего не уходит (он и ответил бы «тихо»). Заговорил сразу после её
+# реплики (дослух) без слова «соведущая» — это ответ ей; в секунду после ответа Плюса — Плюсу (19.10: как с Плюсом).
+# Все фразы Александра (ей и Плюсу) — в общий журнал /root/.vedushchiy/dialog.jsonl.
+VED_BIN = os.environ.get('USHI_VED', '/usr/local/bin/vedushchiy')
+VED_OFF = os.environ.get('VED_OFF', '/root/.vedushchiy-off')
+VED_GOVORILA = os.environ.get('VED_GOVORILA', '/tmp/vedushchiy-govorila')
+VED_DIALOG = os.environ.get('VED_DIALOG', '/root/.vedushchiy/dialog.jsonl')
+VED_PAUZA = float(os.environ.get('USHI_VED_PAUZA', 120))
+_PL = r'(?:п?люс|plus)'
+_RAZD = r'[\s,.!?…:;«»"\'-]*'
+SOVED = re.compile(r'^' + _RAZD + r'(?:' + _PL + r'[\s,.!?…-]+' + _PL + r'[\s,.!?…-]+)?'
+                   r'(?:со[\s-]*ве[дт][уюо][щш]\w*|со[\s-]*вед\w*|co[\s-]?host\w*)(?!\w)' + _RAZD, re.I)
+# управление соведущей (Плюс выполняет vedushchiy vkl/vykl/kazhdye): «соведущий, давай», «соведущего выключи»
+SOVED_KOMANDA = re.compile(r'^(?:давай|раз в \d+|каждые \d+|вкл\w*|выкл\w*|включ\w*|выключ\w*|отключ\w*|'
+                           r'замолч\w*|не нужн\w*|пока не|хватит)(?!\w)', re.I)
+
+
+def ved_dialog(t, komu):
+    """Фраза Александра — в общий журнал (дёшево, без процессов)."""
+    try:
+        os.makedirs(os.path.dirname(VED_DIALOG), exist_ok=True)
+        with open(VED_DIALOG, 'a') as f:
+            f.write(json.dumps({'t': round(time.time(), 1), 'rol': 'alex', 'komu': komu, 'tekst': t[:600]},
+                               ensure_ascii=False) + '\n')
+        if os.path.getsize(VED_DIALOG) > 200000:
+            st = open(VED_DIALOG, errors='replace').read().splitlines()[-300:]
+            open(VED_DIALOG + '.tmp', 'w').write('\n'.join(st) + '\n')
+            os.replace(VED_DIALOG + '.tmp', VED_DIALOG)
+    except OSError:
+        pass
+
+
+def ved_govorila_posledney():
+    """Секунду «дослуха» открыл голос соведущей (19.10, Александр: «сделай, как с Плюсом» — не два
+    минуты разговора с ней, а ответ сразу после её реплики). Голос старше 19.10 (файла нет) — как раньше:
+    последней говорила соведущая (после неё Плюс не отвечал) и не больше VED_PAUZA секунд назад."""
+    try:
+        kto = open(G_DOSLUH_KTO).read().strip()
+        return kto == 'ved' and time.time() - os.path.getmtime(G_DOSLUH_KTO) <= VED_PAUZA
+    except OSError:
+        pass
+    try:
+        tg = os.path.getmtime(VED_GOVORILA)
+    except OSError:
+        return False
+    if time.time() - tg > VED_PAUZA:
+        return False
+    try:
+        tp = os.path.getmtime(G_POSL)
+    except OSError:
+        tp = 0.0
+    return tg >= tp
+
+
+VED_DOSTAVLENO = '/tmp/ushi-dialog.dostavleno'   # t последней записи dialog.jsonl, о которой Плюс уже знает
+VED_POSL_ZAPISANO = '/tmp/ushi-dialog.posl'       # mtime ответа Плюса (golos.posl), уже внесённого в dialog.jsonl
+VED_POMETKA_MIN = 60                               # записи старше (минут) Плюсу не напоминаем
+
+
+def ved_zapis(rol, komu, tekst, t=None):
+    try:
+        os.makedirs(os.path.dirname(VED_DIALOG), exist_ok=True)
+        with open(VED_DIALOG, 'a') as f:
+            f.write(json.dumps({'t': round(t or time.time(), 1), 'rol': rol, 'komu': komu, 'tekst': tekst[:600]},
+                               ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
+def ved_plus_otvet():
+    """Последний ответ Плюса (его текст уши и так видят в golos.posl) — в общий журнал, один раз."""
+    try:
+        mt = os.path.getmtime(G_POSL)
+        zap = float(open(VED_POSL_ZAPISANO).read() or 0) if os.path.exists(VED_POSL_ZAPISANO) else None
+        if zap is None:
+            open(VED_POSL_ZAPISANO, 'w').write(str(mt))     # первый запуск: старое не пишем
+            return
+        if mt <= zap:
+            return
+        open(VED_POSL_ZAPISANO, 'w').write(str(mt))
+        t = ' '.join(open(G_POSL, errors='replace').read().split())
+        if t:
+            ved_zapis('plus', 'alex', t[:400], mt)
+    except (OSError, ValueError):
+        pass
+
+
+def ved_pometka():
+    """«(с соведущей с прошлого раза: Александр: «…» — она: «…»)» — новые записи журнала разговора с ней
+    (не больше 3, по 200 знаков, без дублей); нет новых — пусто. Плюс знает о них без команд."""
+    ved_plus_otvet()
+    try:
+        last = float(open(VED_DOSTAVLENO).read() or 0)
+    except (OSError, ValueError):
+        last = 0.0
+    novye, t_max, vidno = [], last, set()
+    try:
+        for l in open(VED_DIALOG, errors='replace').read().splitlines()[-40:]:
+            try:
+                z = json.loads(l)
+            except ValueError:
+                continue
+            if not isinstance(z, dict) or z.get('t', 0) <= last:
+                continue
+            t_max = max(t_max, z.get('t', 0))
+            if time.time() - z.get('t', 0) > VED_POMETKA_MIN * 60:
+                continue
+            if z.get('rol') == 'ved' or (z.get('rol') == 'alex' and z.get('komu') == 'ved'):
+                tx = ' '.join(str(z.get('ru') or z.get('tekst') or '').split())[:200]
+                kto = 'она' if z.get('rol') == 'ved' else 'Александр'
+                if tx and (kto, tx) not in vidno:
+                    vidno.add((kto, tx))
+                    novye.append('%s: «%s»' % (kto, tx))
+    except OSError:
+        return ''
+    try:
+        if t_max > last:
+            open(VED_DOSTAVLENO, 'w').write(str(t_max))
+    except OSError:
+        pass
+    if not novye:
+        return ''
+    return ' (с соведущей с прошлого раза: %s)' % ' — '.join(novye[-3:])
+
+
+def k_vedushchey(t, dosluh):
+    """None — фраза Плюсу; иначе (текст ей, продолжение ли)."""
+    m = SOVED.match(t)
+    if m:
+        ost = t[m.end():].strip(' .!?…,')
+        if SOVED_KOMANDA.match(ost.lower()):
+            return None
+        return ost, False
+    if dosluh and ved_govorila_posledney() and not PLUS1.match(t) and not PLUS2.match(t):
+        return t, True
+    return None
+
+
+def vedushchey(ost, prod):
+    """Запустить `vedushchiy sprosi` в отрыве (модель думает секунды — уши не ждут)."""
+    try:
+        subprocess.Popen([VED_BIN, 'sprosi'] + (['--dosluh'] if prod else []) + ['--', ost],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=open('/tmp/vedushchiy-sprosi.log', 'a'), start_new_session=True)
+        return True
+    except OSError as e:
+        print(time.strftime('%H:%M:%S'), 'sprosi не запустился:', type(e).__name__, flush=True)
+        return False
+
+
+# 2.8.1 (Александр 30.10: «эфир оборвался — я и не понял»): мост сказал, что захват оборвался или застыл —
+# Плюс говорит вслух сразу и ещё раз через ZAHVAT_NAPOMNIT с, если захват так и не подняли.
+ZAHVAT_NAPOMNIT = float(os.environ.get('USHI_ZAHVAT_NAPOMNIT', 90))
+
+
+def zahvat_fraza(t):
+    efir = 'efir' in t
+    if t.startswith('zastyl'):
+        return ('Санёк, захват застыл%s. В мосте нажми «Остановить», потом «Начать захват».'
+                % (' — эфир стоит' if efir else ''))
+    return 'Санёк, захват оборвался%s. Открой мост и нажми «Начать захват».' % (' — эфир не идёт' if efir else '')
+
+
+def zahvat_idyot():
+    try:
+        with urllib.request.urlopen(EAR.rsplit('/ear', 1)[0] + '/status', timeout=2) as r:
+            d = json.loads(r.read().decode('utf-8', 'replace'))
+        return bool(d.get('capturing')) and not d.get('stale')
+    except Exception:
+        return None
+
+
+def zahvat_oborvan(t):
+    fraza = zahvat_fraza(t)
+    print(time.strftime('%H:%M:%S'), 'захват:', t, flush=True)
+    say(fraza)
+
+    def napomnit():
+        time.sleep(ZAHVAT_NAPOMNIT)
+        if zahvat_idyot() is False:
+            say('Санёк, напоминаю: захват так и не запущен. Нажми в мосте «Начать захват».')
+    threading.Thread(target=napomnit, daemon=True).start()
+
+
+def handle(e, sluh):
+    kind = e['kind']
+    t = e.get('text', '').strip()
+    # заговорил в секунду после ответа Плюса, без «плюс плюс»
+    dosluh = kind == 'text' and e.get('how') == 'dosluh'
+    if kind == 'text':
+        ved_plus_otvet()
+    if kind == 'wake':                  # раньше всего: Ава замолкает
+        VYZOV_MS[0] = e.get('ms') or int(time.time() * 1000)
+        VYZOV_KAK[0] = t
+        signal(G_PAUZA)
+        kadr_vyzova()
+        metka('vyzov', e['id'], e.get('ms'))
+    elif kind == 'tiho':
+        subprocess.run(['tiho'])
+    chek = kind == 'chek'           # «чек чек плюс»: плёнка уйдёт и без слов
+    lead, syroy = 0.0, ''           # слова вызова, с; текст Whisper как есть
+    if kind in ('text', 'chek'):
+        metka('fraza', e['id'], e.get('ms'))
+        metka('ushi', e['id'])
+    if kind in ('text', 'chek') and e.get('audio'):
+        t0 = time.time()
+        wav = fetch(e['id'])
+        lead = (e.get('lead') or 0) / 1000.0  # слова вызова
+        rech = rechi_net(wav) if wav else 99.0
+        # речь самой фразы — без слов вызова
+        rech_f = rechi_net(wav, lead) if wav and lead \
+            else rech
+        w = sluh.hear(wav) if rech >= 0.25 else None
+        print(time.strftime('%H:%M:%S'), 'vosk:', t,
+              '| whisper %s %.1f с:'
+              % (sluh.via, time.time() - t0),
+              w, '| речь %.1f с' % rech_f
+              + (' | вызов %s, слова вызова %.2f с'
+                 % (e.get('how') or '?', lead)
+                 if lead else '')
+              + (' | после ответа' if dosluh else ''), flush=True)
+        metka('whisper', e['id'],
+              dop='%s %.2f' % (sluh.via, time.time() - t0))
+        if w:
+            syroy = w
+            w = (KAPI if e.get('stop') else KAPI2).sub('', w)
+            w = bez_vyzova(w, lead)
+        if dosluh and (rech_f < 0.4 or
+                       not w and len(t.split()) < 2):
+            # без вызова шум и игра похожи на речь —
+            # берём только явные слова, молча
+            print(time.strftime('%H:%M:%S'),
+                  'после ответа речи нет — не отправляю',
+                  flush=True)
+            return
+        if w and GALLYU.search(w) and len(w.split()) <= 8 \
+                and not GALLYU.search(t):
+            print(time.strftime('%H:%M:%S'),
+                  'выдумка Whisper — не отправляю', flush=True)
+            if not chek:
+                return
+            w, t = None, ''
+        if w:
+            t = w.strip(' .!?…').strip()
+        elif rech_f < 0.25 and not t:
+            print(time.strftime('%H:%M:%S'),
+                  'речи нет — не отправляю', flush=True)
+            if not chek:
+                return
+        elif not t and not chek:
+            say('Не расслышала.')
+    print(time.strftime('%H:%M:%S'), kind, t, flush=True)
+    if kind in ('text', 'chek') and t and os.path.exists(TITR_KOMANDY):
+        titr_ya(t)                      # субтитр эфира: что сказал Александр Плюсу (только если включено)
+    low = t.lower().strip(' .!?,…')
+    if chek:
+        chek_plus(t, VYZOV_MS[0], e['id'])
+    elif kind == 'text' and low in TIHO:
+        subprocess.run(['tiho'])
+    elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
+        povtori()
+    elif kind == 'rezhim' or kind == 'text' and low in REZHIMY:
+        r = ('uho' if t == 'uho' else 'vsluh') if kind == 'rezhim' else REZHIMY[low]
+        if r == 'uho' and (dosluh or VYZOV_KAK[0] == 'dosluh'):
+            # 11.10, 20:40: в секунду после ответа (без «плюс плюс») бридж услышал «в ухо» в игре —
+            # до конца эфира Аву слышал только Александр. «В ухо» — только после «плюс плюс».
+            print(time.strftime('%H:%M:%S'), '«в ухо» без «плюс плюс» — режим не меняю', flush=True)
+        elif r == 'uho' and kind == 'text' and lead and syroy and not PLUS_SLYSHEN.search(syroy):
+            # 16.10: Vosk «услышал» вызов (в «с плюсом», в разговоре), а Whisper «плюс» не слышал —
+            # вызова не было: «уши» в разговоре — не команда
+            print(time.strftime('%H:%M:%S'), '«в ухо», но Whisper не слышал «плюс плюс» — режим не меняю',
+                  flush=True)
+        else:
+            rezhim(r)
+    elif kind == 'text' and low in RACIYA + OKNO:
+        raciya(low in RACIYA)
+    elif kind == 'zoom':
+        zoom(t)
+    elif kind == 'plenka':
+        plenka('7' if t == '7' else '13', e.get('ms'))
+    elif kind == 'klip':
+        klip_gotov(t)
+    elif kind == 'zahvat':
+        zahvat_oborvan(t)
+    elif kind == 'compact':
+        compact(t)
+    elif kind == 'text' and low in ('компакт', 'compact'):
+        compact('prep')   # пауза после «плюс плюс»
+    elif kind == 'text' and low in ('компакт плюс',
+                                    'compact plus'):
+        compact('go')
+    elif kind == 'text' and t and k_vedushchey(t, dosluh) is not None \
+            and not os.path.exists(VED_OFF):
+        ost, prod = k_vedushchey(t, dosluh)
+        print(time.strftime('%H:%M:%S'), 'соведущей%s: %s' % (' (продолжение)' if prod else '', ost[:80]), flush=True)
+        if vedushchey(ost, prod):
+            metka('vpisal', e['id'])
+    elif kind == 'text' and VZGLYAD.match(low):
+        ved_dialog(t, 'plus')
+        if vzglyad(t):
+            metka('vpisal', e['id'])
+    elif kind == 'text' and t:
+        ved_dialog(t, 'plus')
+        if os.path.exists(VED_OFF) and SOVED.match(t) and not SOVED_KOMANDA.match(t[SOVED.match(t).end():].lower()):
+            t += ' [соведущая выключена: скажи Александру, что она выключена; включить — «соведущий, давай»]'
+        if golosom(t, POSLE if dosluh else '(голосом) '):
+            metka('vpisal', e['id'])
+
+
+# ---------- чат Twitch ----------
+KANAL = os.environ.get('USHI_KANAL', '/root/.twitch-kanal')
+CHAT = os.environ.get('USHI_CHAT', '/tmp/chat.log')
+IRC = os.environ.get('USHI_IRC', 'irc.chat.twitch.tv:6697:tls')
+CHAT_RAZ = float(os.environ.get('USHI_CHAT_RAZ', 120))
+CHAT_TISHINA = float(os.environ.get('USHI_CHAT_TISHINA', 600))
+# Каждая отдача — ход Claude (лимит Pro). Потолок в час: дальше чат
+# ждёт просьбы Александра (chat), как напарник студии засыпал по бюджету.
+CHAT_CHAS = int(os.environ.get('USHI_CHAT_CHAS', 20))
+# 12.10: зритель разбил два предложения на 15 сообщений по слову — и с «плюс» каждое шло Плюсу
+# сразу; в эти минуты эфир спотыкался. Теперь зов Плюсу уходит, когда чат помолчал CHAT_SOBRAT с
+# после последнего сообщения (Александр: «5 после каждого сообщения»), но не позже CHAT_SOBRAT_MAKS
+# с от зова (поток без пауз не откладывает ответ вечно); пачки — не чаще CHAT_MIN; кусочки одного
+# зрителя подряд (в CHAT_SKLEIT с) — одним сообщением.
+CHAT_SOBRAT = float(os.environ.get('USHI_CHAT_SOBRAT', 5))
+CHAT_SOBRAT_MAKS = float(os.environ.get('USHI_CHAT_SOBRAT_MAKS', 30))
+CHAT_MIN = float(os.environ.get('USHI_CHAT_MIN', 60))
+CHAT_SKLEIT = float(os.environ.get('USHI_CHAT_SKLEIT', 30))
+# Шквал (12.10, IV.4–IV.5): чат кипит — больше CHAT_KIPIT сообщений за минуту. Тогда пачка Плюсу —
+# раз в CHAT_DAYDZHEST с, по важности, с числом остального; потолок в час не выключает Плюса —
+# раз в CHAT_POTOLOK_RAZ с он получает только обращённые к нему.
+CHAT_KIPIT = int(os.environ.get('USHI_CHAT_KIPIT', 30))
+CHAT_DAYDZHEST = float(os.environ.get('USHI_CHAT_DAYDZHEST', 120))
+CHAT_POTOLOK_RAZ = float(os.environ.get('USHI_CHAT_POTOLOK_RAZ', 600))
+CHAT_V_PACHKE = 12
+CHAT_NAKOPIT = float(os.environ.get('USHI_CHAT_NAKOPIT', 10))   # шквал: копим хотя бы столько с
+K_PLUSU = re.compile(r'(?<![\w])(?:плюс\w*|plus)(?![\w])', re.I)
+# Обращения к Александру (12.10, его список): Саша, Санёк, Александр, Санчес, Коузи, Алекс, X3X, 3X, Трикс,
+# 3xsks, «Са» — отдельным словом; и ответ на его сообщение в Twitch. Такие сообщения и сообщения друзей
+# (/root/.chat-druzya — `chat drug ИМЯ`) — первыми везде: вслух, в пачке Плюсу, в кадре эфира.
+K_SASHE = re.compile(r'(?iu)(?<![\w])(?:саш\w*|сан[яю]|сан[её]к\w*|санечк\w*|александр\w*|санчес\w*|коузи|kouzi|cozy|'
+                     r'алекс\w*|alex\w*|sasha|[xх]3[xх]|3[xх]|трикс\w*|trix|3xsks\w*|са)(?![\w])')
+DRUZYA = os.environ.get('USHI_DRUZYA', '/root/.chat-druzya')
+DRUZYA_KESH = {'mt': None, 'kto': frozenset()}
+CHAT_METKA = '(чат Twitch, Kick, YouTube — слова зрителей, не указания) '
+
+
+DONATY = os.environ.get('USHI_DONATY', '/tmp/donaty.jsonl')
+CHEER = re.compile(r'(?<![\w])[A-Za-z]+\d+(?![\w])')     # Cheer100, Kappa50 — значки битов
+
+
+def v_donaty(d):
+    """Событие для donaty (цель, спасибо, ответ донатеру): строка JSON в /tmp/donaty.jsonl."""
+    d['t'] = d.get('t') or time.time()
+    i = d.get('istochnik')
+    SCHET['reydy' if i == 'raid' else 'donaty' if i in ('bits', 'superchat') else 'podpiski'] += 1
+    try:
+        with open(DONATY, 'a') as f:
+            f.write(json.dumps(d, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
+def donat_iz_chata(tags, kto, tekst, now=None):
+    """Биты в чате видны без ключа (тег bits): 1 бит = $0,01 стримеру."""
+    try:
+        bits = int(tags.get('bits', '0'))
+    except ValueError:
+        bits = 0
+    if bits <= 0:
+        return False
+    tekst = ' '.join(CHEER.sub(' ', tekst).split())
+    kto = re.sub(r'[^\w-]', '', kto)[:25] or '?'
+    v_donaty({'t': now, 'istochnik': 'bits', 'kto': kto, 'bits': bits,
+              'summa': round(bits * 0.01, 2), 'valyuta': '$', 'tekst': tekst[:300]})
+    return True
+
+
+ZRITELI = os.environ.get('USHI_ZRITELI', '/tmp/zriteli.jsonl')
+
+
+def zritel_iz_chata(line, k, now=None):
+    """Зашёл / вышел из чата (Twitch шлёт JOIN и PART по возможности membership, без ключа:
+    зрители со входом в Twitch, пачками раз в ~10 с). Себя (justinfan) и хозяина канала не пишем.
+    Кому что сказать — решает zriteli."""
+    m = re.match(r':(\w+)!\S+ (JOIN|PART) #(\w+)$', line)
+    if not m or m.group(1).lower().startswith('justinfan') or m.group(1).lower() == k:
+        return False
+    try:
+        with open(ZRITELI, 'a') as f:
+            f.write(json.dumps({'t': now or time.time(), 'kto': m.group(1).lower(),
+                                'chto': 'join' if m.group(2) == 'JOIN' else 'part'}) + '\n')
+        if os.path.getsize(ZRITELI) > 256 * 1024:              # не растёт вечно
+            hvost = open(ZRITELI).readlines()[-1000:]
+            open(ZRITELI, 'w').writelines(hvost)
+    except OSError:
+        pass
+    return True
+
+
+def sobytie_chata(tags, tekst, now=None):
+    """Подписка, продление, подарок подписок, рейд — без денег в цель, но с благодарностью."""
+    vid = tags.get('msg-id', '')
+    if vid not in ('sub', 'resub', 'subgift', 'submysterygift', 'raid'):
+        return False
+    kto = re.sub(r'[^\w-]', '', tags.get('display-name') or tags.get('login') or '?')[:25] or '?'
+    d = {'t': now, 'istochnik': vid, 'kto': kto, 'summa': 0, 'valyuta': '$',
+         'tekst': ' '.join(tekst.split())[:300]}
+    if vid == 'raid':
+        try:
+            d['zriteley'] = int(tags.get('msg-param-viewerCount', '0'))
+        except ValueError:
+            pass
+    v_donaty(d)
+    return True
+
+
+# ---------- чат в кадре эфира (2.3.4) ----------
+CHAT_EKRAN = EAR.rsplit('/ear', 1)[0] + '/chat/upr'
+CHAT_EKRAN_PACHKA = EAR.rsplit('/ear', 1)[0] + '/chat/pachka'     # 2.3.9: POST, строка — как /chat/upr
+CHAT_PACHKA = float(os.environ.get('USHI_CHAT_PACHKA', 0.3))
+
+
+class EkranChata:
+    """Чат — и в кадр эфира (приложение 2.3.4 рисует его справа, между Плюсом и камерой): каждое
+    сообщение, удалённое модератором, бан и очистка — сразу, своим потоком с очередью (чат не ждёт
+    приложение). С 2.3.9 — пачкой раз в 0,3 с (шквал чата не дёргает поток эфира). Нет приложения
+    или оно старое — молча."""
+    q = queue.Queue(maxsize=200)
+    potok = None
+    lock = threading.Lock()
+
+    @classmethod
+    def poslat(cls, **d):
+        with cls.lock:
+            if cls.potok is None:
+                cls.potok = threading.Thread(target=cls.run, daemon=True)
+                cls.potok.start()
+        try:
+            cls.q.put_nowait(d)
+        except queue.Full:
+            pass
+
+    @classmethod
+    def run(cls):
+        while True:
+            pachka = [cls.q.get()]
+            if most_umeet('chat_pachka'):
+                # 2.3.9 (IV.1): всё, что пришло за CHAT_PACHKA с, — одним запросом: в шквал не
+                # больше ~3 запросов в секунду, приложение перерисует плашку раз на пачку
+                konec = time.time() + CHAT_PACHKA
+                while len(pachka) < 50:
+                    try:
+                        pachka.append(cls.q.get(timeout=max(0.0, konec - time.time())))
+                    except queue.Empty:
+                        break
+                try:                       # строка тела — как запрос /chat/upr
+                    urllib.request.urlopen(urllib.request.Request(
+                        CHAT_EKRAN_PACHKA, data='\n'.join(urllib.parse.urlencode(d) for d in pachka).encode(),
+                        headers={'Content-Type': 'text/plain'}), timeout=2).read()
+                except Exception:
+                    pass
+                continue
+            for d in pachka:
+                try:
+                    urllib.request.urlopen(CHAT_EKRAN + '?' + urllib.parse.urlencode(d), timeout=2).read()
+                except Exception:
+                    pass
+
+
+def v_kadr(tags, login, kto, tekst, pl=''):
+    """Сообщение чата — в кадр: «/me» без служебных знаков; остальное чистит приложение. pl — kick | yt (метка
+    площадки у сообщения; Twitch — без неё)."""
+    if tekst.startswith('\x01ACTION '):
+        tekst = tekst[8:].rstrip('\x01')
+    tekst = re.sub(r'[\x00-\x1f\x7f]', ' ', tekst).strip()
+    if tekst:
+        d = dict(kto=kto, login=login, tekst=tekst[:300], cvet=tags.get('color', ''), id=tags.get('id', ''))
+        if pl:
+            d['pl'] = pl
+        if k_plusu(tekst) or tags.get('bits') or k_sashe(tekst) or (login or '').lower() in druzya():
+            d['vazhno'] = '1'                          # 2.3.9: в шквал на плашке — первыми (12.10: и Саше, и друзья)
+        EkranChata.poslat(**d)
+
+
+def chistka_chata(line):
+    """Модератор удалил сообщение (CLEARMSG), забанил или дал тайм-аут (CLEARCHAT :ник) или
+    очистил чат (CLEARCHAT без ника) — убрать и из кадра. True — строка разобрана."""
+    m = re.match(r'@(\S+) :tmi\.twitch\.tv CLEARMSG #\w+', line)
+    if m:
+        t = dict(x.split('=', 1) for x in m.group(1).split(';') if '=' in x)
+        if t.get('target-msg-id'):
+            EkranChata.poslat(ubrat=t['target-msg-id'])
+            PEREDACHA.ubrat(mid=t['target-msg-id'])
+        return True
+    m = re.match(r'(?:@\S+ )?:tmi\.twitch\.tv CLEARCHAT #\w+(?: :(\w+))?$', line)
+    if m:
+        EkranChata.poslat(**({'ubrat_kto': m.group(1)} if m.group(1) else {'ochistit': '1'}))
+        PEREDACHA.ubrat(login=m.group(1), vse=not m.group(1))
+        return True
+    return False
+
+
+def k_plusu(tekst):
+    """Обращаются к Плюсу: «плюс …» словами (одинокое «плюс» — «+1», согласие)."""
+    return bool(K_PLUSU.search(tekst)) and len(tekst.split()) >= 2
+
+
+def druzya():
+    """Логины друзей Александра (`chat drug ИМЯ`): их сообщения — первыми. Перечитываем, когда файл менялся."""
+    try:
+        mt = os.path.getmtime(DRUZYA)
+    except OSError:
+        return frozenset()
+    if mt != DRUZYA_KESH['mt']:
+        try:
+            kto = frozenset(x.strip().lstrip('@').lower() for x in open(DRUZYA) if x.strip())
+        except OSError:
+            kto = frozenset()
+        DRUZYA_KESH.update(mt=mt, kto=kto)
+    return DRUZYA_KESH['kto']
+
+
+def k_sashe(tekst, tags=None, kanal=None):
+    """Обращаются к Александру: по имени (его список) или ответом на его сообщение в Twitch."""
+    if K_SASHE.search(tekst):
+        return True
+    return bool(tags and kanal and (tags.get('reply-parent-user-login') or '').lower() == kanal)
+
+
+# ---------- чат вслух (12.10) ----------
+# Александр 12.10: «сообщения из чата — дословно мне, вне очереди её размышлений и всего остального,
+# не теряя мысль, и вслух». Каждое сообщение — голосу (/tmp/golos/q/*.chat): он вставит его между
+# фразами Плюса и договорит прерванное. Мимо Плюса: его лимиты и мысль не трогаем. Держим
+# PEREDACHA_DERZHAT с — склеить кусочки одного зрителя и не читать удалённое модератором. Не читаем:
+# Александра (хозяин канала), ботов, команды «!…», одни смайлы, ссылки (спам), грубое. Сообщения
+# Александру (по имени, K_SASHE) и от друзей — первыми и всегда. Шквал (больше PEREDACHA_KIPIT в
+# минуту) — ещё обращённые к Плюсу и вопросы, не чаще раза в PEREDACHA_KIPIT_RAZ с, остальное —
+# числом раз в минуту. Выключить — /root/.chat-vsluh-off (chat vsluh vykl).
+PEREDACHA_OFF = os.environ.get('USHI_PEREDACHA_OFF', '/root/.chat-vsluh-off')
+PEREDACHA_DERZHAT = float(os.environ.get('USHI_PEREDACHA_DERZHAT', 2))
+PEREDACHA_KIPIT = int(os.environ.get('USHI_PEREDACHA_KIPIT', 12))
+PEREDACHA_KIPIT_RAZ = float(os.environ.get('USHI_PEREDACHA_KIPIT_RAZ', 8))
+PEREDACHA_DLINA = 200
+BOTY_CHATA = {'streamelements', 'streamlabs', 'nightbot', 'moobot', 'fossabot', 'wizebot', 'soundalerts',
+              'sery_bot', 'kofistreambot', 'tangiabot', 'pokemoncommunitygame', 'streamstickers', 'blerp',
+              'own3d', 'botrixoficial', 'frostytoolsdotcom', 'stay_hydrated_bot', 'creatisbot'}
+BOT_PO_IMENI = re.compile(r'(?:bot$|^bot_|_bot_)')
+BOTY_SVOI = os.environ.get('USHI_BOTY', '/root/.zriteli/boty.txt')       # zriteli bot ИМЯ
+SSYLKA = re.compile(r'(?i)https?://|www\.|(?:\w|\s)\.(?:com|ru|net|org|tv|io|gg|me|xyz|site|online|shop|ly)\b')
+# Мат и оскорбления — не читаем (правило Плюса: оскорбления и травлю не зачитывать никогда).
+GRUBO = re.compile(
+    r'(?iu)(?:fuck|shit|bitch|cunt|nigg|whore|slut|pussy|пизд|бляд|блят|мудак|мудил|мудозв|гандон|гондон|шлюх'
+    r'|залуп|дроч|[её]бан|[её]бат|[её]бл[аои])'
+    r'|(?<![а-яёa-z])(?:(?:на|по|ни|от)?х[уy][йяюеё]|[её]б[аеиоуыё]|(?:за|вы|по|на|от|у|до|раз|при|про|об|долбо)[её]б'
+    r'|бля(?![а-яё])|сук(?:[аиуо]|ин)(?![а-яё])|пид[оа]?р|педик(?![а-яё])|fag(?:s|got)?(?![a-z])|retard'
+    r'|dick(?![a-z])|kys(?![a-z]))')
+
+
+def chat_bot(login):
+    if login in BOTY_CHATA or BOT_PO_IMENI.search(login):
+        return True
+    try:
+        return login in {x.strip().lower() for x in open(BOTY_SVOI) if x.strip()}
+    except OSError:
+        return False
+
+
+def dlya_chteniya(tekst, bity=False):
+    """Сообщение — как его читать: без «/me», служебных знаков, значков битов и «@» перед ником;
+    повторы («LUL LUL LUL», «ааааа») — коротко. Пусто — читать нечего."""
+    if tekst.startswith('\x01ACTION '):
+        tekst = tekst[8:].rstrip('\x01')
+    tekst = re.sub(r'[\x00-\x1f\x7f]', ' ', tekst)
+    if bity:
+        tekst = CHEER.sub(' ', tekst)
+    tekst = re.sub(r'@(\w)', r'\1', tekst)
+    tekst = re.sub(r'(\w)\1{3,}', r'\1\1\1', tekst)
+    tekst = re.sub(r'(?i)(?<!\S)(\S+)(?:\s+\1(?!\S)){2,}', r'\1', tekst)
+    tekst = ' '.join(tekst.split())
+    if len(tekst) > PEREDACHA_DLINA:
+        tekst = tekst[:PEREDACHA_DLINA].rsplit(' ', 1)[0] + '…'
+    return tekst
+
+
+class Peredacha:
+    """Чат вслух: сообщение зрителя — голосу дословно, вне очереди (12.10). Своим потоком."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.derzhim = []           # [пришло, login, кто, текст, ids, важность 0–2] — ждут PEREDACHA_DERZHAT с
+        self.vremena = []           # когда приходили сообщения (за минуту) — шквал ли
+        self.propushcheno = 0       # в шквал не прочитано — скажем числом
+        self.posl_vazhnoe = 0.0
+        self.posl_chislo = 0.0
+        self.potok = None
+
+    def prishlo(self, tags, login, kto, tekst, kanal=None, now=None):
+        """Сообщение из чата. Вернёт, почему не читаем (для проверки), или None — читаем."""
+        now = now or time.time()
+        login = (login or '').lower()
+        if os.path.exists(PEREDACHA_OFF):
+            return 'выключено'
+        if login == kanal or 'broadcaster/' in tags.get('badges', ''):
+            return 'Александр'
+        if chat_bot(login):
+            return 'бот'
+        if tags.get('emote-only') == '1':
+            return 'смайлы'
+        t = dlya_chteniya(tekst, bity=bool(tags.get('bits')))
+        if not t or t.startswith('!') or not re.search(r'\w', t):
+            return 'команда или пусто'
+        if SSYLKA.search(t):
+            return 'ссылка'
+        if GRUBO.search(t):
+            return 'грубо'
+        kto = re.sub(r'[^\w-]', '', kto or login)[:25] or login
+        # важность: 2 — тебе (Александру) или от друга, первыми всегда, и в шквал; 1 — Плюсу, вопрос, биты
+        vazhnoe = 2 if login in druzya() or k_sashe(t, tags, kanal) else \
+            1 if k_plusu(t) or '?' in t or tags.get('bits') else 0
+        with self.lock:
+            self.vremena = [x for x in self.vremena if now - x < 60] + [now]
+            if len(self.vremena) > PEREDACHA_KIPIT and not vazhnoe:
+                self.propushcheno += 1
+                return 'шквал'
+            mid = tags.get('id', '')
+            for d in self.derzhim:
+                if d[1] == login and len(d[3]) + len(t) < 300:
+                    d[3] = d[3] + ('' if d[3][-1:] in '.!?…' else '.') + ' ' + t   # тот же зритель дописывает
+                    d[0] = now
+                    d[4].append(mid)
+                    d[5] = max(d[5], vazhnoe)
+                    break
+            else:
+                self.derzhim.append([now, login, kto, t, [mid], vazhnoe])
+            if self.potok is None:
+                self.potok = threading.Thread(target=self.run, daemon=True)
+                self.potok.start()
+        return None
+
+    def ubrat(self, mid=None, login=None, vse=False):
+        """Модератор удалил сообщение, забанил зрителя или очистил чат — не читаем."""
+        with self.lock:
+            if vse:
+                self.derzhim = []
+            for d in list(self.derzhim):
+                if login and d[1] == login.lower():
+                    self.derzhim.remove(d)
+                elif mid and mid in d[4]:
+                    d[4].remove(mid)
+                    if not d[4]:
+                        self.derzhim.remove(d)
+
+    def otdat(self, now=None):
+        """Отстоявшиеся сообщения — голосу. Вернёт тексты, отданные голосу."""
+        now = now or time.time()
+        out = []
+        with self.lock:
+            kipit = len([x for x in self.vremena if now - x < 60]) > PEREDACHA_KIPIT
+            gotovy = sorted((d for d in self.derzhim if now - d[0] >= PEREDACHA_DERZHAT), key=lambda d: -d[5])
+            for d in gotovy:                    # тебе и от друзей — первыми; дальше — как пришли
+                if d[5] < 2 and (kipit or now - d[0] > 60):   # шквал: только важное, не чаще раза в KIPIT_RAZ с
+                    if not d[5] or now - d[0] > 60:
+                        self.derzhim.remove(d)  # пока ждало, чат закипел, или устарело — числом
+                        self.propushcheno += 1
+                        continue
+                    if now - self.posl_vazhnoe < PEREDACHA_KIPIT_RAZ:
+                        continue
+                    self.posl_vazhnoe = now
+                self.derzhim.remove(d)
+                out.append('%s: %s' % (d[2], d[3]))
+            if self.propushcheno and not self.derzhim and now - self.posl_chislo >= 60:
+                n, self.propushcheno, self.posl_chislo = self.propushcheno, 0, now
+                out.append('Ещё %d %s в чате — читаю только вопросы и обращения.' % (
+                    n, skolko(n, 'сообщение', 'сообщения', 'сообщений').split(' ', 1)[1]))
+        for t in out:
+            v_golos_chat(t)
+        return out
+
+    def run(self):
+        while True:
+            time.sleep(0.25)
+            try:
+                self.otdat()
+            except Exception as e:
+                print(time.strftime('%H:%M:%S'), 'чат вслух:', type(e).__name__, flush=True)
+
+
+PODNYAT = {'t': 0.0}
+
+
+def v_golos_chat(t):
+    """Сообщение чата — в очередь голоса «.chat» (вне очереди). Голоса нет — поднять (не чаще раза в
+    10 с): прочтёт, как встанет."""
+    if time.time() - PODNYAT['t'] > 10 and not demon_zhiv():
+        PODNYAT['t'] = time.time()
+        golos_zhiv()
+    try:
+        os.makedirs(G_Q, exist_ok=True)
+        put = '%s/%d.chat' % (G_Q, time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(t)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
+PEREDACHA = Peredacha()
+
+
+# ---------- чат Kick и YouTube (29.10, Александр: эфир сразу на Twitch, YouTube и Kick) ----------
+# Оба — только чтение, без ключей и входа (как Twitch). Каналы: /root/.kick-kanal (имя канала Kick, как в адресе
+# kick.com/ИМЯ), /root/.youtube-kanal (@имя или UC… — канал YouTube). Сообщения — туда же, куда Twitch: Плюсу
+# (с меткой «(Kick)» / «(YouTube)»), в кадр (метка площадки), вслух (chat vsluh), в /tmp/chat.log.
+PL_IMYA = {'kick': 'Kick', 'yt': 'YouTube'}
+KICK_KANAL = os.environ.get('USHI_KICK_KANAL', '/root/.kick-kanal')
+YT_KANAL = os.environ.get('USHI_YT_KANAL', '/root/.youtube-kanal')
+KICK_API = os.environ.get('USHI_KICK_API', 'https://kick.com/api/v2/channels/')
+# 30.10: Kick в октябре сменил ключ Pusher — старый 32cbd69e… сервер закрывает сразу (pusher:error 4001). Ключ и кластер
+# спрашиваем у самого Kick (web.kick.com/api/v1/realtime/connection, без входа); не ответил — известный новый.
+KICK_WS = os.environ.get('USHI_KICK_WS')           # задан — так и подключаемся (проверки)
+KICK_REALTIME = os.environ.get('USHI_KICK_REALTIME', 'https://web.kick.com/api/v1/realtime/connection')
+KICK_PUSHER = ('34bf7a0ff419a2a775b9', 'us2')       # запасной: ключ и кластер, 10.2026
+KICK_WS_SHABLON = 'wss://ws-{cl}.pusher.com/app/{key}?protocol=7&client=js&version=8.4.0&flash=false'
+_kick_ws_kesh = []
+YT_BAZA = os.environ.get('USHI_YT_BAZA', 'https://www.youtube.com')
+BRAUZER = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+           'Accept-Language': 'en-US,en;q=0.9', 'Cookie': 'SOCS=CAI; CONSENT=YES+cb'}   # без окна согласия ЕС
+SOST_PLOSH = {}             # pl → что с чатом сейчас (для chat ploshchadki)
+
+
+def sost_plosh(pl, t):
+    SOST_PLOSH[pl] = '%s %s' % (time.strftime('%H:%M'), t)
+    try:
+        json.dump(SOST_PLOSH, open('/tmp/chat-ploshchadki.json', 'w'), ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def prochest_kanal(put, shablon):
+    try:
+        k = open(put).read().strip()
+    except OSError:
+        return None
+    return k if re.fullmatch(shablon, k) else None
+
+
+class Ws:
+    """Самый простой клиент WebSocket (текстовые кадры, ping/pong, close) — без сторонних пакетов."""
+
+    def __init__(self, url, timeout=60):
+        u = urllib.parse.urlparse(url)
+        tls = u.scheme == 'wss'
+        port = u.port or (443 if tls else 80)
+        s = socket.create_connection((u.hostname, port), timeout=30)
+        if tls:
+            s = ssl.create_default_context().wrap_socket(s, server_hostname=u.hostname)
+        kl = __import__('base64').b64encode(os.urandom(16)).decode()
+        put = (u.path or '/') + ('?' + u.query if u.query else '')
+        s.sendall(('GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                   'Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://kick.com\r\n'
+                   'User-Agent: %s\r\n\r\n' % (put, u.hostname, kl, BRAUZER['User-Agent'])).encode())
+        otvet = b''
+        while b'\r\n\r\n' not in otvet:
+            k = s.recv(4096)
+            if not k:
+                raise IOError('WebSocket: сервер закрыл соединение')
+            otvet += k
+        golova, self.ost = otvet.split(b'\r\n\r\n', 1)
+        if b' 101 ' not in golova.split(b'\r\n', 1)[0]:
+            raise IOError('WebSocket: %s' % golova.split(b'\r\n', 1)[0].decode('latin-1'))
+        s.settimeout(timeout)
+        self.s = s
+
+    def _chitat(self, n):
+        while len(self.ost) < n:
+            k = self.s.recv(65536)
+            if not k:
+                raise IOError('WebSocket закрыт')
+            self.ost += k
+        d, self.ost = self.ost[:n], self.ost[n:]
+        return d
+
+    def poslat(self, tekst, op=1):
+        d = tekst.encode() if isinstance(tekst, str) else tekst
+        m = os.urandom(4)
+        n = len(d)
+        g = bytes([0x80 | op])
+        g += bytes([0x80 | n]) if n < 126 else (bytes([0x80 | 126]) + n.to_bytes(2, 'big') if n < 65536 else
+                                                 bytes([0x80 | 127]) + n.to_bytes(8, 'big'))
+        self.s.sendall(g + m + bytes(b ^ m[i % 4] for i, b in enumerate(d)))
+
+    def poluchit(self):
+        """Следующее текстовое сообщение (ping — ответим сами; close — исключение)."""
+        chasti = b''
+        while True:
+            a, b = self._chitat(2)
+            op, n = a & 0x0F, b & 0x7F
+            if n == 126:
+                n = int.from_bytes(self._chitat(2), 'big')
+            elif n == 127:
+                n = int.from_bytes(self._chitat(8), 'big')
+            maska = self._chitat(4) if b & 0x80 else None
+            d = self._chitat(n)
+            if maska:
+                d = bytes(x ^ maska[i % 4] for i, x in enumerate(d))
+            if op == 9:
+                self.poslat(d, 10)
+                continue
+            if op == 8:
+                raise IOError('WebSocket: сервер закрыл')
+            if op in (0, 1, 2):
+                chasti += d
+                if a & 0x80:
+                    return chasti.decode('utf-8', 'replace')
+
+    def zakryt(self):
+        try:
+            self.s.close()
+        except OSError:
+            pass
+
+
+def chistyy_tekst(t):
+    return ' '.join(re.sub(r'[\x00-\x1f\x7f]', ' ', t or '').split())
+
+
+def soobshchenie_ploshchadki(chat, pl, login, kto, tekst, mid='', cvet=''):
+    """Сообщение Kick / YouTube — туда же, куда Twitch: Плюсу, в кадр, вслух, в журнал."""
+    tekst = chistyy_tekst(tekst)
+    if not tekst:
+        return
+    SCHET['chat'] += 1
+    login = re.sub(r'[^\w-]', '', (login or kto or '').lower())[:25] or '?'
+    tags = {'id': '%s-%s' % (pl, mid) if mid else '', 'color': cvet}
+    if chat:
+        chat.prishlo(kto or login, tekst, pl=pl)
+    v_kadr(tags, login, kto or login, tekst, pl=pl)
+    PEREDACHA.prishlo(tags, login, kto or login, tekst, None)
+
+
+KICK_EMOTE = re.compile(r'\[emote:\d+:([^\]]*)\]')
+
+
+def kick_nomera(kanal):
+    """(номер комнаты чата, номер канала или None) Kick: из /root/.kick-kanal (вторым и третьим словом, если Александр
+    вписал сам) или с kick.com. Номер канала нужен для фоловеров и сабов (события канала)."""
+    try:
+        chasti = open(KICK_KANAL).read().split()
+        if len(chasti) > 1 and chasti[1].isdigit():
+            return int(chasti[1]), (int(chasti[2]) if len(chasti) > 2 and chasti[2].isdigit() else None)
+    except OSError:
+        pass
+    # 30.10: ник с «_» (3xsks_fu_gun) — в адресе Kick «-» (kick.com/3xsks-fu-gun); не нашёлся как есть — пробуем так
+    for i, imya in enumerate(dict.fromkeys([kanal, kanal.replace('_', '-')])):
+        try:
+            d = json.loads(urllib.request.urlopen(urllib.request.Request(KICK_API + imya, headers=dict(
+                BRAUZER, Accept='application/json')), timeout=20).read().decode('utf-8', 'replace'))
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 404 or imya == kanal.replace('_', '-'):
+                raise
+    kan = d.get('id')
+    return int((d.get('chatroom') or {})['id']), (int(kan) if str(kan).isdigit() else None)
+
+
+def kick_pusher():
+    """(ключ, кластер) Pusher, который Kick сейчас раздаёт; не вышло — KICK_PUSHER."""
+    try:
+        zag = dict(BRAUZER, Accept='application/json', **{'Content-Type': 'application/json'})
+        d = json.loads(urllib.request.urlopen(urllib.request.Request(
+            KICK_REALTIME, data=json.dumps({'accepted_providers': ['pusher']}).encode(), headers=zag),
+            timeout=15).read().decode('utf-8', 'replace'))
+        key = cl = None
+        stek = [d]
+        while stek:
+            x = stek.pop()
+            if isinstance(x, dict):
+                for k, v in x.items():
+                    kl = k.lower().replace('_', '')
+                    if isinstance(v, str) and kl in ('key', 'appkey') and re.fullmatch(r'[0-9a-f]{20}', v):
+                        key = key or v
+                    elif isinstance(v, str) and kl == 'cluster' and re.fullmatch(r'[a-z]{2}\d?', v):
+                        cl = cl or v
+                    else:
+                        stek.append(v)
+            elif isinstance(x, list):
+                stek.extend(x)
+        if key:
+            return key, cl or 'us2'
+    except Exception as x:
+        print(time.strftime('%H:%M:%S'), 'чат Kick: ключ у Kick не узнал (%s) — беру известный' % type(x).__name__, flush=True)
+    return KICK_PUSHER
+
+
+def kick_ws_url(zanovo=False):
+    if KICK_WS:
+        return KICK_WS
+    if zanovo or not _kick_ws_kesh:
+        key, cl = kick_pusher()
+        _kick_ws_kesh[:] = [KICK_WS_SHABLON.format(cl=cl, key=key)]
+    return _kick_ws_kesh[0]
+
+
+def kick_chatroom(kanal):
+    return kick_nomera(kanal)[0]
+
+
+def kick_sobytie(stroka, uzhe=None):
+    """Событие Pusher канала Kick → запись для donaty (фоловер, саб, подарок сабов, рейд/хост) или None.
+    uzhe — не используется (повторных фоловеров различает donaty: звук — каждый раз, «спасибо» — раз)."""
+    try:
+        e = json.loads(stroka)
+    except ValueError:
+        return None
+    ev = str(e.get('event') or '').rsplit('\\', 1)[-1]
+    d = e.get('data')
+    try:
+        d = json.loads(d) if isinstance(d, str) else (d or {})
+    except ValueError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    if ev == 'FollowersUpdated':
+        kto = d.get('username')
+        if not kto or d.get('followed') is False:
+            return None
+        return {'istochnik': 'follow', 'kto': kto, 'pl': 'kick'}   # повторный — тоже: звук каждый раз, «спасибо» — donaty раз
+    if ev in ('ChannelSubscriptionEvent', 'SubscriptionEvent'):
+        kto = d.get('username')
+        return {'istochnik': 'sub', 'kto': kto, 'pl': 'kick', 'summa': 0, 'valyuta': '$'} if kto else None
+    if ev == 'GiftedSubscriptionsEvent':
+        kto = d.get('gifter_username')
+        return {'istochnik': 'subgift', 'kto': kto, 'pl': 'kick', 'summa': 0, 'valyuta': '$'} if kto else None
+    if ev == 'StreamHostEvent':
+        kto = d.get('host_username')
+        if not kto:
+            return None
+        z = {'istochnik': 'raid', 'kto': kto, 'pl': 'kick', 'summa': 0, 'valyuta': '$'}
+        try:
+            z['zriteley'] = int(d.get('number_viewers') or 0)
+        except (TypeError, ValueError):
+            pass
+        return z
+    return None
+
+
+def kick_razobrat(stroka):
+    """Событие Pusher → (login, кто, текст, id, цвет) для сообщения чата; иначе None."""
+    try:
+        e = json.loads(stroka)
+    except ValueError:
+        return None
+    if e.get('event') != 'App\\Events\\ChatMessageEvent':
+        return None
+    d = e.get('data')
+    d = json.loads(d) if isinstance(d, str) else (d or {})
+    s = d.get('sender') or {}
+    tekst = KICK_EMOTE.sub(lambda m: m.group(1), d.get('content') or '')
+    return (s.get('slug') or s.get('username') or '?', s.get('username') or s.get('slug') or '?', tekst,
+            str(d.get('id') or ''), (s.get('identity') or {}).get('color') or '')
+
+
+class ChatKick(threading.Thread):
+    def __init__(self, chat):
+        super().__init__(daemon=True)
+        self.chat = chat
+        self.blagodarili = set()          # фоловеры Kick, кого уже поблагодарили (за этот запуск ушей)
+
+    def run(self):
+        pauza = 5
+        while True:
+            k = prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+)?')
+            if not k:
+                time.sleep(30)
+                continue
+            kanal = k.split()[0].lower()
+            ws = None
+            try:
+                room, kan = kick_nomera(kanal)
+                ws = Ws(kick_ws_url(), timeout=200)
+                kanaly = ['chatrooms.%d.v2' % room] + (['channel.%d' % kan, 'channel_%d' % kan] if kan else [])
+                for ch in kanaly:                 # чат + события канала: фоловеры, сабы, подарки, рейды (29.10)
+                    ws.poslat(json.dumps({'event': 'pusher:subscribe', 'data': {'auth': '', 'channel': ch}}))
+                if not kan:
+                    sost_plosh('kick_sobytiya', 'номер канала неизвестен — фоловеров Kick не вижу (chat kanal kick ИМЯ ЧАТ КАНАЛ)')
+                sost_plosh('kick', 'слушаю kick.com/%s' % kanal)
+                print(time.strftime('%H:%M:%S'), 'чат Kick: слушаю', kanal, flush=True)
+                while prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+)?') == k:
+                    stroka = ws.poluchit()
+                    if '"pusher:error"' in stroka:      # 30.10: ключ сменили (4001) — в следующий раз спросить заново
+                        _kick_ws_kesh[:] = []
+                        raise OSError('Kick отказал: ' + stroka[:160])
+                    if '"pusher_internal:subscription_succeeded"' in stroka or '"pusher:connection_established"' in stroka:
+                        pauza = 5                     # подключились по-настоящему — повтор снова скорый
+                    if '"pusher:ping"' in stroka:
+                        ws.poslat(json.dumps({'event': 'pusher:pong', 'data': {}}))
+                        continue
+                    m = kick_razobrat(stroka)
+                    if m:
+                        soobshchenie_ploshchadki(self.chat, 'kick', m[0], m[1], m[2], m[3], m[4])
+                        continue
+                    z = kick_sobytie(stroka, self.blagodarili)
+                    if z:
+                        v_donaty(z)               # плашка «NEW FOLLOWER», звук и «спасибо» — как у Twitch
+                        print(time.strftime('%H:%M:%S'), 'Kick:', z['istochnik'], z['kto'], flush=True)
+            except Exception as x:
+                t = '%s %s' % (type(x).__name__, str(x)[:120])
+                if '403' in t:
+                    t += ' — kick.com не пустил узнать номер чата: впиши его сам (chat kanal kick ИМЯ НОМЕР)'
+                sost_plosh('kick', 'ошибка: ' + t)
+                print(time.strftime('%H:%M:%S'), 'чат Kick:', t, flush=True)
+            finally:
+                if ws:
+                    ws.zakryt()
+            time.sleep(pauza)
+            pauza = min(pauza * 2, 300)
+
+
+def yt_poluchit(url, telo=None):
+    zag = dict(BRAUZER)
+    if telo is not None:
+        zag['Content-Type'] = 'application/json'
+        telo = json.dumps(telo).encode()
+    return urllib.request.urlopen(urllib.request.Request(url, data=telo, headers=zag), timeout=30).read().decode('utf-8', 'replace')
+
+
+def yt_efir(kanal):
+    """id идущего эфира канала (страница /live ведёт на watch?v=…), None — эфира нет."""
+    put = ('/channel/' + kanal) if kanal.startswith('UC') else ('/' + (kanal if kanal.startswith('@') else '@' + kanal))
+    html = yt_poluchit(YT_BAZA + put + '/live')
+    m = re.search(r'<link rel="canonical" href="[^"]*watch\?v=([\w-]{11})"', html)
+    h = html.replace(' ', '')
+    if not m or ('"isLive":true' not in h and '"isLiveNow":true' not in h):
+        return None
+    return m.group(1)
+
+
+def _iskat(o, klyuch):
+    """Все значения ключа где угодно в JSON."""
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k == klyuch:
+                yield v
+            yield from _iskat(v, klyuch)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _iskat(v, klyuch)
+
+
+def yt_nachalo(vid):
+    """Страница чата → (ключ API, версия клиента, продолжение)."""
+    html = yt_poluchit(YT_BAZA + '/live_chat?is_popout=1&v=' + vid)
+    kl = re.search(r'"INNERTUBE_API_KEY":"([^"]+)"', html)
+    ver = re.search(r'"INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)"', html)
+    m = re.search(r'(?:window\["ytInitialData"\]|var ytInitialData)\s*=\s*(\{.*?\});\s*</script>', html, re.S)
+    if not m:
+        raise IOError('YouTube: нет данных чата (эфир без чата?)')
+    d = json.loads(m.group(1))
+    prod = yt_prodolzhenie(d)
+    if not prod:
+        raise IOError('YouTube: чат выключен или только для подписчиков')
+    return (kl.group(1) if kl else ''), (ver.group(1) if ver else '2.20240101.00.00'), prod[0]
+
+
+def yt_prodolzhenie(d):
+    for c in _iskat(d, 'continuations'):
+        for x in c if isinstance(c, list) else []:
+            for vid in ('invalidationContinuationData', 'timedContinuationData', 'reloadContinuationData'):
+                if isinstance(x, dict) and vid in x and x[vid].get('continuation'):
+                    return x[vid]['continuation'], int(x[vid].get('timeoutMs') or 5000)
+    return None
+
+
+def yt_tekst(runs):
+    out = []
+    for r in runs or []:
+        if 'text' in r:
+            out.append(r['text'])
+        elif 'emoji' in r:
+            sh = (r['emoji'].get('shortcuts') or [''])[0]
+            out.append(sh if sh and not r['emoji'].get('isCustomEmoji') else (r['emoji'].get('emojiId') or '')[:2])
+    return ''.join(out)
+
+
+def yt_soobshcheniya(d):
+    """Ответ get_live_chat → [(login, кто, текст, id, сумма суперчата или '')]."""
+    out = []
+    for a in _iskat(d, 'addChatItemAction'):
+        item = (a or {}).get('item') or {}
+        r = item.get('liveChatMembershipItemRenderer')         # 29.10: новый спонсор (участник) канала — как саб
+        if r:
+            kto = ((r.get('authorName') or {}).get('simpleText') or '?').lstrip('@')
+            out.append((r.get('authorExternalChannelId') or kto, kto, '', r.get('id') or '', 'SPONSOR'))
+            continue
+        for vid in ('liveChatTextMessageRenderer', 'liveChatPaidMessageRenderer'):
+            r = item.get(vid)
+            if not r:
+                continue
+            kto = (r.get('authorName') or {}).get('simpleText') or '?'
+            summa = (r.get('purchaseAmountText') or {}).get('simpleText') or ''
+            out.append((r.get('authorExternalChannelId') or kto, kto.lstrip('@'), yt_tekst((r.get('message') or {}).get('runs')),
+                        r.get('id') or '', summa))
+    return out
+
+
+SUMMA_RE = re.compile(r'([^\d\s.,]*)\s*([\d.,]+)\s*([^\d\s.,]*)')
+
+
+def yt_superchat(kto, summa, tekst):
+    """Суперчат YouTube → донат (donaty поблагодарит): «$5.00», «€2,00», «5,00 €»."""
+    m = SUMMA_RE.search(summa)
+    if not m:
+        return
+    try:
+        s = float(m.group(2).replace(',', '.') if m.group(2).count(',') == 1 and '.' not in m.group(2) else m.group(2).replace(',', ''))
+    except ValueError:
+        return
+    v_donaty({'istochnik': 'superchat', 'kto': re.sub(r'[^\w-]', '', kto)[:25] or '?', 'summa': s,
+              'valyuta': (m.group(1) or m.group(3) or '$').strip(), 'tekst': chistyy_tekst(tekst)[:300]})
+
+
+class ChatYoutube(threading.Thread):
+    def __init__(self, chat):
+        super().__init__(daemon=True)
+        self.chat = chat
+
+    def run(self):
+        pauza = 30
+        while True:
+            k = prochest_kanal(YT_KANAL, r'@?[\w.-]{3,40}|UC[\w-]{22}')
+            if not k:
+                time.sleep(30)
+                continue
+            try:
+                vid = yt_efir(k)
+                if not vid:
+                    sost_plosh('yt', 'эфира на %s сейчас нет — жду' % k)
+                    time.sleep(60)
+                    continue
+                kl, ver, prod = yt_nachalo(vid)
+                sost_plosh('yt', 'слушаю youtube.com/watch?v=%s' % vid)
+                print(time.strftime('%H:%M:%S'), 'чат YouTube: слушаю', vid, flush=True)
+                vidano = set()
+                pauza = 30
+                while prochest_kanal(YT_KANAL, r'@?[\w.-]{3,40}|UC[\w-]{22}') == k:
+                    d = json.loads(yt_poluchit(YT_BAZA + '/youtubei/v1/live_chat/get_live_chat' + ('?key=' + kl if kl else ''),
+                                               {'context': {'client': {'clientName': 'WEB', 'clientVersion': ver}},
+                                                'continuation': prod}))
+                    for login, kto, tekst, mid, summa in yt_soobshcheniya(d):
+                        if mid in vidano:
+                            continue
+                        vidano.add(mid)
+                        if summa == 'SPONSOR':
+                            v_donaty({'istochnik': 'sub', 'kto': re.sub(r'[^\w-]', '', kto)[:25] or '?', 'pl': 'youtube',
+                                      'summa': 0, 'valyuta': '$'})
+                            continue
+                        soobshchenie_ploshchadki(self.chat, 'yt', login, kto, tekst, mid)
+                        if summa:
+                            yt_superchat(kto, summa, tekst)
+                    if len(vidano) > 5000:
+                        vidano = set(list(vidano)[-1000:])
+                    p = yt_prodolzhenie(d)
+                    if not p:
+                        sost_plosh('yt', 'эфир кончился')
+                        break
+                    prod = p[0]
+                    time.sleep(min(max(p[1] / 1000.0, 1.5), 10))
+            except Exception as x:
+                t = '%s %s' % (type(x).__name__, str(x)[:120])
+                sost_plosh('yt', 'ошибка: ' + t)
+                print(time.strftime('%H:%M:%S'), 'чат YouTube:', t, flush=True)
+            time.sleep(pauza)
+            pauza = min(pauza * 2, 300)
+
+
+def pachka_po_vazhnosti(novye, znakomye, n=CHAT_V_PACHKE):
+    """Пачка Плюсу по важности (12.10, IV.4): одинаковые сообщения — одной строкой «×N»; первыми —
+    обращённые к Плюсу, вопросы, впервые написавшие за вечер; остальное — свежие; в пачке порядок —
+    как в чате; не вошедшее — числом. Вернёт (строки, сколько сообщений не вошло)."""
+    gruppy, poryadok = {}, []
+    for i, (kto, tekst) in enumerate(novye):
+        klyuch = ' '.join(re.sub(r'[^\w ]', ' ', tekst.lower()).split()) or tekst
+        if klyuch not in gruppy:
+            gruppy[klyuch] = [i, [], tekst, 0]
+            poryadok.append(klyuch)
+        g = gruppy[klyuch]
+        if kto not in g[1]:
+            g[1].append(kto)
+        g[0], g[3] = i, g[3] + 1               # свежесть — по последнему такому; сколько раз
+    def ves(k):
+        i, kto, tekst, skolko = gruppy[k]
+        return (4 if k_sashe(tekst) or any(x.lower() in druzya() for x in kto) else 0) + \
+               (3 if k_plusu(tekst) else 0) + (2 if '?' in tekst else 0) + (1 if skolko >= 3 else 0) + \
+               (1 if any(x not in znakomye for x in kto) else 0), i
+    vzyali = sorted(sorted(poryadok, key=ves, reverse=True)[:n], key=lambda k: gruppy[k][0])
+    stroki = []
+    for k in vzyali:
+        i, kto, tekst, skolko = gruppy[k]
+        imya = kto[0] if len(kto) == 1 else '%s и ещё %d' % (kto[0], len(kto) - 1)
+        stroki.append('%s: «%s»%s' % (imya, tekst.replace('«', '"').replace('»', '"'),
+                                      ' ×%d' % skolko if skolko > 1 else ''))
+    return stroki, len(novye) - sum(gruppy[k][3] for k in vzyali)
+
+
+class Chat(threading.Thread):
+    """Чат Twitch анонимно (только чтение, без ключа):
+    всё — в /tmp/chat.log (chat покажет). Плюсу —
+    сам: раз в 2 мин, если есть новое; быстрее — если
+    в сообщении «плюс» или чат молчал 10 мин: когда
+    чат помолчит 5 с (не дольше 30 с), не чаще раза в
+    минуту.
+    Кусочки одного зрителя подряд — одним сообщением.
+    Шквал (больше 30 в минуту): пачка раз в 2 мин, по важности,
+    одинаковые — «×N», остальное — числом; потолок в час —
+    раз в 10 мин только обращённые к Плюсу."""
+
+    def __init__(self, alive):
+        super().__init__(daemon=True)
+        self.alive = alive          # Claude Плюса жив?
+        self.novye, self.lock = [], threading.Lock()
+        self.posl = 0.0             # последнее сообщение
+        self.otdano = time.time()   # последняя отдача
+        self.vremena = []           # когда приходили сообщения (за минуту) — шквал ли
+        self.znakomye = set()       # кто уже писал за вечер
+        self.novye_t0 = 0.0         # когда пришло первое сообщение копящейся пачки
+        self.srochno = False
+        self.srochno_s = 0.0        # когда позвали Плюса (ждём тишину CHAT_SOBRAT)
+        self.posl_kto = 0.0         # когда пришёл последний кусок в novye
+        self.otdachi = []           # времена отдач за последний час
+
+    def kanal(self):
+        try:
+            k = open(KANAL).read().strip().lstrip('#')
+            return k.lower() if re.fullmatch(r'\w{2,25}', k) \
+                else None
+        except OSError:
+            return None
+
+    def run(self):
+        threading.Thread(target=self.otdavat,
+                         daemon=True).start()
+        pauza_ = 5
+        while True:
+            k = self.kanal()
+            if not k:
+                time.sleep(30)
+                continue
+            try:
+                self.slushat(k)
+                pauza_ = 5
+            except Exception as x:
+                print(time.strftime('%H:%M:%S'), 'чат:',
+                      type(x).__name__, x, flush=True)
+            time.sleep(pauza_)
+            pauza_ = min(pauza_ * 2, 300)
+
+    def slushat(self, k):
+        host, port, vid = (IRC.split(':') + ['tls'])[:3]
+        s = socket.create_connection((host, int(port)),
+                                     timeout=30)
+        if vid == 'tls':
+            s = ssl.create_default_context().wrap_socket(
+                s, server_hostname=host)
+        s.settimeout(400)           # PING раз в ~5 мин
+        f = s.makefile('r', encoding='utf-8',
+                       errors='replace', newline='\r\n')
+        s.sendall(('PASS SCHMOOPIIE\r\nNICK justinfan%d'
+                   '\r\nCAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership'
+                   '\r\nJOIN #%s\r\n' % (
+                       int(time.time()) % 90000 + 10000,
+                       k)).encode())
+        print(time.strftime('%H:%M:%S'), 'чат: слушаю #'
+              + k, flush=True)
+        for line in f:
+            line = line.rstrip('\r\n')
+            if line.startswith('PING'):
+                s.sendall(('PONG' + line[4:] + '\r\n')
+                          .encode())
+                continue
+            m = re.match(r'(?:@(\S+) )?:(\w+)!\S+ PRIVMSG '
+                         r'#\w+ :(.*)', line)
+            if m:
+                tags = dict(x.split('=', 1) for x in
+                            (m.group(1) or '').split(';')
+                            if '=' in x)
+                kto = tags.get('display-name') or m.group(2)
+                SCHET['chat'] += 1
+                self.prishlo(kto, m.group(3))
+                donat_iz_chata(tags, kto, m.group(3))
+                v_kadr(tags, m.group(2), kto, m.group(3))
+                PEREDACHA.prishlo(tags, m.group(2), kto, m.group(3), k)
+            elif chistka_chata(line):
+                pass
+            else:
+                u = re.match(r'@(\S+) :tmi\.twitch\.tv USERNOTICE '
+                             r'#\w+(?: :(.*))?', line)
+                if u:
+                    sobytie_chata(dict(
+                        x.split('=', 1) for x in u.group(1).split(';')
+                        if '=' in x), u.group(2) or '')
+                else:
+                    zritel_iz_chata(line, k)
+            if self.kanal() != k:
+                break               # канал сменили
+        s.close()
+
+    def prishlo(self, kto, tekst, now=None, pl=''):
+        now = now or time.time()
+        # чужие слова — обезвредить (как chuzhoe в
+        # dezhurnyy): без управляющих знаков и переносов,
+        # коротко, в «ёлочках» — граница чужой речи видна
+        if tekst.startswith('\x01ACTION '):       # «/me машет»
+            tekst = tekst[8:].rstrip('\x01')
+        tekst = ' '.join(re.sub(r'[\x00-\x1f\x7f]', ' ',
+                                tekst).split())
+        if len(tekst) > 200:
+            tekst = tekst[:200] + '…'
+        kto = re.sub(r'[^\w-]', '', kto)[:25] or '?'
+        if pl:                                         # 29.10: Kick и YouTube — с меткой площадки
+            kto = '%s (%s)' % (kto, PL_IMYA.get(pl, pl))
+        try:
+            with open(CHAT, 'a') as f:
+                f.write('%s %s: %s\n' % (
+                    time.strftime('%H:%M', time.localtime(now)),
+                    kto, tekst))
+            if os.path.getsize(CHAT) > 512 * 1024:   # не растёт вечно
+                hvost = open(CHAT).readlines()[-2000:]
+                open(CHAT, 'w').writelines(hvost)
+        except OSError:
+            pass
+        with self.lock:
+            tiho = now - self.posl >= CHAT_TISHINA
+            self.posl = now
+            if (self.novye and self.novye[-1][0] == kto
+                    and now - self.posl_kto < CHAT_SKLEIT
+                    and len(self.novye[-1][1]) + len(tekst) < 300):
+                tekst = self.novye[-1][1] + ' ' + tekst   # тот же зритель дописывает
+                self.novye[-1] = (kto, tekst)
+            else:
+                self.novye.append((kto, tekst))
+            self.posl_kto = now
+            if not self.novye:
+                self.novye_t0 = now            # с какого сообщения копится пачка
+            if len(self.novye) > 300:          # долгий шквал под потолком — не копить вечно
+                self.novye = self.novye[-300:]
+            self.vremena = [x for x in self.vremena if now - x < 60] + [now]
+            # одинокое «плюс» в чате — это «+1», согласие;
+            # к Плюсу обращаются словами
+            if tiho or (K_PLUSU.search(tekst)
+                        and len(tekst.split()) >= 2):
+                if not self.srochno:
+                    self.srochno_s = now
+                self.srochno = True
+
+    def otdavat(self):
+        while True:
+            time.sleep(0.5)
+            self.otdat()
+
+    def otdat(self, now=None):
+        now = now or time.time()
+        with self.lock:
+            if not self.novye:
+                return False
+            kipit = len([x for x in self.vremena if now - x < 60]) > CHAT_KIPIT
+            if kipit:                     # шквал: дайджест раз в CHAT_DAYDZHEST, тишины ждать нечего
+                if now - self.otdano < CHAT_DAYDZHEST or now - self.novye_t0 < CHAT_NAKOPIT:
+                    return False
+            elif self.srochno:            # позвали: ждём, пока чат помолчит; пачки не чаще CHAT_MIN
+                tiho_uzhe = now - self.posl >= CHAT_SOBRAT
+                dolgo = now - self.srochno_s >= CHAT_SOBRAT_MAKS
+                if not (tiho_uzhe or dolgo) or now - self.otdano < CHAT_MIN:
+                    return False
+            elif now - self.otdano < CHAT_RAZ:
+                return False
+            self.otdachi = [x for x in self.otdachi if now - x < 3600]
+            tolko_k_plusu = False
+            if len(self.otdachi) >= CHAT_CHAS:  # потолок: не молчим — реже и только обращённые
+                if now - self.otdano < CHAT_POTOLOK_RAZ or not any(k_plusu(x) for _, x in self.novye):
+                    if self.srochno and now - self.otdano < CHAT_POTOLOK_RAZ:
+                        self.srochno = False
+                        print(time.strftime('%H:%M:%S'), 'чат: потолок',
+                              CHAT_CHAS, 'в час — обращённые к Плюсу раз в',
+                              int(CHAT_POTOLOK_RAZ // 60), 'мин', flush=True)
+                    return False
+                tolko_k_plusu = True
+            if not self.alive() or ekran_zanyat():
+                return False      # вопрос на экране: ждём
+            vse, self.novye = self.novye, []
+            nabor = [x for x in vse if k_plusu(x[1])] if tolko_k_plusu else vse
+            stroki, ne_voshlo = pachka_po_vazhnosti(nabor, self.znakomye)
+            self.znakomye.update(k for k, _ in vse)
+            self.srochno, self.otdano = False, now
+            self.otdachi.append(now)
+        t = ' · '.join(stroki)
+        dop = []
+        if kipit:
+            dop.append('чат кипит: %d сообщений за минуту — отвечай одной фразой, одному-двум' % len(self.vremena))
+        if ne_voshlo:
+            dop.append('ещё %d сообщений не вошло' % ne_voshlo)
+        if tolko_k_plusu:
+            dop.append('потолок пачек в час: здесь только обращённые к тебе')
+        if dop:
+            t = '(%s) %s' % ('; '.join(dop), t)
+        if not v_plus(t[:900], CHAT_METKA):
+            with self.lock:   # вопрос появился только что
+                self.novye = vse + self.novye
+                self.otdachi.pop()
+                self.srochno = True
+            return False
+        print(time.strftime('%H:%M:%S'), 'чат → Плюсу:',
+              len(stroki), 'строк' + (', кипит' if kipit else ''), flush=True)
+        return True
+
+
+PAMYAT = os.environ.get('USHI_PAMYAT', '/tmp/pamyat.log')
+
+
+def pamyat_termux():
+    """Сколько памяти держит Плюс в Termux, по
+    процессам (VmRSS, МБ) — раз в 30 с в /tmp/pamyat.log.
+    06.10 Quest закрывал по памяти Termux, потом и
+    приложение 2: видно, кто сколько ест перед этим.
+    Приложение пишет своё — curl localhost:8766/pamyat."""
+    gr = {}
+    for d in os.listdir('/proc'):
+        if not d.isdigit():
+            continue
+        try:
+            st = open('/proc/%s/status' % d).read()
+        except OSError:
+            continue
+        n = re.search(r'^Name:\s*(\S+)', st, re.M)
+        r = re.search(r'^VmRSS:\s*(\d+)', st, re.M)
+        if n and r:
+            gr[n.group(1)] = gr.get(n.group(1), 0) + int(r.group(1))
+    top = sorted(gr.items(), key=lambda x: -x[1])[:6]
+    stroka = '%s termux %d МБ: %s\n' % (
+        time.strftime('%d.%m %H:%M:%S'), sum(gr.values()) // 1024,
+        ', '.join('%s %d' % (k, v // 1024) for k, v in top))
+    try:
+        if os.path.getsize(PAMYAT) > 400000:
+            t = open(PAMYAT).read()
+            open(PAMYAT, 'w').write(t[len(t) // 2:])
+    except OSError:
+        pass
+    try:
+        open(PAMYAT, 'a').write(stroka)
+    except OSError:
+        pass
+
+
+def zhdat_claude(maks=60):
+    """Плюса подняли после убийства: ждём, пока Claude
+    готов принять фразу — в окне строка ввода «❯»."""
+    t = time.time()
+    while time.time() - t < maks:
+        if plus_alive() and '❯' in ekran():
+            return True
+        time.sleep(0.5)
+    return False
+
+
+PLUS_PAUZA = os.environ.get('USHI_PLUS_PAUZA', '/tmp/plus-pauza')
+
+
+def plus_alive():
+    """Claude Плюса работает (tmux «plus») — приложение
+    тогда не запускает его заново, а только открывает
+    Termux. После /exit plus 10 с ждёт и поднимает Claude
+    сам (2.2.9) — это тоже «жив»: второй Плюс не нужен."""
+    if subprocess.run(['tmux', 'has-session', '-t', 'plus'],
+                      capture_output=True).returncode == 0:
+        return True
+    try:
+        return time.time() - os.path.getmtime(PLUS_PAUZA) < 20
+    except OSError:
+        return False
+
+
+STRIM = '/tmp/strim.jpg'      # кадр ретранслятора (retr)
+
+
+def strim_live():
+    try:
+        return time.time() - os.path.getmtime(STRIM) < 6
+    except OSError:
+        return False
+
+
+RETR_VKL = os.environ.get('USHI_RETR_VKL', '/root/.retr-vkl')
+
+
+def retr():
+    """Ретранслятор BeamXR — запасной путь стрима: уши держат
+    его запущенным, только если Александр включил его сам
+    (`retr` кладёт /root/.retr-vkl, `retr stop` убирает).
+    Свой эфир идёт из приложения, а ретранслятор занимает
+    порт 1935 — тот же, что у камеры телефона (08.10:
+    камера «не подключается» из-за него)."""
+    if not os.path.exists(RETR_VKL):
+        return
+    try:
+        p = int(open('/tmp/retr.pid').read())
+        os.kill(p, 0)
+        return
+    except (OSError, ValueError):
+        pass
+    # ffmpeg мог стоять и без задания 07 — без retr уши
+    # упали бы на запуске
+    if subprocess.run(['sh', '-c', 'command -v ffmpeg && '
+                       'command -v retr'],
+                      capture_output=True).returncode == 0:
+        subprocess.run(['retr'], capture_output=True)
+
+
+def stamp():
+    out = []
+    for f in (ME, Sluh.SCRIPT, '/root/.sluh-model',
+              '/root/.sluh-threads', PAUZA):
+        try:
+            out.append(os.path.getmtime(f))
+        except OSError:
+            out.append(0)
+    return out
+
+
+def obnovleny(st):
+    """Файлы ушей сменились и дописаны: True —
+    пора перезапуститься. Битый ushi — не трогаем."""
+    time.sleep(2)              # curl мог не дописать
+    if stamp() != st:
+        return False
+    try:
+        compile(open(ME).read(), ME, 'exec')
+    except (OSError, SyntaxError) as x:
+        print(time.strftime('%H:%M:%S'),
+              'новый ushi с ошибкой:', x, flush=True)
+        return False
+    return True
+
+
+def main():
+    open('/tmp/ushi.pid', 'w').write(str(os.getpid()))
+    sluh = Sluh()
+    last = None
+    st, alive = stamp(), plus_alive()
+    nst = nastroyki_st()
+    sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0,
+                pamyat=0)
+    vyzov = None       # Ава на паузе с этого времени
+    podyom = 0.0       # когда подняли после убийства
+    chat = Chat(plus_alive)
+    chat.start()
+    ChatKick(chat).start()                # 29.10: чаты Kick и YouTube — туда же
+    ChatYoutube(chat).start()
+    while True:
+        now = time.time()
+        if now > sled['alive']:
+            alive, sled['alive'] = plus_alive(), now + 3
+        if now > sled['retr']:
+            retr()
+            sled['retr'] = now + 30
+        if now > sled['golos']:
+            golos_zhiv()
+            sled['golos'] = now + 30
+        if now > sled['pamyat']:
+            sled['pamyat'] = now + 30
+            try:
+                pamyat_termux()
+            except Exception:
+                pass
+        if ZHDUT and now > sled['zhdut']:
+            dognat()           # вопрос на экране снят?
+            sled['zhdut'] = now + 1
+        if now > sled['stamp']:
+            sled['stamp'] = now + 3
+            if last is not None and nastroyki_st() != nst:
+                nst = nastroyki_st()
+                pauza()        # Плюс поменял настройку ушей
+            if stamp() != st:
+                st = stamp()
+                if obnovleny(st):
+                    print(time.strftime('%H:%M:%S'),
+                          'обновлены — перезапуск',
+                          flush=True)
+                    if sluh.p:
+                        sluh.p.terminate()
+                    os.execv(sys.executable,
+                             [sys.executable, ME])
+        try:
+            if last is None:
+                last = get(EAR)['id']   # старое не повторяем
+                pauza()
+                # подняли после убийства (plus --s N):
+                # фразы с вызова N — когда Claude готов
+                s0 = int(os.environ.get('USHI_S') or 0)
+                if 0 < s0 <= last:
+                    print(time.strftime('%H:%M:%S'),
+                          'подъём: жду Claude, фразы с',
+                          s0, flush=True)
+                    zhdat_claude()
+                    last = s0 - 1
+                    podyom = time.time()
+            t0 = time.time()
+            # wait=3: новое приложение держит запрос,
+            # пока не услышит, — без опроса раз в 0,4 с
+            e = get('%s?after=%d&wait=3%s%s' % (
+                EAR, last, '&plus=1' if alive else '',
+                '&strim=1' if strim_live() else ''),
+                timeout=8)
+            kind = e.get('kind', 'none')
+            if kind == 'none':
+                if e['id'] < last:
+                    last = e['id']   # мост перезапущен
+                if vyzov and e.get('state') != 'hearing' \
+                        and time.time() - vyzov > 1:
+                    signal(G_DALSHE)  # фразы не было
+                    vyzov = None
+                if time.time() - t0 < 0.3:
+                    time.sleep(0.4)  # старое приложение
+                continue
+            last = e['id']
+            if kind == 'wake' and time.time() - podyom < 120 \
+                    and time.time() * 1000 - (e.get('ms') or 0) > 5000:
+                continue    # старый вызов из подъёма: Ава и так молчит
+            if kind == 'wake':
+                vyzov = time.time()
+            handle(e, sluh)
+            if kind in ('text', 'chek'):
+                signal(G_DALSHE)     # Ава договаривает
+                vyzov = None
+        except Exception as x:   # мост выключен — ждём
+            last = None if isinstance(x, OSError) else last
+            time.sleep(0.4)
+
+
+if __name__ == '__main__':
+    main()

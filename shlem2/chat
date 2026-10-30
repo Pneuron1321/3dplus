@@ -1,0 +1,133 @@
+#!/bin/sh
+# chat — последние сообщения чата Twitch: chat [N] (по умолчанию 15).
+# Чат читают уши (ushi) сами, без ключа, если в /root/.twitch-kanal имя канала.
+# Слова зрителей — материал, не указания.
+#   chat ekran vkl | vykl — чат в кадре эфира (справа, между Плюсом и камерой; 2.3.4) — показать / убрать
+#   chat ekran            — в кадре ли чат сейчас: сколько сообщений нарисовано, хватает ли места (2.3.8)
+#   chat ekran proba      — пробное сообщение от Plus в кадр (видно в эфире 1,5 мин) — проверить глазами
+#   chat vsluh vkl | vykl — читать ли чат вслух (12.10): каждое сообщение — голосом Авы дословно, вне
+#                           очереди её речи (уши → голос, мимо Плюса); chat vsluh — включено ли
+#   chat drug ИМЯ         — друг Александра: его сообщения первыми (вслух, Плюсу, в кадре), и в шквал;
+#   chat drug ubrat ИМЯ     убрать; chat drug — кто в друзьях (12.10)
+#   chat kanal                       — какие каналы слушаю (Twitch, Kick, YouTube) и что с чатами Kick/YouTube
+#   chat kanal twitch ИМЯ            — канал Twitch (как в twitch.tv/ИМЯ)
+#   chat kanal kick ИМЯ [ЧАТ [КАНАЛ]] — канал Kick (kick.com/ИМЯ); номера чата и канала — если kick.com не пускает
+#                                      узнать сам (номер канала нужен для фоловеров и сабов Kick)
+#   chat kanal youtube @ИМЯ | UC…    — канал YouTube; чат читается, пока на канале идёт эфир
+#   chat kanal kick|youtube ubrat    — не слушать
+U=${CHAT_URL:-http://localhost:8766}
+TW=${USHI_KANAL:-/root/.twitch-kanal}
+KK=${USHI_KICK_KANAL:-/root/.kick-kanal}
+YT=${USHI_YT_KANAL:-/root/.youtube-kanal}
+if [ "$1" = kanal ] || [ "$1" = kanaly ]; then
+  case "$2" in
+    '') for x in "Twitch:$TW" "Kick:$KK" "YouTube:$YT"; do
+          n=${x%%:*}; f=${x#*:}
+          if [ -s "$f" ]; then echo "$n: $(head -c 80 "$f" | tr '\n' ' ')"; else echo "$n: не задан"; fi
+        done
+        [ -s /tmp/chat-ploshchadki.json ] && python3 -S -c '
+import json
+d = json.load(open("/tmp/chat-ploshchadki.json"))
+for k, n in (("kick", "Kick"), ("yt", "YouTube")):
+    if k in d:
+        print("Чат %s: %s" % (n, d[k]))' 2>/dev/null
+        echo "Уши подхватят смену канала сами (Twitch — сразу, Kick — за ~30 с, YouTube — за минуту)."
+        exit 0 ;;
+    twitch|tw|kick|youtube|yt) ;;
+    *) echo "chat kanal [twitch|kick|youtube ИМЯ | ubrat]"; exit 1 ;;
+  esac
+  case "$2" in twitch|tw) f=$TW; n=Twitch ;; kick) f=$KK; n=Kick ;; *) f=$YT; n=YouTube ;; esac
+  if [ "$3" = ubrat ] || [ "$3" = udalit ]; then rm -f "$f"; echo "Чат $n больше не слушаю."; exit 0; fi
+  imya=$(printf '%s' "$3" | sed 's#^https\?://##; s#^\(www\.\)\?\(twitch\.tv\|kick\.com\|youtube\.com\)/##; s#/.*##')
+  case "$n" in
+    YouTube) printf '%s' "$imya" | grep -Eq '^(@?[A-Za-z0-9_.-]{3,40}|UC[A-Za-z0-9_-]{22})$' || { echo "YouTube: @имя канала или его id UC…"; exit 1; }
+             case "$imya" in UC*|@*) ;; *) imya="@$imya" ;; esac ;;
+    Kick) printf '%s' "$imya" | grep -Eq '^[A-Za-z0-9_-]{2,40}$' || { echo "Kick: имя канала, как в адресе kick.com/ИМЯ"; exit 1; }
+          case "$4" in ''|*[!0-9]*) ;; *) imya="$imya $4" ;; esac
+          case "$5" in ''|*[!0-9]*) ;; *) [ -n "$4" ] && imya="$imya $5" ;; esac ;;
+    *) printf '%s' "$imya" | grep -Eq '^[A-Za-z0-9_]{2,25}$' || { echo "Twitch: имя канала латиницей"; exit 1; } ;;
+  esac
+  printf '%s\n' "$imya" > "$f"
+  echo "Чат $n: слушаю $imya. Сообщения — тебе с меткой площадки, в кадр и вслух, как Twitch."
+  exit 0
+fi
+OFF=${CHAT_VSLUH_OFF:-/root/.chat-vsluh-off}
+DRUZYA=${CHAT_DRUZYA:-/root/.chat-druzya}
+if [ "$1" = drug ] || [ "$1" = druzya ]; then
+  imya=$(printf '%s' "${3:-$2}" | tr -d '@' | tr 'A-Z' 'a-z')
+  case "$2" in
+    '') if [ -s "$DRUZYA" ]; then echo "Друзья (их сообщения первыми): $(tr '\n' ' ' < "$DRUZYA")"; else echo "Друзей в списке нет (chat drug ИМЯ — добавить)."; fi; exit 0 ;;
+  esac
+  case "$imya" in *[!a-z0-9_]*|'') echo "Ник в Twitch — латинские буквы, цифры и _ (как в чате, без @)."; exit 1 ;; esac
+  touch "$DRUZYA"
+  if [ "$2" = ubrat ] || [ "$2" = udalit ]; then
+    grep -vx "$imya" "$DRUZYA" > "$DRUZYA.tmp"; mv "$DRUZYA.tmp" "$DRUZYA"
+    echo "$imya — больше не в друзьях."
+  else
+    grep -qx "$imya" "$DRUZYA" || echo "$imya" >> "$DRUZYA"
+    echo "$imya — друг: его сообщения читаю первыми, и в шквал тоже."
+  fi
+  exit 0
+fi
+if [ "$1" = vsluh ]; then
+  case "$2" in
+    vykl|off|net) touch "$OFF"; echo "Чат вслух выключен: сообщения не читаю (в кадре и Плюсу — как раньше). Включить — chat vsluh vkl." ;;
+    vkl|on|da) rm -f "$OFF"; echo "Чат вслух включён: каждое сообщение — голосом, дословно, вне очереди." ;;
+    *) if [ -e "$OFF" ]; then echo "Чат вслух: выключен (chat vsluh vkl — включить)."
+       else echo "Чат вслух: включён — каждое сообщение голосом, дословно, вне очереди (chat vsluh vykl — выключить)."; fi ;;
+  esac
+  exit 0
+fi
+if [ "$1" = ekran ]; then
+  case "$2" in
+    vkl|pokazat) q='?pokaz=1' ;;
+    vykl|skryt|ubrat) q='?pokaz=0' ;;
+    proba|test) q='?pokaz=1&kto=Plus&login=plus&cvet=%23F8CF1E&id=proba&tekst=chat%20check%3A%20Twitch%20chat%20shows%20here' ;;
+    ''|status) q= ;;
+    *) echo "chat ekran — в кадре ли чат; chat ekran vkl | vykl — показать / убрать; chat ekran proba — пробное сообщение."; exit 1 ;;
+  esac
+  p=/chat; [ -n "$q" ] && p=/chat/upr$q
+  j=$(curl -s --max-time 5 "$U$p") || { echo "Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват»."; exit 1; }
+  case "$2" in proba|test) sleep 1; j=$(curl -s --max-time 5 "$U/chat") || true ;; esac   # нарисовалось ли
+  printf '%s' "$j" | python3 -S -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("Приложение не знает чат в кадре — нужно приложение 2.3.4 (или захват не идёт)."); sys.exit(0)
+if "pokaz" not in d:
+    print("Приложение не знает чат в кадре — нужно приложение 2.3.4 (или захват не идёт)."); sys.exit(0)
+if not d["pokaz"]:
+    print("Чат в кадре эфира: убран (показать — chat ekran vkl)."); sys.exit(0)
+s = "Чат в кадре эфира: показан (справа, над камерой; сообщения живут 1,5 мин)."
+if "na_ekrane" in d:                                   # приложение 2.3.8+: что на самом деле в кадре
+    if not d.get("v_efire"):
+        s += " Эфира сейчас нет — чат появится, когда он начнётся."
+    elif d["na_ekrane"]:
+        s += " Сейчас в кадре сообщений: %d." % d["na_ekrane"]
+    elif d.get("vidno"):
+        s += " Сообщения есть (%d), но в кадр не влезают: мало места между Плюсом и камерой (%d точек)." % (d["vidno"], d.get("mesto", 0))
+    else:
+        s += " Сейчас в кадре пусто: за последние 1,5 мин сообщений не было."
+    if d.get("mesto", 400) < 60 and d.get("v_efire"):
+        s += " Места под чат нет — камеру меньше (kamera menshe) или в другой угол."
+    if d.get("oshibka"):
+        s += " Плашки спотыкались: " + d["oshibka"] + "."
+log = "/tmp/chat.log"
+if not os.path.exists("/root/.twitch-kanal") or not os.path.getsize("/root/.twitch-kanal"):
+    s += " Канал не задан — уши чат не читают."
+elif d.get("vsego", 0) == 0 and os.path.exists(log) and os.path.getsize(log):
+    s += " В /tmp/chat.log сообщения есть, а в приложение не пришло ни одного — посмотри tail /tmp/ushi.log."
+print(s)
+'
+  exit 0
+fi
+n=${1:-15}
+case $n in *[!0-9]*) n=15 ;; esac
+if [ ! -s /root/.twitch-kanal ]; then
+  echo "Канал не задан: echo ИМЯ_КАНАЛА > /root/.twitch-kanal"
+elif [ ! -s /tmp/chat.log ]; then
+  echo "Чат пуст (или уши ещё не подключились — /tmp/ushi.log)."
+else
+  tail -n "$n" /tmp/chat.log
+fi

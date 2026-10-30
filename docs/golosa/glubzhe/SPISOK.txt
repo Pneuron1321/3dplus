@@ -1,0 +1,10 @@
+Мужские многоязычные голоса сервиса (7): de-DE-FlorianMultilingualNeural, en-AU-WilliamMultilingualNeural, en-US-AndrewMultilingualNeural, en-US-BrianMultilingualNeural, fr-FR-RemyMultilingualNeural, it-IT-GiuseppeMultilingualNeural, ko-KR-HyunsuMultilingualNeural
+1-florian-nizhe-45.mp3 — de-DE-FlorianMultilingualNeural, ниже на 45 Гц
+2-william-nizhe-45.mp3 — en-AU-WilliamMultilingualNeural, ниже на 45 Гц
+3-andrew-nizhe-45.mp3 — en-US-AndrewMultilingualNeural, ниже на 45 Гц
+4-brian-nizhe-45.mp3 — en-US-BrianMultilingualNeural, ниже на 45 Гц
+5-remy-nizhe-45.mp3 — fr-FR-RemyMultilingualNeural, ниже на 45 Гц
+6-giuseppe-nizhe-45.mp3 — it-IT-GiuseppeMultilingualNeural, ниже на 45 Гц
+7-hyunsu-nizhe-45.mp3 — ko-KR-HyunsuMultilingualNeural, ниже на 45 Гц
+8-brian-nizhe-60.mp3 — en-US-BrianMultilingualNeural, ниже на 60 Гц
+9-andrew-nizhe-60.mp3 — en-US-AndrewMultilingualNeural, ниже на 60 Гц

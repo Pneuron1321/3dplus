@@ -1,0 +1,184 @@
+#!/bin/sh
+# obnovi — свежие скрипты Плюса 2 из публичного зеркала (3dplus, папка shlem2) в
+# /usr/local/bin. Каждый файл сначала проверяется на синтаксис: битый не ставится.
+# CLAUDE.md и settings.json не трогает — их ставит Александр (защита авто-режима).
+# Уши (ushi) подхватывают новое сами через несколько секунд.
+# Правки прямо в шлеме (19.10, Александр: «не трогать» каждый раз — давай доработаем) — трёхстороннее слияние,
+# как в git: база — версия из зеркала, которую obnovi ставил в прошлый раз (/root/.obnovi-baza). Шлем правил одни
+# места, зеркало другие — сливает сам (синтаксис проверен, прежний файл — в /root/obnovi-rezerv). Правили одно и
+# то же место или базы ещё нет — файл из шлема остаётся, версия из зеркала ложится в /root/obnovi-novye, а
+# `obnovi otdat` складывает все правки шлема в один файл в Загрузках — его Александр шлёт Claude Code.
+# Метка «obnovi: ne trogat» больше ничего не значит. Устаревший файл (его отпечаток среди выложенных —
+# obnovi-sumy) просто заменяется.
+# Правила Плюса (/root/.claude/CLAUDE.md) — так же, слиянием (20.10, Александр: «очень важный файл, его тоже надо
+# по-умному — совмещать»), но только `obnovi pravila` и только руками Александра (`!`): Плюс свои правила не
+# ставит (защита авто-режима). Простой `obnovi` правила не трогает — лишь говорит, что вышли новые.
+#   obnovi          — обновить скрипты
+#   obnovi pravila  — обновить CLAUDE.md (Александр)
+#   obnovi otdat    — правки шлема (скрипты и CLAUDE.md) в /sdcard/Download/pravki-shlema.txt
+# Папка shlem — версия 1.0, её «обнови» первой версии; вторая берёт только из shlem2.
+B=${OBNOVI_BASE:-https://raw.githubusercontent.com/Pneuron1321/3dplus/claude/tender-goodall-41rwsn/shlem2}
+D=${OBNOVI_DIR:-/usr/local/bin}
+T=$(mktemp -d)
+NOV=${OBNOVI_NOVYE:-/root/obnovi-novye}
+BAZA=${OBNOVI_BAZA:-/root/.obnovi-baza}
+REZ=${OBNOVI_REZERV:-/root/obnovi-rezerv}
+OTDAT=${OBNOVI_OTDAT:-/sdcard/Download/pravki-shlema.txt}
+VED_MOY=${OBNOVI_VED_MOY:-/root/.vedushchiy/vedushchiy.moy}
+PRAVILA=${OBNOVI_PRAVILA:-/root/.claude/CLAUDE.md}
+FAJLY="plus-lib plus-mcp ushi sluh sluh-test kluch kadr retr efir kamera karta most3 nalet radar titr donat itogi obzor vedushchiy donaty zriteli golos skazhi tiho uskor zamer chat plus pamyat golos-hook raciya nagruzka gosti sinhron muzyka treki klipy scena vid obnovi"
+mkdir -p "$BAZA" 2> /dev/null
+curl -fsSL "$B/obnovi-sumy?t=$(date +%s)" -o "$T/.sumy" 2> /dev/null || : > "$T/.sumy"
+
+sintaksis() {   # $1 — файл: python или sh, без ошибок
+  case $(head -1 "$1") in
+    *python*) python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$1" 2> /dev/null ;;
+    *) sh -n "$1" 2> /dev/null ;;
+  esac
+}
+
+gde() {         # $1 — имя: где он стоит в шлеме
+  if [ "$1" = CLAUDE.md ]; then echo "$PRAVILA"; else echo "$D/$1"; fi
+}
+
+vypushchen() {  # $1 — имя, $2 — файл: его отпечаток среди выложенных версий
+  h=$(sha256sum "$2" 2> /dev/null | cut -c1-16)
+  [ -n "$h" ] && grep -q "^$1 $h\$" "$T/.sumy"
+}
+
+pravlen() {     # $1 — имя: файл в шлеме не совпадает ни с базой, ни с выложенными версиями
+  g=$(gde "$1")
+  [ -f "$g" ] || return 1
+  [ -f "$BAZA/$1" ] && cmp -s "$g" "$BAZA/$1" && return 1
+  grep -q "^$1 " "$T/.sumy" || return 1          # старое зеркало без отпечатков — как раньше, правок не видим
+  ! vypushchen "$1" "$g"
+}
+
+postavit() {    # $1 — имя, $2 — что ставить: рядом и переименованием (работающий скрипт дочитывает старый)
+  cp "$2" "$D/.$1.novyy" && chmod +x "$D/.$1.novyy" && mv -f "$D/.$1.novyy" "$D/$1" || return 1
+  if [ "$1" = vedushchiy ] && [ -d "$(dirname "$VED_MOY")" ]; then
+    cp "$2" "$VED_MOY.tmp" && mv -f "$VED_MOY.tmp" "$VED_MOY"   # своя копия соведущей — та же, иначе вернёт старую
+  fi
+  return 0
+}
+
+slit() {        # $1 база, $2 шлем, $3 зеркало, $4 итог; 0 — слито, 1 — правили одно и то же место
+  python3 -c '
+import difflib, sys
+baza, a, b = (open(p, encoding="utf-8", errors="surrogateescape").read().splitlines(True) for p in sys.argv[1:4])
+
+def kuski(nov, kto):
+    return [(i1, i2, nov[j1:j2], kto) for t, i1, i2, j1, j2 in
+            difflib.SequenceMatcher(None, baza, nov, autojunk=False).get_opcodes() if t != "equal"]
+
+vse = sorted(kuski(a, "a") + kuski(b, "b"), key=lambda x: (x[0], x[1]))
+itog, poz, i = [], 0, 0
+while i < len(vse):
+    s, e, r, kto = vse[i]
+    j = i + 1
+    while j < len(vse) and max(s, vse[j][0]) <= min(e, vse[j][1]):
+        if vse[j][3] == kto or vse[j][:3] != (s, e, r):
+            sys.exit(1)                               # шлем и зеркало правили одно и то же место
+        j += 1
+    itog += baza[poz:s] + r
+    poz = e
+    i = j
+itog += baza[poz:]
+open(sys.argv[4], "w", encoding="utf-8", errors="surrogateescape").write("".join(itog))
+' "$@"
+}
+
+if [ "$1" = otdat ]; then
+  : > "$OTDAT.tmp" 2> /dev/null || { echo "Не могу писать в $OTDAT"; rm -rf "$T"; exit 1; }
+  k=0
+  for f in $FAJLY CLAUDE.md; do
+    pravlen "$f" || continue
+    bz=нет
+    [ -f "$BAZA/$f" ] && bz=$(sha256sum "$BAZA/$f" | cut -c1-16)
+    printf '===== %s (шлем %s; база %s) =====\n' "$f" "$(sha256sum "$(gde "$f")" | cut -c1-16)" "$bz" >> "$OTDAT.tmp"
+    cat "$(gde "$f")" >> "$OTDAT.tmp"
+    k=$((k + 1))
+  done
+  rm -rf "$T"
+  if [ "$k" -eq 0 ]; then rm -f "$OTDAT.tmp"; echo "Правок в шлеме нет — всё как в зеркале."; exit 0; fi
+  mv -f "$OTDAT.tmp" "$OTDAT"
+  echo "Правки шлема ($k файлов): $OTDAT — перешли его Claude Code (WhatsApp)."
+  exit 0
+fi
+
+if [ "$1" = pravila ]; then
+  f=CLAUDE.md
+  if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f" || [ "$(grep -c . "$T/$f")" -lt 50 ]; then
+    echo "правила: не скачались — оставляю прежние"; rm -rf "$T"; exit 1
+  fi
+  stavit_pravila() {   # $1 — что ставить; прежние — в резерв; сколько строк пришло и ушло
+    mkdir -p "$(dirname "$PRAVILA")" "$REZ"
+    [ -f "$PRAVILA" ] && cp "$PRAVILA" "$REZ/CLAUDE.md.$(date +%Y%m%d-%H%M%S)"
+    plus=$(diff "$PRAVILA" "$1" 2> /dev/null | grep -c '^>'); minus=$(diff "$PRAVILA" "$1" 2> /dev/null | grep -c '^<')
+    cp "$1" "$PRAVILA.novyy" && mv -f "$PRAVILA.novyy" "$PRAVILA" && cp "$T/$f" "$BAZA/$f"
+  }
+  if cmp -s "$T/$f" "$PRAVILA"; then
+    cp "$T/$f" "$BAZA/$f"; echo "правила: уже свежие"
+  elif pravlen "$f"; then
+    if [ -f "$BAZA/$f" ] && slit "$BAZA/$f" "$PRAVILA" "$T/$f" "$T/$f.slito" && [ "$(grep -c . "$T/$f.slito")" -ge 50 ]; then
+      stavit_pravila "$T/$f.slito"
+      echo "правила: слиты — правки шлема остались, новые добавлены (+$plus −$minus строк; прежние — в $REZ). Теперь /exit"
+    else
+      mkdir -p "$NOV" && cp "$T/$f" "$NOV/$f"
+      echo "правила: правлены в шлеме, и новые меняют те же места — не трогаю (новые рядом: $NOV/$f)."
+      echo "Скажи «obnovi otdat» и перешли pravki-shlema.txt Claude Code — сольёт сам."
+    fi
+  else
+    stavit_pravila "$T/$f"
+    echo "правила: обновлены (+$plus −$minus строк; прежние — в $REZ). Теперь /exit"
+  fi
+  rm -rf "$T"; exit 0
+fi
+
+n=0
+for f in $FAJLY; do
+  if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f"; then echo "$f: не скачался"; continue; fi
+  sintaksis "$T/$f" || { echo "$f: с ошибкой — не ставлю"; continue; }
+  if cmp -s "$T/$f" "$D/$f"; then cp "$T/$f" "$BAZA/$f" 2> /dev/null; continue; fi
+  if [ "$f" != obnovi ] && pravlen "$f"; then
+    # правлен прямо в шлеме: есть база — сливаем сами; нет базы или правили одно место — не трогаем
+    if [ -f "$BAZA/$f" ] && slit "$BAZA/$f" "$D/$f" "$T/$f" "$T/$f.slito" && sintaksis "$T/$f.slito"; then
+      mkdir -p "$REZ" && cp "$D/$f" "$REZ/$f.$(date +%Y%m%d-%H%M%S)"
+      if postavit "$f" "$T/$f.slito"; then
+        cp "$T/$f" "$BAZA/$f"
+        echo "$f: слит — правки шлема и зеркала вместе (прежний — в $REZ)"; n=$((n + 1))
+      fi
+      continue
+    fi
+    mkdir -p "$NOV" && cp "$T/$f" "$NOV/$f"
+    echo "$f: правлен в шлеме и сам не сливается — не трогаю; зеркальная рядом: $NOV/$f. Скажи «obnovi otdat» и перешли файл Claude Code"
+    continue
+  fi
+  if postavit "$f" "$T/$f"; then
+    cp "$T/$f" "$BAZA/$f" 2> /dev/null
+    echo "$f: обновлён"; n=$((n + 1))
+  fi
+done
+echo "Обновлено файлов: $n."
+# Транзитор и Фарватер Александра (29.10) — соведущей в её папку: полный текст для каждой третьей реплики
+VED_PAPKA=${OBNOVI_VED_PAPKA:-/root/.vedushchiy}
+for f in deep-transitor.md farvater.md; do
+  if curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f" 2> /dev/null && [ -s "$T/$f" ] && ! cmp -s "$T/$f" "$VED_PAPKA/$f"; then
+    mkdir -p "$VED_PAPKA" && cp "$T/$f" "$VED_PAPKA/$f" && echo "$f: соведущей — новая версия"
+  fi
+done
+if curl -fsSL "$B/CLAUDE.md?t=$(date +%s)" -o "$T/CLAUDE.md" 2> /dev/null && ! cmp -s "$T/CLAUDE.md" "$PRAVILA" &&
+   ! cmp -s "$T/CLAUDE.md" "$BAZA/CLAUDE.md"; then
+  echo "Вышли новые правила (CLAUDE.md). Ставит Александр сам: «! obnovi pravila», потом /exit."
+fi
+rm -rf "$T"
+# Гости эфира (2.5.0): туннель Cloudflare — cloudflared (Go, один файл), ставится один раз с GitHub.
+if [ -z "$OBNOVI_BEZ_CLOUDFLARED" ] && ! [ -x "$D/cloudflared" ] && ! command -v cloudflared > /dev/null 2>&1; then
+  case $(uname -m) in aarch64|arm64) A=arm64 ;; x86_64) A=amd64 ;; *) A= ;; esac
+  if [ -n "$A" ] && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$A" -o "$D/.cloudflared.novyy" &&
+     chmod +x "$D/.cloudflared.novyy" && "$D/.cloudflared.novyy" --version > /dev/null 2>&1; then
+    mv -f "$D/.cloudflared.novyy" "$D/cloudflared" && echo "cloudflared: поставлен (туннель для гостей эфира)"
+  else
+    rm -f "$D/.cloudflared.novyy"; echo "cloudflared: не скачался — гости эфира без туннеля (попробуй obnovi позже)"
+  fi
+fi

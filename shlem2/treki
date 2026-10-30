@@ -1,0 +1,681 @@
+#!/usr/bin/env python3
+# treki — Плюс ищет Александру НОВЫЕ треки где угодно (29.10, Александр: «темп и жанр я делаю сам плейлистами, а чтобы
+# Плюс мог найти мне новых треков — хорошая основа»; «в качестве источника мне нужны возможности, а не ограничение в
+# нескольких каталогах»). Три пути:
+#  1) поиск сразу по всем открытым источникам свободной музыки: Openverse (Jamendo, Freesound, ccMixter, Wikimedia и
+#     другие — сотни тысяч треков), Internet Archive (нетлейблы), каталог Kevin MacLeod, ccMixter;
+#  2) любая ссылка, которую Плюс нашёл сам (поиск в интернете): YouTube, SoundCloud, Bandcamp, Jamendo, Audius,
+#     archive.org, прямой MP3 — `treki skachat ССЫЛКА` (через yt-dlp; прямой MP3 — без него);
+#  3) темп любого трека меряется на шлеме (ffmpeg): фильтр «120-130» работает для всех источников, не только для
+#     тех, где темп записан.
+# Лицензия запоминается у каждого трека (avtory.json). Свободная (CC BY / BY-SA / BY-ND / CC0 / royalty-free) — в
+# /root/muzyka и плейлист novye: можно в эфир. Неизвестная или с NC — НЕ в папку плеера (он без плейлиста играет всю
+# папку, а она идёт в эфир), а в /sdcard/Download/plus-treki-lichnoe: послушать в телефоне или очках, в эфир — нет
+# (Twitch глушит и банит за чужую музыку); Плюс говорит об этом вслух. Удалённое (`muzyka udalit`) второй раз не придёт.
+#
+#   treki najti [что] [темп] [N] [iz ИСТОЧНИК]  — найти и скачать N новых (3, до 10). «что» — жанр, настроение, слова
+#                       (по-русски или по-английски); темп — «120-130», «128», «быстрый», «медленный»;
+#                       ИСТОЧНИК — openverse | archive | macleod | ccmixter (без него — все сразу, вперемешку)
+#   treki pokazat …                — то же, но только показать (темп — где он известен заранее)
+#   treki skachat ССЫЛКА [лицензия] — скачать по любой ссылке; лицензию, если сайт её не отдаёт, Плюс пишет сам
+#                       (cc-by, cc0, royalty-free, streambeats…); не знает — трек ляжет в lichnoe
+#   treki temp ТРЕК                — измерить темп трека из /root/muzyka
+#   treki novye | lichnoe          — что лежит в плейлисте
+#   treki ostavit ТРЕК ПЛЕЙЛИСТ    — перенести из novye (или lichnoe) в свой плейлист
+#   treki katalog                  — обновить каталог Kevin MacLeod сейчас (сам — раз в неделю)
+import array
+import json
+import os
+import random
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+import urllib.request
+
+E = os.environ.get
+DIR = E('MUZYKA_DIR', '/root/muzyka')
+KATALOG = E('TREKI_KATALOG', '/root/.treki-katalog.json')
+BYLO = E('TREKI_BYLO', '/root/.treki-bylo.json')
+INC_URL = E('TREKI_INC_URL', 'https://incompetech.com/music/royalty-free/pieces.json')
+INC_MP3 = E('TREKI_INC_MP3', 'https://incompetech.com/music/royalty-free/mp3-royaltyfree/')
+CCM_URL = E('TREKI_CCM_URL', 'https://ccmixter.org/api/query')
+OV_URL = E('TREKI_OV_URL', 'https://api.openverse.org/v1/audio/')
+IA_URL = E('TREKI_IA_URL', 'https://archive.org')
+YTDLP = E('TREKI_YTDLP', 'yt-dlp')
+PLEYLIST, LICHNOE = 'novye', 'lichnoe'
+# неясная лицензия — НЕ в папку плеера: без активного плейлиста muzyka играет всю папку, а она идёт в эфир
+LICHNOE_DIR = E('TREKI_LICHNOE', '/sdcard/Download/plus-treki-lichnoe')
+NEDELYA = 7 * 24 * 3600
+EXT = ('.mp3', '.ogg', '.wav', '.m4a', '.flac', '.opus')
+UA = {'User-Agent': 'plus-treki/2.0 (stream music finder)'}
+ISTOCHNIKI = ('openverse', 'archive', 'macleod', 'ccmixter')
+
+# русское слово → что искать (источники англоязычные)
+SLOVAR = {
+    'техно': ['techno', 'electronica', 'electronic', 'house', 'edm', 'synth'],
+    'электро': ['electronic', 'electronica', 'synth'], 'электроника': ['electronic', 'electronica', 'synth'],
+    'хаус': ['house'], 'синт': ['synth'], 'синтвейв': ['synthwave', 'synth', 'retro', '80s'], 'драмнбейс': ['drum and bass', 'dnb'],
+    'дабстеп': ['dubstep'], 'транс': ['trance'], 'лоуфай': ['lofi', 'lo-fi'], 'лофай': ['lofi', 'lo-fi'],
+    'рок': ['rock'], 'метал': ['metal', 'heavy'], 'панк': ['punk'], 'джаз': ['jazz'], 'блюз': ['blues'],
+    'фанк': ['funk'], 'диско': ['disco'], 'поп': ['pop'], 'хип': ['hip hop', 'hip-hop'], 'хипхоп': ['hip hop', 'hip-hop'],
+    'рэп': ['hip hop', 'rap'], 'эмбиент': ['ambient'], 'классика': ['classical'], 'оркестр': ['orchestral', 'orchestra'],
+    'кино': ['cinematic', 'soundtrack', 'film'], 'саундтрек': ['soundtrack', 'cinematic'], 'латино': ['latin'],
+    'регги': ['reggae'], 'кантри': ['country'], 'хоррор': ['horror'], 'ужас': ['horror', 'scary'], 'лаунж': ['lounge'],
+    'чиптюн': ['chiptune', '8-bit', '8bit'], 'восьмибит': ['chiptune', '8-bit', '8bit'], 'ретро': ['retro'],
+    'бодрый': ['energetic', 'driving', 'action', 'intense', 'upbeat'], 'энергичный': ['energetic', 'driving', 'intense', 'upbeat'],
+    'драйв': ['driving', 'action'], 'погоня': ['action', 'driving', 'chase', 'intense'], 'экшн': ['action'],
+    'бой': ['action', 'aggressive', 'intense', 'epic'], 'агрессивный': ['aggressive'], 'эпичный': ['epic'], 'эпик': ['epic'],
+    'спокойный': ['calm', 'calming', 'relaxed', 'peaceful'], 'расслабленный': ['relaxed', 'calming'], 'чилл': ['chill', 'relaxed', 'lounge'],
+    'мрачный': ['dark', 'somber', 'ominous'], 'тёмный': ['dark'], 'темный': ['dark'], 'грустный': ['sad', 'somber'],
+    'весёлый': ['happy', 'bright', 'bouncy', 'humorous', 'uplifting'], 'веселый': ['happy', 'bright', 'bouncy', 'humorous', 'uplifting'],
+    'светлый': ['bright', 'uplifting'], 'таинственный': ['mysterious', 'suspenseful'], 'напряжённый': ['suspense', 'suspenseful', 'intense'],
+    'напряженный': ['suspense', 'suspenseful', 'intense'], 'смешной': ['funny', 'humorous', 'quirky'], 'грув': ['groove', 'grooving'],
+}
+TEMP_SLOVA = {'быстрый': (128, 999), 'быстро': (128, 999), 'побыстрее': (125, 999), 'fast': (128, 999),
+              'средний': (96, 127), 'медленный': (0, 95), 'медленно': (0, 95), 'помедленнее': (0, 100), 'slow': (0, 95)}
+LISHNIE = {'треки', 'трек', 'трека', 'треков', 'музыка', 'музыку', 'новые', 'новых', 'найди', 'мне', 'для', 'и', 'в', 'с',
+           'темп', 'темпом', 'bpm', 'штук', 'штуки', 'что-нибудь', 'какой-нибудь', 'track', 'tracks', 'music', 'new', 'iz', 'из'}
+# лицензии, с которыми трек можно в эфир (Twitch: без NC — эфир с рекламой и донатами — коммерческий)
+SVOBODNAYA_RE = re.compile(r'\bcc[- ]?(by|0|zero)\b|creativecommons\.org/(licenses/by|publicdomain)|public ?domain|\bpdm\b|'
+                           r'\battribution\b|royalty[- ]free|streambeats|stream[- ]safe|no copyright|copyright[- ]free|\bncs\b')
+
+
+def norm(s):
+    return re.sub(r'[^a-z0-9а-яё]+', ' ', str(s).lower()).strip()
+
+
+def poluchit(url, tajm=40):
+    return urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=tajm).read()
+
+
+def poluchit_json(url, tajm=40):
+    return json.loads(poluchit(url, tajm).decode('utf-8', 'replace'))
+
+
+def svobodnaya(lic):
+    """Можно ли в эфир: CC без NC (BY, BY-SA, BY-ND, CC0, общественное достояние) или royalty-free для стримов."""
+    l = str(lic or '').lower()
+    if re.search(r'(^|[^a-z])nc([^a-z]|$)|noncommercial|non-commercial|sampling|all rights|проверь', l):
+        return False
+    return bool(SVOBODNAYA_RE.search(l))
+
+
+def trek(imya, url, istochnik, avtor='', lic='', zhanr='', nastroenie='', bpm=0, tekst='', stranica=''):
+    return {'imya': str(imya).strip(), 'url': url, 'istochnik': istochnik, 'avtor': str(avtor or '').strip(),
+            'lic': str(lic or '').strip(), 'zhanr': str(zhanr or ''), 'nastroenie': str(nastroenie or ''), 'bpm': bpm,
+            'tekst': norm(' '.join([str(imya), str(zhanr), str(nastroenie), str(tekst)])), 'stranica': stranica}
+
+
+# ---------- Kevin MacLeod (жанр, настроение и темп — в каталоге) ----------
+
+def _pole(d, *imena):
+    for k in imena:
+        for kk in (k, k.capitalize(), k.upper()):
+            v = d.get(kk)
+            if v not in (None, ''):
+                return v
+    return ''
+
+
+def _bpm(v):
+    m = re.search(r'\d+', str(v or ''))
+    n = int(m.group(0)) if m else 0
+    return n if 30 <= n <= 300 else 0
+
+
+def razobrat_inc(dannye):
+    spisok = dannye if isinstance(dannye, list) else (dannye.get('pieces') or dannye.get('data') or [])
+    out = []
+    for d in spisok:
+        if not isinstance(d, dict):
+            continue
+        imya = str(_pole(d, 'title', 'name')).strip()
+        fajl = str(_pole(d, 'filename', 'file', 'mp3')).strip() or (imya + '.mp3' if imya else '')
+        if not imya or not fajl.lower().endswith('.mp3'):
+            continue
+        out.append(trek(imya, INC_MP3 + urllib.parse.quote(fajl), 'macleod', 'Kevin MacLeod', 'CC BY 4.0',
+                        _pole(d, 'genre', 'genres'), _pole(d, 'feel', 'feels', 'mood'), _bpm(_pole(d, 'bpm', 'tempo')),
+                        ' '.join(str(_pole(d, k)) for k in ('description', 'instruments', 'collection'))))
+    return out
+
+
+def katalog(svezhiy=False):
+    try:
+        k = json.load(open(KATALOG, encoding='utf-8'))
+        if not svezhiy and time.time() - k.get('vremya', 0) < NEDELYA and k.get('treki'):
+            return k['treki']
+    except (OSError, ValueError):
+        k = {}
+    try:
+        treki = razobrat_inc(poluchit_json(INC_URL, 60))
+        if treki:
+            tmp = KATALOG + '.tmp'
+            json.dump({'vremya': time.time(), 'treki': treki}, open(tmp, 'w', encoding='utf-8'), ensure_ascii=False)
+            os.replace(tmp, KATALOG)
+            return treki
+    except Exception as e:
+        print('Каталог Kevin MacLeod не скачался (%s).' % str(e)[:80], file=sys.stderr)
+    return k.get('treki') or []
+
+
+def iz_macleod(gruppy, temp, n):
+    return [t for t in katalog() if podhodit(t, gruppy, temp) >= len(gruppy)]
+
+
+# ---------- Openverse: Jamendo, Freesound, ccMixter, Wikimedia… одним запросом ----------
+
+def iz_openverse(gruppy, temp, n):
+    q = {'q': ' '.join(g[0] for g in gruppy) or 'music', 'license': 'by,by-sa,by-nd,cc0,pdm', 'page_size': str(min(50, n * 8)),
+         'page': str(random.randint(1, 3) if gruppy else random.randint(1, 10))}
+    try:
+        d = poluchit_json(OV_URL + '?' + urllib.parse.urlencode(q), 40)
+    except Exception as e:
+        if q['page'] != '1':                                          # страниц меньше, чем взяли наугад
+            try:
+                q['page'] = '1'
+                d = poluchit_json(OV_URL + '?' + urllib.parse.urlencode(q), 40)
+            except Exception:
+                return []
+        else:
+            return []
+    out = []
+    for r in d.get('results') or []:
+        url = r.get('url') or ''
+        ft = str(r.get('filetype') or url.rsplit('.', 1)[-1]).lower()
+        dl = r.get('duration') or 0
+        if not url or ft not in ('mp3', 'ogg', 'wav', 'flac', 'm4a', 'opus') or (dl and not 60_000 <= dl <= 900_000):
+            continue                                                  # звуки короче минуты — не музыка для эфира
+        lic = ('CC %s %s' % (str(r.get('license') or '').upper(), r.get('license_version') or '')).strip()
+        zhanry = ' '.join(r.get('genres') or [])
+        tegi = ' '.join(t.get('name', '') for t in (r.get('tags') or []) if isinstance(t, dict))
+        out.append(trek(r.get('title') or 'trek', url, 'openverse/%s' % (r.get('source') or r.get('provider') or '?'),
+                        r.get('creator'), lic, zhanry, '', 0, tegi, r.get('foreign_landing_url') or ''))
+    return out
+
+
+# ---------- Internet Archive: нетлейблы под CC ----------
+
+def iz_archive(gruppy, temp, n):
+    slova = ' OR '.join('"%s"' % g[0] for g in gruppy)
+    q = '(%s) AND mediatype:audio AND (licenseurl:*creativecommons.org/licenses/by/* OR licenseurl:*creativecommons.org/licenses/by-sa/* ' \
+        'OR licenseurl:*creativecommons.org/publicdomain*)' % (slova or 'netlabel')
+    p = [('q', q), ('fl[]', 'identifier'), ('fl[]', 'title'), ('fl[]', 'creator'), ('fl[]', 'licenseurl'), ('fl[]', 'subject'),
+         ('rows', str(min(30, n * 4))), ('page', '1'), ('output', 'json'), ('sort[]', 'downloads desc')]
+    try:
+        docs = (poluchit_json(IA_URL + '/advancedsearch.php?' + urllib.parse.urlencode(p), 40).get('response') or {}).get('docs') or []
+    except Exception:
+        return []
+    random.shuffle(docs)
+    out = []
+    for d in docs[:max(3, n * 2)]:
+        ident = d.get('identifier')
+        if not ident:
+            continue
+        try:
+            fajly = poluchit_json('%s/metadata/%s' % (IA_URL, urllib.parse.quote(ident)), 30).get('files') or []
+        except Exception:
+            continue
+        mp3 = [f for f in fajly if str(f.get('name', '')).lower().endswith('.mp3') and 'mp3' in str(f.get('format', 'mp3')).lower()]
+        if not mp3:
+            continue
+        f = random.choice(mp3)
+        kto = d.get('creator')
+        kto = ', '.join(kto) if isinstance(kto, list) else kto
+        tema = d.get('subject')
+        tema = ' '.join(tema) if isinstance(tema, list) else (tema or '')
+        out.append(trek(f.get('title') or os.path.splitext(os.path.basename(f['name']))[0],
+                        '%s/download/%s/%s' % (IA_URL, urllib.parse.quote(ident), urllib.parse.quote(f['name'])),
+                        'archive.org', kto or f.get('creator') or '', d.get('licenseurl') or '', '', '', 0,
+                        '%s %s' % (d.get('title') or '', tema), '%s/details/%s' % (IA_URL, ident)))
+    return out
+
+
+# ---------- ccMixter ----------
+
+def iz_ccmixter(gruppy, temp, n):
+    q = {'f': 'json', 'lic': 'by', 'sort': 'rank', 'limit': str(max(10, n * 4))}
+    angl = [g[0] for g in gruppy if re.match(r'^[a-z0-9 -]+$', g[0])]
+    if angl:
+        q['tags'] = '+'.join(a.replace(' ', '_') for a in angl[:3])
+    try:
+        dannye = poluchit_json(CCM_URL + '?' + urllib.parse.urlencode(q, safe='+'), 40)
+    except Exception:
+        return []
+    out = []
+    for d in dannye if isinstance(dannye, list) else []:
+        url = next((f.get('download_url') for f in d.get('files') or [] if str(f.get('download_url', '')).lower().endswith('.mp3')), '')
+        if not url or not d.get('upload_name'):
+            continue
+        out.append(trek(d['upload_name'], url, 'ccmixter', d.get('user_real_name') or d.get('user_name'),
+                        d.get('license_name') or d.get('license_url') or 'CC BY', '', '', 0,
+                        str(d.get('upload_tags') or '').replace(',', ' ')))
+    return out
+
+
+ISKATELI = {'openverse': iz_openverse, 'archive': iz_archive, 'macleod': iz_macleod, 'ccmixter': iz_ccmixter}
+
+
+# ---------- запрос ----------
+
+def po_osnove(w, d):
+    """Слово из словаря и в другой форме: «спокойное», «мрачную», «быстрое», «весёлое» — по основе (без окончания)."""
+    w = w.replace('ё', 'е')
+    for k, v in d.items():
+        k2 = k.replace('ё', 'е')
+        if w == k2 or (len(k2) >= 5 and w.startswith(k2[:max(4, len(k2) - 2)])):
+            return v
+    return None
+
+
+def razobrat_zapros(slova):
+    """«техно быстрый 5 iz openverse» → (группы синонимов, (от, до) темпа или None, сколько, источник или None)."""
+    t = ' '.join(slova).lower().replace('–', '-').replace('—', '-')
+    ist = None
+    m = re.search(r'\b(?:iz|из)\s+(\w+)', t)
+    if m and m.group(1) in ISTOCHNIKI:
+        ist = m.group(1)
+        t = t[:m.start()] + ' ' + t[m.end():]
+    temp, n = None, 3
+    m = re.search(r'(\d{2,3})\s*-\s*(\d{2,3})', t)
+    if m:
+        temp = tuple(sorted((int(m.group(1)), int(m.group(2)))))
+        t = t[:m.start()] + ' ' + t[m.end():]
+    for c in re.findall(r'\d+', t):
+        c = int(c)
+        if 40 <= c <= 250 and temp is None:
+            temp = (c - 4, c + 4)
+        elif 1 <= c <= 10:
+            n = c
+    gruppy = []
+    for w in re.findall(r'[a-zа-яё][a-zа-яё-]*', t):
+        if w in LISHNIE or len(w) < 3:
+            continue
+        tw = po_osnove(w, TEMP_SLOVA)
+        if tw:
+            temp = temp or tw
+        else:
+            gruppy.append(po_osnove(w, SLOVAR) or [w])
+    return gruppy, temp, max(1, min(10, n)), ist
+
+
+def podhodit(tr, gruppy, temp):
+    if temp and tr.get('bpm') and not (temp[0] <= tr['bpm'] <= temp[1]):
+        return -1
+    return sum(1 for g in gruppy if any(s in tr['tekst'] for s in g))
+
+
+def bylo():
+    try:
+        return set(json.load(open(BYLO, encoding='utf-8')))
+    except (OSError, ValueError):
+        return set()
+
+
+def bylo_zapisat(b):
+    try:
+        json.dump(sorted(b), open(BYLO, 'w', encoding='utf-8'), ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def uzhe_est():
+    try:
+        return {norm(os.path.splitext(f)[0]) for f in os.listdir(DIR) if f.lower().endswith(EXT)}
+    except OSError:
+        return set()
+
+
+def kandidaty(gruppy, temp, n, ist):
+    """Из всех источников (или одного) — вперемешку: по очереди из каждого, внутри — случайно."""
+    est, b = uzhe_est(), bylo()
+    stopki = []
+    for imya in ([ist] if ist else ISTOCHNIKI):
+        try:
+            sp = ISKATELI[imya](gruppy, temp, n)
+        except Exception:
+            sp = []
+        sp = [t for t in sp if t['url'] not in b and norm(t['imya']) not in est and podhodit(t, gruppy, temp) >= 0]
+        if imya == 'macleod' or not gruppy:
+            pass                                                      # каталог отфильтрован сам; без слов — всё подходит
+        else:                                                         # у остальных поиск на сайте; ещё и по нашим словам —
+            sp.sort(key=lambda t: -podhodit(t, gruppy, None))         # лучшие совпадения вперёд
+        random.shuffle(sp) if imya == 'macleod' else None
+        if sp:
+            stopki.append(sp)
+    out, vidano = [], set()
+    while any(stopki):
+        for s in stopki:
+            if s:
+                t = s.pop(0)
+                if t['url'] not in vidano:
+                    vidano.add(t['url'])
+                    out.append(t)
+    return out
+
+
+def opisat(t):
+    p = [x for x in (t['zhanr'], ('%d BPM' % t['bpm']) if t['bpm'] else '', t['nastroenie'].split(',')[0].strip()) if x]
+    kto = (' — %s' % t['avtor']) if t['avtor'] else ''
+    return '«%s»%s%s [%s]' % (t['imya'], kto, (' (' + ', '.join(p) + ')') if p else '', t['istochnik'])
+
+
+# ---------- скачать и измерить темп ----------
+
+def imya_fajla(imya, ext='.mp3'):
+    s = re.sub(r'[\\/:*?"<>|\n\r\t]+', ' ', imya).strip()[:80] or 'trek'
+    f, i = s + ext, 2
+    while os.path.exists(os.path.join(DIR, f)):
+        f, i = '%s %d%s' % (s, i, ext), i + 1
+    return f
+
+
+def eto_zvuk(dannye):
+    return dannye[:3] == b'ID3' or dannye[:4] in (b'OggS', b'RIFF', b'fLaC') or dannye[4:8] == b'ftyp' or \
+        (len(dannye) > 1 and dannye[0] == 0xFF and dannye[1] & 0xE0 == 0xE0)
+
+
+def skachat_pryamo(url, imya):
+    dannye = poluchit(url, 180)
+    if len(dannye) < 50_000 or not eto_zvuk(dannye):
+        raise ValueError('не звук (%d байт)' % len(dannye))
+    ext = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
+    ext = ext if ext in EXT else '.mp3'
+    os.makedirs(DIR, exist_ok=True)
+    f = imya_fajla(imya, ext)
+    tmp = os.path.join(DIR, '.skachivaetsya' + ext)
+    open(tmp, 'wb').write(dannye)
+    os.replace(tmp, os.path.join(DIR, f))
+    return f
+
+
+def izmerit_temp(put, s=30, dlit=60):
+    """Темп по огибающей громкости (ffmpeg → 11025 Гц, автокорреляция всплесков), BPM 70–180; 0 — не вышло."""
+    try:
+        pcm = subprocess.run(['ffmpeg', '-v', 'error', '-ss', str(s), '-t', str(dlit), '-i', put, '-ac', '1', '-ar', '11025',
+                              '-f', 's16le', '-'], capture_output=True, timeout=120).stdout
+    except Exception:
+        return 0
+    if len(pcm) < 11025 * 2 * 8 and s:
+        return izmerit_temp(put, 0, dlit)                             # короткий трек — с начала
+    a = array.array('h')
+    a.frombytes(pcm[:len(pcm) // 2 * 2])
+    if sys.byteorder == 'big':
+        a.byteswap()
+    okno = 256                                                        # ~23 мс
+    fps = 11025.0 / okno
+    en = []
+    for i in range(0, len(a) - okno, okno):
+        k = a[i:i + okno]
+        en.append(sum(x * x for x in k[::4]))
+    if len(en) < fps * 8:
+        return 0
+    vsp = [max(0.0, en[i] - en[i - 1]) for i in range(1, len(en))]   # всплески громкости — удары
+    sr = sum(vsp) / len(vsp) or 1.0
+    vsp = [v / sr for v in vsp]
+    luchshiy, bpm = 0.0, 0
+    for b10 in range(700, 1801, 5):                                   # шаг 0,5 BPM
+        bpm_ = b10 / 10.0
+        lag = 60.0 * fps / bpm_
+        l0 = int(lag)
+        d = lag - l0
+        sc = 0.0
+        for i in range(len(vsp) - l0 - 1):
+            sc += vsp[i] * (vsp[i + l0] * (1 - d) + vsp[i + l0 + 1] * d)
+        sc /= (len(vsp) - l0)
+        sc *= 1.0 + 0.1 * (90 <= bpm_ <= 160)                        # обычный темп песни — чуть вероятнее
+        if sc > luchshiy:
+            luchshiy, bpm = sc, bpm_
+    return int(round(bpm))
+
+
+def zapisat_avtora(f, avtor, lic):
+    put = os.path.join(DIR, 'avtory.json')
+    try:
+        d = json.load(open(put, encoding='utf-8'))
+    except (OSError, ValueError):
+        d = {}
+    d[os.path.splitext(f)[0]] = ('%s (%s)' % (avtor or 'автор неизвестен', lic or 'лицензия неизвестна'))
+    json.dump(d, open(put, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+
+
+def v_pleylist(pl, f, ubrat=False):
+    put = os.path.join(DIR, '.pleylist-%s.txt' % pl)
+    try:
+        sp = [l.strip() for l in open(put, encoding='utf-8') if l.strip()]
+    except OSError:
+        sp = []
+    if ubrat:
+        sp = [x for x in sp if x != f]
+    elif f not in sp:
+        sp.append(f)
+    os.makedirs(DIR, exist_ok=True)
+    open(put, 'w', encoding='utf-8').write(''.join(x + '\n' for x in sp))
+    return sp
+
+
+def polozhit(f, avtor, lic):
+    """Лицензия → место: свободная — плейлист novye (можно в эфир), иначе — вон из папки плеера в LICHNOE_DIR."""
+    zapisat_avtora(f, avtor, lic)
+    if svobodnaya(lic):
+        v_pleylist(PLEYLIST, f)
+        return PLEYLIST
+    os.makedirs(LICHNOE_DIR, exist_ok=True)
+    shutil.move(os.path.join(DIR, f), os.path.join(LICHNOE_DIR, f))
+    return LICHNOE
+
+
+# ---------- команды ----------
+
+def najti(slova, kachat):
+    gruppy, temp, n, ist = razobrat_zapros(slova)
+    vse = kandidaty(gruppy, temp, n, ist)
+    zapros = ' '.join(slova)
+    if not vse:
+        print('Новых треков%s не нашла. Попробуй шире (жанр или настроение без темпа) или найди сама в интернете и '
+              'скачай по ссылке: treki skachat ССЫЛКА.' % ((' под «%s»' % zapros) if zapros else ''))
+        return 1
+    if not kachat:
+        sp = [t for t in vse if not temp or t['bpm']][:n] or vse[:n]
+        print('Нашла (показываю %d): %s.%s' % (len(sp), '; '.join(opisat(t) for t in sp),
+                                              ' Темп у остальных измерю при скачивании.' if temp else ''))
+        return 0
+    b = bylo()
+    gotovo, oshibki, mimo = [], [], 0
+    popytok = 0
+    for t in vse:
+        if len(gotovo) >= n or popytok >= n * 3:
+            break
+        popytok += 1
+        try:
+            f = skachat_pryamo(t['url'], t['imya'])
+        except Exception as e:
+            oshibki.append('%s: %s' % (t['imya'], str(e)[:50]))
+            b.add(t['url'])
+            continue
+        b.add(t['url'])
+        if not t['bpm'] and (temp or shutil.which('ffmpeg')):
+            t['bpm'] = izmerit_temp(os.path.join(DIR, f))
+        if temp and t['bpm'] and not (temp[0] <= t['bpm'] <= temp[1]):
+            os.remove(os.path.join(DIR, f))                           # не тот темп — не нужен
+            mimo += 1
+            continue
+        polozhit(f, t['avtor'], t['lic'])
+        gotovo.append(opisat(t))
+    bylo_zapisat(b)
+    if not gotovo:
+        print('Не скачалось ни одного%s%s.' % ((' (мимо темпа %d)' % mimo) if mimo else '',
+                                              (': ' + '; '.join(oshibki)) if oshibki else ''))
+        return 1
+    print('Скачала %d новых в плейлист novye: %s.%s Послушать — muzyka pleylist novye vkl; понравился — treki ostavit '
+          'ТРЕК ПЛЕЙЛИСТ; нет — muzyka udalit ТРЕК.' % (
+              len(gotovo), '; '.join(gotovo), (' Не скачались: %s.' % '; '.join(oshibki)) if oshibki else ''))
+    return 0
+
+
+def lic_iz_metadannyh(m):
+    lic = m.get('license') or ''
+    opis = str(m.get('description') or '')[:4000].lower()
+    if not lic:
+        for s in ('creative commons attribution', 'cc by', 'cc-by', 'cc0', 'royalty free', 'royalty-free', 'streambeats',
+                  'no copyright', 'free to use', 'copyright free'):
+            if s in opis:
+                lic = s + ' (из описания — проверь)'
+                break
+    return lic
+
+
+def skachat(rest):
+    if not rest:
+        print('treki skachat ССЫЛКА [лицензия] — например: treki skachat https://… cc-by')
+        return 1
+    url, lic_ruchnaya = rest[0], ' '.join(rest[1:]).strip()
+    if not re.match(r'^https?://', url):
+        print('Нужна ссылка http(s)://…')
+        return 1
+    put = urllib.parse.urlparse(url).path.lower()
+    if put.endswith(EXT):
+        try:
+            imya = urllib.parse.unquote(os.path.splitext(os.path.basename(urllib.parse.urlparse(url).path))[0]).replace('_', ' ')
+            f = skachat_pryamo(url, imya)
+        except Exception as e:
+            print('Не скачалось: %s.' % str(e)[:100])
+            return 1
+        avtor, lic = '', lic_ruchnaya
+    else:
+        if not shutil.which(YTDLP):
+            print('Для такой ссылки нужен yt-dlp, его нет. Поставь: pip install -U yt-dlp (или apt install yt-dlp), '
+                  'потом повтори.')
+            return 1
+        os.makedirs(DIR, exist_ok=True)
+        tmpd = tempfile.mkdtemp(prefix='treki-', dir=DIR)
+        try:
+            r = subprocess.run([YTDLP, '--no-playlist', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '--no-progress',
+                                '--write-info-json', '-o', os.path.join(tmpd, 'trek.%(ext)s'), url],
+                               capture_output=True, text=True, timeout=900)
+            mp3 = [x for x in os.listdir(tmpd) if x.lower().endswith(EXT)]
+            if r.returncode != 0 or not mp3:
+                print('yt-dlp не скачал: %s' % (r.stderr.strip().splitlines() or ['?'])[-1][:200])
+                return 1
+            try:
+                m = json.load(open(os.path.join(tmpd, next(x for x in os.listdir(tmpd) if x.endswith('.info.json'))), encoding='utf-8'))
+            except Exception:
+                m = {}
+            imya = m.get('track') or m.get('title') or 'trek'
+            avtor = m.get('artist') or m.get('creator') or m.get('uploader') or ''
+            lic = lic_ruchnaya or lic_iz_metadannyh(m)
+            f = imya_fajla(imya, os.path.splitext(mp3[0])[1])
+            os.replace(os.path.join(tmpd, mp3[0]), os.path.join(DIR, f))
+        finally:
+            shutil.rmtree(tmpd, ignore_errors=True)
+    b = bylo()
+    b.add(url)
+    bylo_zapisat(b)
+    bpm = izmerit_temp(os.path.join(DIR, f))
+    pl = polozhit(f, avtor, lic)
+    f = os.path.basename(f)
+    t = '«%s»%s%s' % (os.path.splitext(f)[0], (' — %s' % avtor) if avtor else '', (', %d BPM' % bpm) if bpm else '')
+    if pl == PLEYLIST:
+        print('Скачала %s, лицензия %s — в плейлист novye, можно в эфир.' % (t, lic))
+    else:
+        print('Скачала %s, но лицензия %s — положила не в музыку эфира, а в %s: послушать можно, в ЭФИР НЕЛЬЗЯ '
+              '(Twitch заглушит или заблокирует). Если знаешь, что трек свободный, — treki skachat ССЫЛКА cc-by.' % (
+                  t, lic or 'неизвестна', LICHNOE_DIR))
+    return 0
+
+
+def temp_treka(rest):
+    z = norm(' '.join(rest))
+    try:
+        vse = sorted(f for f in os.listdir(DIR) if f.lower().endswith(EXT))
+    except OSError:
+        vse = []
+    n = [f for f in vse if norm(os.path.splitext(f)[0]) == z] or [f for f in vse if z and z in norm(os.path.splitext(f)[0])]
+    if len(n) != 1:
+        print(('Подходит несколько: %s. Уточни.' % ', '.join(os.path.splitext(f)[0] for f in n[:8])) if n else 'Не нашла трек.')
+        return 1
+    b = izmerit_temp(os.path.join(DIR, n[0]))
+    print(('«%s» — около %d BPM.' % (os.path.splitext(n[0])[0], b)) if b else 'Темп не измерился.')
+    return 0 if b else 1
+
+
+def pokazat_pleylist(pl):
+    if pl == LICHNOE:
+        try:
+            sp = sorted(f for f in os.listdir(LICHNOE_DIR) if f.lower().endswith(EXT))
+        except OSError:
+            sp = []
+        print(('Не для эфира (%s) %d: %s.' % (LICHNOE_DIR, len(sp), ', '.join(os.path.splitext(f)[0] for f in sp))) if sp
+              else 'Треков не для эфира нет.')
+        return 0
+    try:
+        sp = [l.strip() for l in open(os.path.join(DIR, '.pleylist-%s.txt' % pl), encoding='utf-8') if l.strip()]
+    except OSError:
+        sp = []
+    sp = [f for f in sp if os.path.exists(os.path.join(DIR, f))]
+    print('В плейлисте %s %d: %s.' % (pl, len(sp), ', '.join(os.path.splitext(f)[0] for f in sp)) if sp else
+          'Плейлист %s пуст.%s' % (pl, ' Найти — treki najti техно, treki najti спокойный 90-100…' if pl == PLEYLIST else ''))
+    return 0
+
+
+def ostavit(rest):
+    if len(rest) < 2:
+        print('treki ostavit ТРЕК ПЛЕЙЛИСТ — например: treki ostavit Volatile Reaction tekhno')
+        return 1
+    pl = rest[-1]
+    z = norm(' '.join(rest[:-1]))
+    for otkuda in (PLEYLIST, LICHNOE):
+        try:
+            sp = sorted(f for f in os.listdir(LICHNOE_DIR) if f.lower().endswith(EXT)) if otkuda == LICHNOE else \
+                [l.strip() for l in open(os.path.join(DIR, '.pleylist-%s.txt' % otkuda), encoding='utf-8') if l.strip()]
+        except OSError:
+            sp = []
+        n = [f for f in sp if z == norm(os.path.splitext(f)[0])] or [f for f in sp if z in norm(os.path.splitext(f)[0])]
+        if len(n) > 1:
+            print('Подходит несколько: %s. Уточни.' % ', '.join(os.path.splitext(f)[0] for f in n))
+            return 1
+        if n:
+            if otkuda == LICHNOE:                                     # Александр сам решил — переносит в музыку эфира
+                os.makedirs(DIR, exist_ok=True)
+                shutil.move(os.path.join(LICHNOE_DIR, n[0]), os.path.join(DIR, n[0]))
+            dlina = len(v_pleylist(pl, n[0]))
+            if otkuda == PLEYLIST:
+                v_pleylist(otkuda, n[0], ubrat=True)
+            print('«%s» — в плейлисте %s (там %d).%s' % (os.path.splitext(n[0])[0], pl, dlina,
+                  ' Внимание: лицензия не свободная — теперь он в музыке эфира, Twitch может заглушить.' if otkuda == LICHNOE else ''))
+            return 0
+    print('В novye и среди треков не для эфира нет «%s».' % ' '.join(rest[:-1]))
+    return 1
+
+
+def main(a):
+    cmd = a[0].lower() if a else ''
+    rest = a[1:]
+    if cmd in ('najti', 'naiti', 'find', 'iskat'):
+        return najti(rest, True)
+    if cmd in ('pokazat', 'show', 'spisok'):
+        return najti(rest, False)
+    if cmd in ('skachat', 'download', 'url', 'ssylka'):
+        return skachat(rest)
+    if cmd in ('temp', 'bpm', 'tempo'):
+        return temp_treka(rest)
+    if cmd in ('novye', 'new', ''):
+        return pokazat_pleylist(PLEYLIST)
+    if cmd in ('lichnoe', 'lichnye'):
+        return pokazat_pleylist(LICHNOE)
+    if cmd in ('ostavit', 'keep', 'perenesti'):
+        return ostavit(rest)
+    if cmd in ('katalog', 'catalog'):
+        t = katalog(svezhiy=True)
+        print('В каталоге %d треков Kevin MacLeod.' % len(t) if t else 'Каталог не скачался.')
+        return 0 if t else 1
+    print('treki najti [что] [темп] [N] [iz openverse|archive|macleod|ccmixter] | pokazat … | skachat ССЫЛКА [лицензия] | '
+          'temp ТРЕК | novye | lichnoe | ostavit ТРЕК ПЛЕЙЛИСТ | katalog')
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

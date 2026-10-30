@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- сокет FrameServer (даже на 127.0.0.1) требует INTERNET -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- имя plus.local для айфона (mDNS): Wi-Fi иначе отбрасывает групповые пакеты -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- уши: микрофон в фоне — только через службу переднего плана типа microphone -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- ручки картинки карты (2.6.4): Android даёт USB-доступ к видеоустройству (UVC) только приложению с «Камерой»;
+         без неё requestPermission молчит — ни окна, ни ответа (Александр 21.10: «жду разрешения» без окна) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 2.6.6: Quest проверяет своё разрешение на USB-видео («USB Camera permission required…» в журнале 21.10);
+         так же его просит HDMI Link (dumpsys package com.meta.quest_hard_link) -->
+    <uses-permission android:name="horizonos.permission.USB_CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- страница клипов (2.7.0): клипы Моста 3 в «Фильмы/Plus» — чужие файлы; Android 13+ даёт их видеть
+         только с «Видео» (только чтение видео, не всё хранилище); свои клипы камеры видны и без него -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- «Запустить Плюса»: Termux RUN_COMMAND (Termux спросит разрешение) -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Струны (2.6.7): Мост 3 рисует кадр игры в эфир. Только приложения с той же подписью (Мост 3). -->
+    <permission android:name="com.questclaude.STRUNY" android:protectionLevel="signature" />
+    <uses-permission android:name="com.questclaude.STRUNY" />
+
+    <!-- Android 11+: без этого приложение «не видит» Termux и не может его позвать -->
+    <queries>
+        <package android:name="com.termux" />
+        <!-- KartaVhod открывает HDMI Link: без этого Android прячет его от моста (журнал 21.10: AppsFilter BLOCKED) -->
+        <package android:name="com.meta.quest_hard_link" />
+        <package android:name="com.questclaude.most3" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:label="Quest Claude Bridge 2"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 2.8.1: «Плюс · Чат» — отдельное окно (своя задача) с чатом всех площадок; есть и в библиотеке приложений -->
+        <activity
+            android:name=".ChatOkno"
+            android:exported="true"
+            android:label="Плюс · Чат"
+            android:taskAffinity="com.questclaude.bridge.chat"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Карту вставили и в «Choose an app» выбрали мост: Android сам даёт мосту доступ к карте (своё окно
+             «Разрешить» Quest не показывает, 21.10). Мост ставит картинку карты и открывает HDMI Link. -->
+        <activity
+            android:name=".KartaVhod"
+            android:exported="true"
+            android:label="Плюс: картинка карты → HDMI Link"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/karta_usb" />
+        </activity>
+
+        <service
+            android:name=".CaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".EarService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Струны: дверь для Моста 3 (поверхность кадра игры в развилку эфира) -->
+        <service
+            android:name=".StrunySluzhba"
+            android:exported="true"
+            android:permission="com.questclaude.STRUNY" />
+
+        <!-- ответ Termux на «Запустить Плюса» (через PendingIntent) -->
+        <receiver
+            android:name=".Shlem$Reply"
+            android:exported="false" />
+
+    </application>
+</manifest>

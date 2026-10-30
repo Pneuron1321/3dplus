@@ -1,0 +1,5 @@
+#!/bin/sh
+# pamyat — память Плюса между сжатиями контекста и сессиями. Хук SessionStart
+# (при запуске и после /compact) печатает /root/pamyat.md — Claude получает его в контекст.
+[ -s /root/pamyat.md ] && { echo "Память Плюса (/root/pamyat.md):"; cat /root/pamyat.md; }
+exit 0
