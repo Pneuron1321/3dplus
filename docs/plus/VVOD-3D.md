@@ -62,6 +62,27 @@ API — только если понадобится много автомати
 5. Quest ≤ 10 тыс. / ПК ≤ 70 тыс.: упрощение + запекание цвета и нормалей с плотной сетки.
 6. Кости, моргание/улыбка, PhysBone пришельца; Unity у Александра.
 
+## Что ещё уже есть и пригодится
+**Листы и рисунки Александра** (quest-claude `docs/maket/`, только там):
+- `plus-telo-list.png` — лист тела (5 видов мелко, исходник крупных видов); `plus-golova.png`, `ref-golova-list.jpg`,
+  `ref-plus-obyomnoe-lico.png` — голова и объёмное лицо; `plus-hero.png` — главный образ;
+- `nogi-tapki-list-2.png` — ноги и тапки, **«ДЕТАЛЬ СТОПЫ УТКИ»** (стопа под тапком, +10 % длины); `nogi-tapki-list.png` — прежний;
+- `plus-prised-list.png` — Плюс в приседе: проверка костей и сгибов;
+- `vizor-telo-*.png`, `plus-telo-efir.png` — как Плюс выглядит в эфире (2D-фигурка в визоре моста).
+
+**В 3dplus:**
+- `docs/PLUS-3D-PRODOLZHENIE.md` — большая памятка: история, лимиты VRChat, **ответы Александра (раздел 7)**: улыбка и
+  моргание сами время от времени, покачивание пришельца, Quest и ПК, тапки снимаются;
+- `export/pixel-mech-rig.glb`, `pixel-mech-rig-lite.glb` — **готовые кости** прежней кирпичной модели (имена, иерархия) —
+  основа для костей нового Плюса;
+- `src/pixel-mech.js` → `PALETTE` — **точные цвета кирпичей** (hex), для чистки краски;
+- `docs/plus/proba/stopa-utka.png`, `nogi-utka*.png`, `sapog-razmery.png`, `sapog-piccolo.png` — стопа утки и размеры тапка;
+- `tools/forma/proekciya.py` — своя краска с видов на развёртку (`--tochno` — без поиска совмещения);
+- `tools/forma/orto.py` — модель рядом с видами в масштабе вида спереди (пары «картинка | модель»);
+- `tools/forma/hy21.py` — запасной генератор Hunyuan3D-2.1 (HF, бесплатная квота);
+- `tools/zver/glb-vid.mjs` — рендер GLB с нескольких углов.
+- `docs/MODELIST-TRANZITOR.md` — прежний разбор моделирования Транзитором.
+
 ## Инструменты в контейнере
 Blender 5.2 без окна: `python3.13 -m pip install bpy`, запуск `python3.13` (не python3); там же numpy, scipy, trimesh,
 xatlas, scikit-image. Рендер GLB: `node tools/zver/glb-vid.mjs модель.glb выход.png 0,35,90,180,270 500`.
