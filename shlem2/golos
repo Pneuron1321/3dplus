@@ -79,6 +79,22 @@ MUZHSKIE = {'andrew': 'en-US-AndrewMultilingualNeural', 'brian': 'en-US-BrianMul
             'guy': 'en-US-GuyNeural', 'eric': 'en-US-EricNeural', 'thomas': 'en-GB-ThomasNeural'}
 
 
+# 30.10 (Александр: «голоса какие-то феминизированные»): тон голоса Плюса ниже — `golos nizhe 25` (Гц, 0–60; по умолчанию
+# 20), файл /root/.golos-ton. Синтез сам опускает высоту голоса (edge-tts pitch), темп и чёткость те же. Соведущую не трогает.
+TON = os.environ.get('GOLOS_TON', '/root/.golos-ton')
+TON_UMOLCHANIE = 20
+
+
+def ton():
+    """Насколько ниже голос Плюса, Гц (0 — как есть; женский голос — не трогаем)."""
+    if pol() == 'zh':
+        return 0
+    try:
+        return max(0, min(60, int(float(open(TON).read().strip().replace(',', '.')))))
+    except (OSError, ValueError):
+        return TON_UMOLCHANIE
+
+
 def muzhskoy():
     if 'GOLOS_VOICE_M' in os.environ:
         return VOICE_M
@@ -233,7 +249,7 @@ def log(*a):
 
 def kesh(tekst, temp, golos=None):
     """Файл короткой фразы в кэше (у каждого голоса — свой)."""
-    g = golos or (('eleven:%s:%s' % (eleven_golos(), eleven_nizhe())) if eleven_golos() else golos_plusa())
+    g = golos or (('eleven:%s:%s' % (eleven_golos(), eleven_nizhe())) if eleven_golos() else '%s:-%dHz' % (golos_plusa(), ton()))
     return os.path.join(KESH, hashlib.sha1(('%s|%s|%s' % (g, temp, tekst)).encode()).hexdigest()
                         + '.mp3')
 
@@ -532,7 +548,8 @@ class Sintez:
                     metki = []
 
                     async def go():
-                        c = self.mod.Communicate(tekst, golos or golos_plusa(), rate=temp)
+                        c = self.mod.Communicate(tekst, golos or golos_plusa(), rate=temp,
+                                                 pitch='-%dHz' % (0 if golos else ton()))   # Плюс — ниже (30.10)
                         with open(tmp, 'wb') as f:
                             async for ch in c.stream():
                                 if ch['type'] == 'audio':
@@ -543,7 +560,8 @@ class Sintez:
                     self.asyncio.run(go())
                     self.tl.metki = metki or None
                 elif self.exe:
-                    subprocess.run([self.exe, '--voice', golos or golos_plusa(), '--rate=' + temp, '--text', tekst,
+                    subprocess.run([self.exe, '--voice', golos or golos_plusa(), '--rate=' + temp,
+                                    '--pitch=-%dHz' % (0 if golos else ton()), '--text', tekst,
                                     '--write-media', tmp], stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, timeout=30)
                 if os.path.getsize(tmp) > 0:
@@ -1618,6 +1636,13 @@ if __name__ == '__main__':
         else:
             print('Голос Плюса: %s (со следующей фразы). Соведущая — как была.' % (
                 'свой (ElevenLabs, ниже на %s полутона)' % eleven_nizhe() if a[1] == 'moy' else golos_plusa()))
+        sys.exit(0)
+    if a and a[0] in ('nizhe', 'ton'):
+        if len(a) < 2 or not re.fullmatch(r'\d{1,2}', a[1]):
+            print('golos nizhe N — насколько ниже голос Плюса, Гц (0–60; 0 — как есть); сейчас: %d' % ton())
+            sys.exit(1)
+        open(TON, 'w').write(a[1])
+        print('Голос Плюса ниже на %d Гц (со следующей фразы).' % ton())
         sys.exit(0)
     if a and a[0] in ('muzhskoy', 'muzh'):
         if len(a) < 2 or not (a[1].lower() in MUZHSKIE or re.fullmatch(r'[a-z]{2}-[A-Z]{2}-\w+Neural', a[1])):
