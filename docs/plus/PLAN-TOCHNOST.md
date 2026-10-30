@@ -98,7 +98,11 @@ V2 (`api.tripo3d.ai/v2/openapi`) отключается 31.10.2026 16:00 UTC. V3
 (общий для V2 и V3), многовидовая — `POST /v3/generation/multiview-to-model`, одно поле `input` (task_id, file_token
 или URL), `model_version`/`model` обязателен (с 08.2026 есть `P2-20260801`). В сеть окружения нужны: `openapi.tripo3d.com`,
 `developers.tripo3d.com` (документация) и домен файлов результата (под `tripo3d.com`) — лучше `*.tripo3d.com`.
-Ключ — секрет окружения `TRIPO_API_KEY`. Источник: [v2 → v3 Migration Guide](https://developers.tripo3d.com/en/docs/migration-v2-to-v3).
+Ключ — секрет окружения `TRIPO_API_KEY`.
+**Важно (30.10, 401 на openapi.tripo3d.com):** ключ работает только в своём регионе. `tripo3d.com` — сайт для Китая,
+`tripo3d.ai` — международный (developers.tripo3d.ai, там у Александра аккаунт). Значит, запросы — на международный
+хост V3 под `tripo3d.ai` (проверить по developers.tripo3d.ai/ru/docs/quick-start: скорее всего `openapi.tripo3d.ai/v3`
+или `api.tripo3d.ai/v3`), секрет Bearer — на `*.tripo3d.ai`, в сеть — `*.tripo3d.ai`. Источник: [v2 → v3 Migration Guide](https://developers.tripo3d.com/en/docs/migration-v2-to-v3).
 
 ## 7. Что нужно от Александра
 1. Выбор: (а) ждать бесплатную квоту (каждый день ~1 прогон), (б) HF PRO $9/мес, (в) ключ fal.ai для Tripo Multiview
