@@ -51,12 +51,14 @@
             </intent-filter>
         </activity>
 
-        <!-- 2.8.1: «Плюс · Чат» — отдельное окно (своя задача) с чатом всех площадок; есть и в библиотеке приложений -->
+        <!-- 2.8.1: «Плюс · Чат» — отдельное окно (своя задача) с чатом всех площадок; есть и в библиотеке приложений.
+             2.8.3: тема прозрачная — фон рисует само окно, «◐» его убирает -->
         <activity
             android:name=".ChatOkno"
             android:exported="true"
             android:label="Плюс · Чат"
             android:taskAffinity="com.questclaude.bridge.chat"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

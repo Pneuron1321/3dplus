@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -11,6 +12,7 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
+import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
@@ -78,53 +80,72 @@ object ChatLenta {
 
 /**
  * Окно «Плюс · Чат» — отдельное окно приложения (своя задача, как окно моста): чат всех площадок крупно, новые
- * внизу; прокрутил вверх — лента не дёргается, пока не вернёшься вниз. «A+ / A−» — размер букв (запоминается).
+ * внизу; прокрутил вверх — лента не дёргается, пока не вернёшься вниз.
+ * 2.8.3 (Александр 03.11): без слов — сверху только три точки площадок (красная YouTube, зелёная Kick, фиолетовая
+ * Twitch), маленькие «−» и «+» (размер букв, запоминается) и «◐» — прозрачное окно: видно только сообщения и точки
+ * (запоминается; если шлем не умеет прозрачные окна — будет просто тёмное). Сообщение — точка площадки, ник, текст.
  */
 class ChatOkno : Activity() {
     private val ui = Handler(Looper.getMainLooper())
+    private lateinit var koren: LinearLayout
     private lateinit var tekst: TextView
     private lateinit var skrol: ScrollView
-    private lateinit var pusto: TextView
+    private lateinit var knopki: List<Button>
     private var versiya = -1L
     private var razmer = 22f
+    private var prozrachno = false
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         val pref = getSharedPreferences("chat_okno", Context.MODE_PRIVATE)
         razmer = pref.getFloat("razmer", 22f)
+        prozrachno = pref.getBoolean("prozrachno", false)
+        window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         tekst = TextView(this).apply {
-            textSize = razmer; setTextColor(Color.WHITE); setLineSpacing(0f, 1.15f); setPadding(24, 12, 24, 24)
-        }
-        pusto = TextView(this).apply {
-            textSize = 18f; setTextColor(Color.GRAY); setPadding(24, 24, 24, 0)
-            text = "Сообщений пока нет. Чат Twitch, Kick и YouTube появится здесь сам — уши Плюса шлют его в мост."
+            textSize = razmer; setTextColor(Color.WHITE); setLineSpacing(0f, 1.15f); setPadding(20, 4, 20, 20)
         }
         skrol = ScrollView(this).apply { addView(tekst) }
-        fun knopka(t: String, d: Float) = Button(this).apply {
-            text = t; textSize = 18f
-            setOnClickListener {
-                razmer = (razmer + d).coerceIn(14f, 40f)
-                tekst.textSize = razmer
-                pref.edit().putFloat("razmer", razmer).apply()
-            }
+        fun knopka(t: String, f: () -> Unit) = Button(this).apply {
+            text = t; textSize = 14f; minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
+            setPadding(18, 4, 18, 4)
+            setOnClickListener { f() }
         }
+        fun shrift(d: Float) {
+            razmer = (razmer + d).coerceIn(14f, 40f)
+            tekst.textSize = razmer
+            pref.edit().putFloat("razmer", razmer).apply()
+        }
+        knopki = listOf(knopka("−") { shrift(-2f) }, knopka("+") { shrift(2f) }, knopka("◐") {
+            prozrachno = !prozrachno
+            pref.edit().putBoolean("prozrachno", prozrachno).apply()
+            vid()
+        })
         val verh = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(16, 8, 16, 0)
-            addView(TextView(this@ChatOkno).apply {
-                text = "💬 Чат"; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(20, 6, 8, 0)
+            for (pl in listOf("yt", "kick", "tw")) addView(TextView(this@ChatOkno).apply {
+                text = "●"; textSize = 18f; setTextColor(ChatLenta.METKA[pl]?.second ?: Color.LTGRAY); setPadding(0, 0, 10, 0)
             })
-            addView(knopka("A−", -2f))
-            addView(knopka("A+", 2f))
+            addView(View(this@ChatOkno), LinearLayout.LayoutParams(0, 1, 1f))
+            for (k in knopki) addView(k)
         }
-        setContentView(LinearLayout(this).apply {
+        koren = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF15161A.toInt())
             addView(verh)
-            addView(pusto)
             addView(skrol, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        })
+        }
+        setContentView(koren)
+        vid()
+    }
+
+    /** Тёмное окно или прозрачное (только сообщения с тенью и точки). */
+    private fun vid() {
+        koren.setBackgroundColor(if (prozrachno) Color.TRANSPARENT else 0xFF15161A.toInt())
+        tekst.setShadowLayer(if (prozrachno) 6f else 0f, 0f, 2f, Color.BLACK)
+        for (k in knopki) k.alpha = if (prozrachno) 0.45f else 1f
+        versiya = -1L
+        narisovat()
     }
 
     override fun onResume() {
@@ -149,15 +170,11 @@ class ChatOkno : Activity() {
         if (v == versiya) return
         versiya = v
         val ss = ChatLenta.vse()
-        pusto.visibility = if (ss.isEmpty()) View.VISIBLE else View.GONE
         val vnizu = skrol.getChildAt(0).let { it.bottom - (skrol.height + skrol.scrollY) } < 80
         val sb = SpannableStringBuilder()
-        val chasy = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT)
         for (s in ss) {
             if (sb.isNotEmpty()) sb.append('\n')
-            kusok(sb, chasy.format(s.vremya) + " ", 0xFF8A8D94.toInt())
-            val (imya, cvet) = ChatLenta.METKA[s.pl] ?: (s.pl to Color.LTGRAY)
-            kusok(sb, "$imya ", cvet)
+            kusok(sb, "● ", ChatLenta.METKA[s.pl]?.second ?: Color.LTGRAY)
             kusok(sb, s.kto, s.cvet, zhirno = true)
             kusok(sb, ": " + s.tekst, if (s.vazhno) 0xFFFFD54F.toInt() else Color.WHITE)
         }
