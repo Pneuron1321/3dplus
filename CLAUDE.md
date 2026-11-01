@@ -17,8 +17,11 @@
   и напоминает через 90 с; своё окно камеры (Okno «svoe»: края в % кадра; `kamera rastyani|szhat|sdvin vlevo|vpravo|vverh|vniz N`,
   `kamera ramka Л В П Н`, bolshe/menshe — от центра; картинка с обрезкой без искажения). 2.8.0: шторка ЭФИР (галочки Twitch/
   Kick/YouTube), клип эфира со звуком, камеры — без. Тесты моста 301/301.
-- **2.8.2 ГОТОВ К СБОРКЕ, ждёт «одобряю»** (quest-claude 787adb2, docs/SOSTOYANIE.md «2.8.2»): «как у Speed» п. 1, 2, 3, 5 —
-  счётчики зрителей и фолловеров справа вверху (Schet, /schet/upr от zriteli), ник внизу, строка доната (DonatStroka, /donat от donaty).
+- **2.8.2 СОБРАНА 01.11** (зеркало 3dplus 759b8ea, APK app-2.8.2; строки — quest-claude docs/SOSTOYANIE.md «2.8.2 СОБРАН»):
+  «как у Speed» — счётчики зрителей/фолловеров справа вверху (Schet, /schet/upr от zriteli), низ: TW KICK YT IG TIKTOK + ник по
+  очереди со ссылкой доната (`zriteli donat ССЫЛКА`; уши отвечают на «!donate»), строка доната со звуком «Oh, Lord!» (DonatStroka,
+  /donat от donaty), Плюс перед «спасибо» за донат — «Ого, нихуя себе!» (`donaty vosklicanie`). Ждём проверку в шлеме и точную
+  ссылку доната (предположена streamelements.com/3xsks_fu_gun/tip); ник IG/TikTok, возможно, 3xsks_fu_gun_ttv — спросить.
 - **Скрипты шлема (shlem2 в том же 81ab88d):** Kick — новый ключ Pusher (спрашиваем у web.kick.com/api/v1/realtime/connection,
   запасной 34bf7a0ff419a2a775b9/us2; старый 32cbd69e… отклонён), ник с «_» → в адресе «-»; Плюс начинает ответ после 1 с тишины
   (PLUS_PERED), после перебивания продолжает через 2 с (PLUS_TISHINA); замолкание при перебивании работает (Александр проверил).
