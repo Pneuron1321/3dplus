@@ -21,7 +21,7 @@
   «как у Speed» — счётчики зрителей/фолловеров справа вверху (Schet, /schet/upr от zriteli), низ: TW KICK YT IG TIKTOK + ник по
   очереди со ссылкой доната (`zriteli donat ССЫЛКА`; уши отвечают на «!donate»), строка доната со звуком «Oh, Lord!» (DonatStroka,
   /donat от donaty), Плюс перед «спасибо» за донат — «Ого, нихуя себе!» (`donaty vosklicanie`). Ждём проверку в шлеме и точную
-  ссылку доната (предположена streamelements.com/3xsks_fu_gun/tip); ник IG/TikTok, возможно, 3xsks_fu_gun_ttv — спросить.
+  ссылку доната (предположена streamelements.com/3xsks_fu_gun/tip); ник внизу один «3xsks_fu_gun» — Александр 03.11: у IG «_ttv», у TikTok «…corn» в конце, «пусть будет как есть».
 - **Скрипты шлема (shlem2 в том же 81ab88d):** Kick — новый ключ Pusher (спрашиваем у web.kick.com/api/v1/realtime/connection,
   запасной 34bf7a0ff419a2a775b9/us2; старый 32cbd69e… отклонён), ник с «_» → в адресе «-»; Плюс начинает ответ после 1 с тишины
   (PLUS_PERED), после перебивания продолжает через 2 с (PLUS_TISHINA); замолкание при перебивании работает (Александр проверил).
