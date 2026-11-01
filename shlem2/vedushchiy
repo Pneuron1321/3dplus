@@ -60,6 +60,7 @@ import math
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -1998,14 +1999,16 @@ def lenta(pid=None, shag=1.0):
             return True
 
     def pechat(stroki):
+        # 03.11 (Александр: «реплики и перевод занимают пол-окна»): каждая — одной строкой по ширине полосы, без
+        # переноса (длинная — с «…»), перевод — тусклее; заголовка нет
+        shir = max(20, shutil.get_terminal_size((80, 6)).columns - 1)
         for l in stroki:
-            if l.startswith(PEREVOD_STROKA):
-                print('\033[36m' + l + '\033[0m')
-            elif l.strip():
-                print('\033[1;95m' + l + '\033[0m')
+            if not l.strip():
+                continue
+            l = l if len(l) <= shir else l[:shir - 1] + '…'
+            print(('\033[2;36m' if l.startswith(PEREVOD_STROKA) else '\033[95m') + l + '\033[0m')
         sys.stdout.flush()
 
-    print('\033[2mСоведущая — реплики и перевод:\033[0m')
     pechat(hvost(LOG, 4))
     try:
         poz = os.path.getsize(LOG)
