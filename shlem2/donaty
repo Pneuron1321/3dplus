@@ -14,6 +14,7 @@
 Текст зрителя видит только отдельный Haiku без инструментов (`claude -p --tools ""`), не Плюс.
   donaty                      — что пришло за вечер и кто топ
   donaty porog 0.5            — с какой суммы ($) читать сообщение и отвечать голосом
+  donaty vosklicanie ТЕКСТ    — восклицание перед «спасибо» за донат (vykl — без него; обычно «Ого, нихуя себе!»)
   donaty top                  — кто топ-донатор (и тройка лучших)
   donaty top vsyo | vecher    — топ за всё время (обычно) / только за этот вечер
   donaty top skryt | pokazat  — убрать / вернуть плашку топ-донатора
@@ -47,6 +48,10 @@ SE_FOLLOW_POSL_YT = os.environ.get('DONATY_SE_FOLLOW_POSL_YT', '/root/.donaty-se
 ZVUK_SEK = float(os.environ.get('DONATY_ZVUK_SEK', 3.5))       # звук плашки фоловера в мосте (assets/zvuki/folover.mp3)
 SE_URL = os.environ.get('DONATY_SE_URL', 'https://api.streamelements.com/kappa/v2')
 POROG = os.environ.get('DONATY_POROG', '/root/.donaty-porog')
+# 2.8.2 (Александр 01.11: «пусть Плюс говорит спасибо так, как на видео»): перед «спасибо» за деньги — восклицание из его
+# ролика. Своё — `donaty vosklicanie ТЕКСТ`, убрать — `donaty vosklicanie vykl`.
+VOSKLICANIE = os.environ.get('DONATY_VOSKLICANIE', '/root/.donaty-vosklicanie')
+VOSKLICANIE_SVOE = 'Ого, нихуя себе!'
 VYZOVY = os.environ.get('DONATY_VYZOVY', '/root/.vedushchiy/vyzovy-donat.jsonl')
 LOCK = os.environ.get('DONATY_LOCK', '/tmp/donaty.lock')
 KNIGA = os.environ.get('DONATY_KNIGA', '/root/.donaty/donatory.json')     # топ-донатор: кто сколько, в $
@@ -292,6 +297,32 @@ def blagodaril_follow(kto, pl):
     return bylo
 
 
+def vosklicanie():
+    """Восклицание перед «спасибо» за донат: своё из файла, «-» — без него, файла нет — из ролика Александра."""
+    try:
+        t = open(VOSKLICANIE).read().strip()
+    except OSError:
+        return VOSKLICANIE_SVOE
+    return '' if t == '-' else t
+
+
+def kak_summa(summa, valyuta):
+    """«$5», «€12.5», «320 UAH» — для строки доната в эфире."""
+    v = ('%.2f' % summa).rstrip('0').rstrip('.')
+    valyuta = {'USD': '$', 'EUR': '€', 'GBP': '£'}.get((valyuta or '').upper(), valyuta)
+    return (valyuta + v) if len(valyuta or '') <= 1 else '%s %s' % (v, valyuta)
+
+
+def stroka_v_efir(kto, skolko):
+    """2.8.2: маленькая строка «Rex donated $5!» слева вверху эфира (мост /donat); эфира нет — мост пропустит."""
+    try:
+        get('/donat?' + urllib.parse.urlencode({'kto': 'Anonymous' if kto.lower() in ANONIM else kto, 'skolko': skolko},
+                                                quote_via=urllib.parse.quote))
+        return True
+    except Exception:
+        return False
+
+
 def obrabotat(d):
     """Один донат или событие: цель, спасибо и ответ (только в эфир), вызов — в очередь соведущего."""
     ist, kto = d.get('istochnik', '?'), re.sub(r'[^\w-]', '', d.get('kto') or '?')[:25] or '?'
@@ -305,6 +336,7 @@ def obrabotat(d):
             sohranit_knigu(k)
         obnovit_top()
         summa_t = ('%d bits' % d['bits']) if ist == 'bits' else '%s %s' % (('%.2f' % summa).rstrip('0').rstrip('.'), valyuta)
+        stroka_v_efir(kto, ('%d bits' % d['bits']) if ist == 'bits' else kak_summa(summa, valyuta))
         if v_dollarah(summa, valyuta) >= porog():
             soobshchenie = chistyy(d.get('tekst', ''))
             o = otvet_haiku(kto, summa_t, soobshchenie)
@@ -319,6 +351,8 @@ def obrabotat(d):
                 zapis['vyzov'] = ve or vr
         else:
             rech = 'Спасибо, %s!' % kto
+        if vosklicanie():
+            rech = vosklicanie() + ' ' + rech
     elif ist in ('sub', 'resub'):
         rech = 'Спасибо за подписку, %s!' % kto
     elif ist in ('subgift', 'submysterygift'):
@@ -528,6 +562,11 @@ def main(a):
             return 1
         open(POROG, 'w').write(str(v))
         print('Отвечаю голосом и читаю сообщение с $%s.' % a[1])
+        return 0
+    if a and a[0] == 'vosklicanie' and len(a) >= 2:          # 2.8.2: что Плюс восклицает перед «спасибо» за донат
+        t = ' '.join(a[1:]).strip()[:80]
+        open(VOSKLICANIE, 'w').write('-' if t == 'vykl' else t)
+        print('Перед «спасибо» за донат: ' + ('ничего' if t == 'vykl' else '«%s»' % t))
         return 0
     if a and a[0] == 'top':
         if len(a) == 2 and a[1] in ('vsyo', 'vecher'):

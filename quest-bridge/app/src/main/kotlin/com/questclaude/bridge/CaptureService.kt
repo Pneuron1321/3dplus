@@ -71,7 +71,10 @@ class CaptureService : Service() {
         private const val POKAZ = "nalozhenie"     // плашки в эфире: «lico nalet radar», 1/0
         private const val CEL = "donat-cel"        // цель доната: сумма, собрано, валюта, показ, на что
         /** Первая цель (Александр 08.10): $700 на Meta Quest 3 для отца. */
+        /** Ник внизу кадра с первого запуска — как на всех площадках (Александр 30.10). */
+        private const val SCHET_PERVYJ = "nik\t3xsks_fu_gun"
         private const val CEL_PERVAYA = "700.0\t0.0\t$\t1\tMeta Quest 3 for Dad"
+        private const val SCHET = "schet"           // 2.8.2: фолловеры по площадкам, ник внизу, что показывать
         private const val TOP = "donat-top"        // топ-донатор: сколько, валюта, показ, ник
         private const val CHAT = "chat-pokaz"      // чат Twitch в кадре: 1 — показывать, 0 — нет
         private const val SEVER = "kompas-sever"   // поправка компаса («север здесь»), если компас настоящий
@@ -150,6 +153,7 @@ class CaptureService : Service() {
 
     private lateinit var nalet: Nalet
     private lateinit var cel: Cel
+    private lateinit var schet: Schet
     private lateinit var top: Top
     private lateinit var chat: Chat
     /** Субтитры и итоги вечера — живут со службой, рисует Nalozhenie во время эфира. */
@@ -255,6 +259,9 @@ class CaptureService : Service() {
         Hub.klipKlip = { klipKlip() }
         Hub.klipUpr = { q -> klipUpr(q) }
         Hub.opoveshchenie = Opoveshchenie(this) { razvilka }
+        Hub.donatStroka = DonatStroka(this) { razvilka }
+        schet = Schet({ try { File(filesDir, SCHET).readText() } catch (e: Exception) { SCHET_PERVYJ } },
+            { t -> try { File(filesDir, SCHET).writeText(t) } catch (e: Exception) { } })
         nalet = Nalet({ try { File(filesDir, NALET).readText().trim().toLong() } catch (e: Exception) { 0L } },
             { sek -> try { File(filesDir, NALET).writeText(sek.toString()) } catch (e: Exception) { } })
         pokaz = try {
@@ -463,6 +470,7 @@ class CaptureService : Service() {
         override fun itogi(q: Map<String, String>?) = if (q == null) itogi.status() else itogi.upr(q)
         override fun igra(q: Map<String, String>?) = if (q == null) igra.status() else igra.upr(q)
         override fun top(q: Map<String, String>?) = if (q == null) top.status() else top.upr(q)
+        override fun schet(q: Map<String, String>?) = if (q == null) schet.status() else schet.upr(q)
         override fun chat(q: Map<String, String>?): String = chatOtvet(if (q == null) chat.status() else chat.upr(q))
         override fun chatPachka(qs: List<Map<String, String>>): String = chatOtvet(chat.pachka(qs))
 
@@ -576,7 +584,7 @@ class CaptureService : Service() {
         Hub.rechi.efir = true
         val k = kompas ?: Kompas(this).also { kompas = it }
         nalozhenie = Nalozhenie(this, nalet, k, rz, { efir }, { pokaz }, titry, cel, itogi, igra, top, chat,
-            glaza = { f -> reader?.surface?.let { s -> razvilka?.fps(s, f) } }, gosti = gosti).also { it.start() }
+            glaza = { f -> reader?.surface?.let { s -> razvilka?.fps(s, f) } }, gosti = gosti, schet = schet).also { it.start() }
         if (k.tip == "absolute") k.popravka = try { File(filesDir, SEVER).readText().trim().toFloat() } catch (e: Exception) { 0f }
         notifyEfir(vybor, opts)
         return e.status(kluchiJson())
@@ -747,6 +755,7 @@ class CaptureService : Service() {
         Hub.klipKlip = null
         Hub.klipUpr = null
         Hub.opoveshchenie = null
+        Hub.donatStroka = null
         gosti?.let { it.otklyuchit(); it.stop(zabyt = false) }
         gosti = null
         Hub.nalet = null

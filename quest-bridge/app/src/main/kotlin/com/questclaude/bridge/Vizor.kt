@@ -34,6 +34,8 @@ object Vizor {
     const val TWITCH = 0xFF9146FF.toInt()
     const val KICK = 0xFF53FC18.toInt()
     const val YOUTUBE = 0xFFFF0033.toInt()
+    const val INSTAGRAM = 0xFFE1306C.toInt()      // 2.8.2: значки внизу кадра
+    const val TIKTOK = 0xFF25F4EE.toInt()
 
     // ---------- шрифты (assets/shrifty, OFL — лицензии рядом) ----------
     const val SHRIFT_ZAGOLOVKOV = "shrifty/Unbounded.ttf"
@@ -80,10 +82,15 @@ object Vizor {
     const val NALET = 28f
     const val ZAGOLOVOK_SCENY = 104f
     const val TAJMER = 64f
+    const val SCHET = 24f            // 2.8.2: числа счётчиков (Unbounded)
+    const val NIK_NIZ = 22f          // 2.8.2: ник внизу кадра (Unbounded)
+    const val DONAT_IMYA = 22f       // 2.8.2: ник в строке доната (Unbounded)
+    const val DONAT_TEKST = 22f      // 2.8.2: «donated $5!» (Unbounded, мелко — как у Speed)
     val KEGLI: Map<String, Pair<Float, Boolean>> = mapOf(
         "tekst" to (TEKST to false), "titry" to (TEKST_TITROV to false), "nalet" to (NALET to false),
         "imya_topa" to (IMYA_TOPA to true), "summa_topa" to (SUMMA_TOPA to true), "metka" to (METKA to true),
-        "nik" to (NIK to true),
+        "nik" to (NIK to true), "schet" to (SCHET to true), "nik_niz" to (NIK_NIZ to true),
+        "donat_imya" to (DONAT_IMYA to true), "donat_tekst" to (DONAT_TEKST to true),
         "zagolovok_sceny" to (ZAGOLOVOK_SCENY to true), "tajmer" to (TAJMER to true),
     )
 
@@ -182,6 +189,24 @@ object Vizor {
     const val CH = 600
     val CHAT_VERH = NALET_PILYULYA.b + ZAZOR
 
+    // слой "sv" — счётчики (2.8.2): правый столбец сразу под налётом, чат — ниже них
+    const val SCHET_STROKA = 36f
+    fun schetH(strok: Int) = POLE + SCHET_STROKA * strok.coerceIn(1, 2) + 8f
+    const val SV_W = CW
+    val SV_H = schetH(2).toInt()
+    val SCHET_VERH = CHAT_VERH
+
+    // слой "nk" — ник внизу кадра (2.8.2): под субтитрами, по их центру; со ссылкой доната — по очереди: ник [NK_NIK_MS],
+    // ссылка [NK_DONAT_MS]
+    const val NK_NIK_MS = 20_000L
+    const val NK_DONAT_MS = 10_000L
+    const val NK_W = 900
+    const val NK_H = 36
+    val NK_VERH = H - NK_H - 2f
+
+    // слой "dn" — строка доната (2.8.2): слева вверху, под карточкой топа (её нет — на её месте)
+    val DN_VERH = LV.b + ZAZOR
+
     // слой "nc" — субтитры: низ по центру, не выше нижней границы центра
     const val TW = 1030                 // уже прежних 1100: слева Плюс
     const val TH = 172
@@ -235,6 +260,8 @@ object Vizor {
     fun ploshchadka(pl: String): Pair<String, Int> = when (pl) {
         "kick" -> "KICK" to KICK
         "yt" -> "YT" to YOUTUBE
+        "ig" -> "IG" to INSTAGRAM
+        "tt" -> "TIKTOK" to TIKTOK
         else -> "TW" to TWITCH
     }
 }

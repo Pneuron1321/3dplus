@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.RadialGradient
 import android.graphics.RectF
@@ -226,6 +227,93 @@ class VizorPlashki(
             n++
         }
         return n
+    }
+
+    // ---------- счётчики (правый столбец под налётом) и ник внизу (2.8.2) ----------
+
+    private val schetK = kist.kist(kist.zagolovki, Vizor.SCHET)
+    private val serdceP = Path()
+    private val krug = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val nikNizK = kist.kist(kist.zagolovki, Vizor.NIK_NIZ)
+    private val plNizK = kist.kist(kist.zagolovki, Vizor.ZNACHOK + 2f, Color.WHITE)
+
+    /**
+     * Карточка счётчиков «как у Speed»: красная точка и сколько смотрят (все площадки вместе), ниже фиолетовое
+     * сердце и сколько фолловеров; справа в строке — цветные точки площадок, чьи числа сложены.
+     */
+    fun schet(b: Bitmap, s: Schet) {
+        val c = Canvas(b)
+        c.drawColor(0, PorterDuff.Mode.CLEAR)
+        val ryady = mutableListOf<Pair<Boolean, Map<String, Long>>>()
+        if (s.zrVidny) ryady += true to s.zriteli()
+        if (s.podVidny) ryady += false to s.podpischiki()
+        if (ryady.isEmpty()) return
+        val w = b.width.toFloat()
+        val p = Vizor.POLE
+        kist.karta(c, RectF(0f, 0f, w, Vizor.schetH(ryady.size)))
+        var y = p
+        for ((zr, m) in ryady) {
+            val cy = y + Vizor.SCHET_STROKA / 2f
+            if (zr) { krug.color = Vizor.VIZOR; c.drawCircle(p + 10f, cy, 7f, krug) }
+            else { krug.color = Vizor.FIOLET; serdce(c, p + 10f, cy, 8f) }
+            val chislo = Schet.krasivo(m.values.sum())
+            schetK.color = if (zr) Vizor.LED else Vizor.ZOLOTO
+            // точки площадок справа — если число влезает и с ними (число не режем никогда)
+            if (p + 26f + schetK.measureText(chislo) + 8f + 14f * m.size <= w - p) {
+                var tx = w - p - 6f
+                for (pl in Schet.PLOSHCHADKI.reversed()) if (pl in m) {
+                    krug.color = Vizor.ploshchadka(pl).second
+                    c.drawCircle(tx, cy, 5f, krug)
+                    tx -= 14f
+                }
+            }
+            c.drawText(chislo, p + 26f, cy + 9f, schetK)
+            y += Vizor.SCHET_STROKA
+        }
+    }
+
+    /** Сердце (в шрифтах визора знака ♥ нет): два круга и треугольник, цвет — krug. */
+    private fun serdce(c: Canvas, cx: Float, cy: Float, r: Float) {
+        c.drawCircle(cx - r / 2, cy - r / 4, r / 2 * 1.08f, krug)
+        c.drawCircle(cx + r / 2, cy - r / 4, r / 2 * 1.08f, krug)
+        serdceP.reset()
+        serdceP.moveTo(cx - r * 1.02f, cy - r / 8); serdceP.lineTo(cx + r * 1.02f, cy - r / 8); serdceP.lineTo(cx, cy + r)
+        serdceP.close()
+        c.drawPath(serdceP, krug)
+    }
+
+    /**
+     * Полоска внизу кадра — тонкой пилюлей по центру картинки слоя: [chto] "nik" — значки TW KICK YT IG TIKTOK и ник,
+     * "donat" — золотой значок DONATE и ссылка доната.
+     */
+    fun niki(b: Bitmap, chto: String, nik: String, ssylka: String) {
+        val c = Canvas(b)
+        c.drawColor(0, PorterDuff.Mode.CLEAR)
+        val h = b.height.toFloat()
+        val donat = chto == "donat"
+        val zn = if (donat) listOf("DONATE" to Vizor.ZOLOTO) else Schet.ZNACHKI.map { Vizor.ploshchadka(it) }
+        if (donat) return nizPilyulya(c, b, h, zn, ssylka)
+        nizPilyulya(c, b, h, zn, nik)
+    }
+
+    private fun nizPilyulya(c: Canvas, b: Bitmap, h: Float, zn: List<Pair<String, Int>>, nik: String) {
+        val zw = zn.map { plNizK.measureText(it.first) + 12f }
+        val nw = nikNizK.measureText(nik)
+        val w = minOf(b.width - 8f, 14f + zw.sum() + 6f * zn.size + 8f + nw + 16f)
+        val x0 = (b.width - w) / 2f
+        val r = RectF(x0, 4f, x0 + w, h - 4f)
+        kist.karta(c, r, radius = r.height() / 2, ten = false)
+        var x = x0 + 14f
+        val zh = 22f
+        val zy = r.centerY() - zh / 2
+        zn.forEachIndexed { i, (pl, cvet) ->
+            plPod.color = cvet
+            c.drawRoundRect(RectF(x, zy, x + zw[i], zy + zh), 5f, 5f, plPod)
+            plNizK.color = if (cvet == Vizor.KICK || cvet == Vizor.TIKTOK || cvet == Vizor.ZOLOTO) Color.BLACK else Color.WHITE
+            c.drawText(pl, x + 6f, zy + 16f, plNizK)
+            x += zw[i] + 6f
+        }
+        c.drawText(kist.vlezet(nikNizK, nik, r.right - x - 16f), x + 8f, r.centerY() + 7f, nikNizK)
     }
 
     // ---------- низ по центру: субтитры ----------

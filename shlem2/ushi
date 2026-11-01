@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import queue
+import random
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1403,6 +1404,37 @@ def dlya_chteniya(tekst, bity=False):
     return tekst
 
 
+# 2.8.2 (Александр 01.11): зритель спрашивает, куда донатить, — Плюс говорит, где ссылка (внизу кадра и в описании).
+# Ссылку кладёт `zriteli donat ССЫЛКА`; нет ссылки — не отвечаем. Не чаще раза в DONAT_OTVET_RAZ с.
+DONAT_SSYLKA = os.environ.get('USHI_DONAT_SSYLKA', '/root/.zriteli/donat-ssylka')
+DONAT_OTVET_RAZ = 120
+PRO_DONAT = re.compile(r'^\s*!(donate|donat|tip|tips|донат)\b|'
+                       r'\b(how|where)\b.{0,25}\b(donate|donation|tip)|\b(donat(e|ion)|tip)\s*(link|page)|'
+                       r'(куда|как|где).{0,20}донат|ссылк.{0,15}донат|донат.{0,15}ссылк', re.I)
+DONAT_FRAZY = ['Want to support the stream? The donation link is at the bottom of the screen and in the description. '
+               'Thank you!',
+               'The donate link is right at the bottom of the stream and in the description. Thanks for the support!']
+_donat_otvet = [0.0]
+
+
+def pro_donat(tekst):
+    return bool(PRO_DONAT.search(tekst or ''))
+
+
+def otvet_pro_donat(now=None):
+    """Сказать, где ссылка доната. True — сказали (или недавно уже сказали): само сообщение не читаем."""
+    now = now or time.time()
+    try:
+        if not open(DONAT_SSYLKA).read().strip():
+            return False
+    except OSError:
+        return False
+    if now - _donat_otvet[0] >= DONAT_OTVET_RAZ:
+        _donat_otvet[0] = now
+        say(random.choice(DONAT_FRAZY))
+    return True
+
+
 class Peredacha:
     """Чат вслух: сообщение зрителя — голосу дословно, вне очереди (12.10). Своим потоком."""
 
@@ -1428,6 +1460,8 @@ class Peredacha:
         if tags.get('emote-only') == '1':
             return 'смайлы'
         t = dlya_chteniya(tekst, bity=bool(tags.get('bits')))
+        if pro_donat(tekst) and otvet_pro_donat(now):        # 2.8.2: «куда донатить?» — Плюс отвечает сам
+            return 'про донат'
         if not t or t.startswith('!') or not re.search(r'\w', t):
             return 'команда или пусто'
         if SSYLKA.search(t):

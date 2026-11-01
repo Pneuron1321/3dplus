@@ -13,7 +13,8 @@ import java.io.File
 class VizVaryant(val imya: String, val vid: Okno.Vid, val muzyka: Boolean = true, val sotnya: Boolean = false,
                  val niz: List<Triple<String, String, String>> = emptyList(), val lico: String = "plus",
                  val sost: String = "obychno", val morgaet: Boolean = false, val t: Long = 0L,
-                 val prisedT: Long = -1L, val ulybka: Boolean = false, val gostey: Int = 0)
+                 val prisedT: Long = -1L, val ulybka: Boolean = false, val gostey: Int = 0,
+                 val schet: Boolean = false)
 
 fun kadryVizor(out: File) {
     val ya = Okno.Vid("ugol", "pn", 0.25f, 90, true, 4f)                // айфон стоя, снизу вплотную (как у Александра)
@@ -24,6 +25,9 @@ fun kadryVizor(out: File) {
             Triple("ya", "Держись, сейчас уйдём через мост!", "Hold on, we're losing them over the bridge!"))),
         // 2.7.9: Плюс внизу слева, над ним — плитки гостей (места — Raskladka.plitki; рамки и имена — в gosti-maket)
         VizVaryant("vizor-gosti-2", ya, gostey = 2),
+        // 2.8.2: счётчики зрителей и фолловеров (под налётом), ник внизу, строка доната (под карточкой топа)
+        VizVaryant("vizor-schet", ya, schet = true, niz = listOf(
+            Triple("plus", "Rex, спасибо за донат!", "Rex, thanks for the donation!"))),
         VizVaryant("vizor-gosti-3", ya, gostey = 3),
         VizVaryant("vizor-efir-bokom", bokom, muzyka = false, sotnya = true, niz = listOf(
             Triple("ya", "Макс, прикрой слева, я захожу на крышу, а ты держи вертолёт подальше от нас",
@@ -92,7 +96,12 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     val kameraVerhGl = r[1] + r[3] + maxOf(2, H / 360)
     val zazor = Vizor.ZAZOR.toInt()
     val chatNiz = H - kameraVerhGl - zazor                                                      // музыка — слева под Плюсом
-    val chatVerh = Vizor.CHAT_VERH.toInt()
+    val schet = Schet({ null }, { }).apply {
+        upr(mapOf("zr_tw" to "37", "zr_kick" to "12", "zr_yt" to "5", "pod_tw" to "1284", "pod_kick" to "310", "pod_yt" to "96",
+            "nik" to "3xsks_fu_gun", "ssylka" to "streamelements.com/3xsks_fu_gun/tip"))
+    }
+    val svH = if (v.schet) Vizor.schetH(2) + Vizor.ZAZOR else 0f
+    val chatVerh = (Vizor.CHAT_VERH + svH).toInt()
     s.rz.chatMesto = (chatNiz - chatVerh).coerceIn(0, Vizor.CH)
 
     // ---------- плашки: настоящий код ----------
@@ -149,6 +158,23 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
         kc.restore()
     }
     if (v.muzyka) kc.drawBitmap(mzB, Vizor.MUZ.l, Vizor.MUZ.t, null)                   // mz
+    if (v.schet) {
+        val svB = ABitmap.createBitmap(Vizor.SV_W, Vizor.schetH(2).toInt(), ABitmap.Config.ARGB_8888)
+        viz.schet(svB, schet)
+        kc.drawBitmap(svB, Vizor.STOLB_X, Vizor.SCHET_VERH, null)                              // sv
+        val nkB = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)
+        viz.niki(nkB, "nik", schet.nik, schet.ssylka)
+        val tl = Vizor.titryX(minOf(Vizor.PRAVO, r[0].toFloat()))
+        kc.drawBitmap(nkB, tl + Vizor.TW / 2f - Vizor.NK_W / 2f, Vizor.NK_VERH, null)          // nk
+        val dnB = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)       // nk во вторую очередь — ссылка
+        viz.niki(dnB, "donat", schet.nik, schet.ssylka)
+        val kd = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)
+        ACanvas(kd).apply { drawColor(0xFF2A2F3A.toInt()); drawBitmap(dnB, 0f, 0f, null) }
+        File(dir.parentFile, "niz-donat.png").writeBytes(kd.png())
+        val d = DonatStroka(AContext()) { null }
+        zvat(d, "narisovat", "kotlet_42", "€25", 0f, 1f)
+        kc.drawBitmap(vzyat<ABitmap>(d, "bmp"), Vizor.LEVO - 4f, Vizor.DN_VERH, null)          // dn
+    }
     return kadr
 }
 

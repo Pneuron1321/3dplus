@@ -53,6 +53,7 @@ public class Canvas {
     }
     public int save() { return c.save(); }
     public int saveLayer(float l, float t, float r, float b, Paint p) { return c.saveLayer(l, t, r, b, p == null ? null : p.sk()); }
+    public int saveLayerAlpha(float l, float t, float r, float b, int a) { org.jetbrains.skia.Paint p = new org.jetbrains.skia.Paint(); p.setAlpha(a); return c.saveLayer(l, t, r, b, p); }
     public void restore() { c.restore(); }
     public void restoreToCount(int n) { c.restoreToCount(n); }
     public void translate(float dx, float dy) { c.translate(dx, dy); }

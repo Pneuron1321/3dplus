@@ -542,6 +542,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }   // слои гостей: от точки (0; SLOY_Y) 1080p
             "vse" -> { x = 0; y = 0; w = o.w; h = o.h }
             "al" -> { x = (o.w - w) / 2; y = o.h - (Opoveshchenie.VERH * s).toInt() - h }   // 2.7.8: оповещение — сверху по центру
+            "dn" -> { x = m; y = o.h - (Raskladka.VERH * s).toInt() - h }                    // 2.8.2: строка доната — слева под табло
             "mz" -> {                         // музыка: справа над окном камеры (без камеры — над субтитрами)
                 val zazor = (8 * s).toInt()
                 y = kameraVerh(o)?.let { it + zazor } ?: (o.h * 5 / 100 + (Nalozhenie.TH * s).toInt() + zazor)
@@ -585,10 +586,18 @@ class Razvilka(private val w: Int, private val h: Int) {
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
             "al" -> { x = (o.w - w) / 2; y = gl(Opoveshchenie.VERH) }                      // 2.7.8: оповещение — сверху по центру
+            "sv" -> y = gl(Vizor.SCHET_VERH)                                                 // 2.8.2: счётчики — под налётом
+            "nk" -> { x = ((titryLevo(o) + Vizor.TW / 2f - Vizor.NK_W / 2f) * s).toInt(); y = gl(Vizor.NK_VERH) }   // ник — под субтитрами
+            "dn" -> {                                                                        // строка доната — под карточкой топа
+                x = ((Vizor.LEVO - 4f) * s).toInt()
+                y = gl(if (sloi["lv"]?.let { it.w > 0 } == true) Vizor.DN_VERH else Vizor.VERH)
+            }
             "mz" -> { x = (Vizor.MUZ.l * s).toInt(); y = gl(Vizor.MUZ.t) }   // наверху по центру (2.7.9)
             "pc" -> {
                 val zazor = (Vizor.ZAZOR * s).toInt()
-                val verh = o.h - (Vizor.CHAT_VERH * s).toInt()
+                // 2.8.2: под счётчиками, если они есть
+                val sv = sloi["sv"]?.takeIf { it.w > 0 }?.let { (it.h + Vizor.ZAZOR) * s } ?: 0f
+                val verh = o.h - ((Vizor.CHAT_VERH + sv) * s).toInt()
                 val niz = kameraVerh(o)?.let { it + zazor } ?: (o.h - (Vizor.NIZ * s).toInt())   // музыка — не в столбце
                 chatMesto = ((verh - niz) / s).toInt().coerceIn(0, Vizor.CH)
                 if (verh - niz < (60 * s).toInt()) return false

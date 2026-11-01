@@ -40,6 +40,18 @@ APP_TOKEN = os.environ.get('ZR_APP_TOKEN', '/root/.twitch-app-token')         # 
 HELIX = os.environ.get('ZR_HELIX', 'https://api.twitch.tv/helix')
 TOKEN_URL = os.environ.get('ZR_TOKEN_URL', 'https://id.twitch.tv/oauth2/token')
 LOCK = os.environ.get('ZR_LOCK', '/tmp/zriteli.lock')
+# 2.8.2: счётчики в эфире «как у Speed» — зрители и фолловеры всех площадок одним числом (мост /schet/upr)
+KICK_KANAL = os.environ.get('ZR_KICK_KANAL', '/root/.kick-kanal')
+KICK_API = os.environ.get('ZR_KICK_API', 'https://kick.com/api/v2/channels/')
+YT_KANAL = os.environ.get('ZR_YT_KANAL', '/root/.youtube-kanal')
+YT_BAZA = os.environ.get('ZR_YT_BAZA', 'https://www.youtube.com')
+SE_URL = os.environ.get('ZR_SE_URL', 'https://api.streamelements.com/kappa/v2')
+SE_JWT = os.environ.get('ZR_SE_JWT', '/root/.se-jwt')                      # секрет: не печатать
+SE_JWT_YT = os.environ.get('ZR_SE_JWT_YT', '/root/.se-jwt-youtube')        # секрет: не печатать
+BRAUZER = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+           'Accept-Language': 'en-US,en;q=0.9', 'Cookie': 'SOCS=CAI; CONSENT=YES+cb'}
+RAZ_SCHET = 60      # счётчики в эфир — раз в минуту
+DONAT_SSYLKA = os.environ.get('ZR_DONAT_SSYLKA', '/root/.zriteli/donat-ssylka')   # ссылка доната: внизу кадра, уши
 SKAZHI = os.environ.get('ZR_SKAZHI', '/usr/local/bin/skazhi')
 GOLOS_Q = os.environ.get('ZR_GOLOS_Q', '/tmp/golos/q')
 SEK = float(os.environ.get('ZR_SEK', 1))                   # в проверке — доли секунды
@@ -200,6 +212,117 @@ def skolko_smotryat(k):
     return None
 
 
+# ---------- счётчики эфира (2.8.2) ----------
+
+def _json(url, zag=None, timeout=10):
+    with urllib.request.urlopen(urllib.request.Request(url, headers=zag or BRAUZER), timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8', 'replace'))
+
+
+def chislo_yt(t):
+    """«1.2K subscribers», «12,345», «3,4 млн» → число; не число — None."""
+    m = re.search(r'([\d][\d.,\s\u00a0]*)\s*([KkMmКкМм]|тыс|млн)?', t or '')
+    if not m:
+        return None
+    n, suf = m.group(1).replace('\u00a0', '').replace(' ', '').strip(), (m.group(2) or '').lower()
+    if suf:
+        n = n.replace(',', '.')
+        try:
+            return int(float(n) * (1000 if suf in ('k', 'к', 'тыс') else 1_000_000))
+        except ValueError:
+            return None
+    n = re.sub(r'[.,]', '', n)
+    return int(n) if n.isdigit() else None
+
+
+def kick_dannye():
+    """(зрителей сейчас или None — не в эфире, фолловеров или None) с kick.com; канала нет — (None, None)."""
+    try:
+        imya = open(KICK_KANAL).read().split()[0].strip().lower()
+    except (OSError, IndexError):
+        return None, None
+    d = None
+    for i in dict.fromkeys([imya, imya.replace('_', '-')]):
+        try:
+            d = _json(KICK_API + urllib.parse.quote(i), dict(BRAUZER, Accept='application/json'))
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+    if not isinstance(d, dict):
+        return None, None
+    ls = d.get('livestream') or {}
+    zr = ls.get('viewer_count', ls.get('viewers')) if ls.get('is_live', True) else None
+    pod = d.get('followers_count', d.get('followersCount'))
+    return (int(zr) if str(zr).isdigit() else None), (int(pod) if str(pod).isdigit() else None)
+
+
+def yt_dannye():
+    """(зрителей сейчас или None, подписчиков или None) со страницы /live канала YouTube (без ключа)."""
+    try:
+        kanal = open(YT_KANAL).read().split()[0].strip()
+    except (OSError, IndexError):
+        return None, None
+    put = ('/channel/' + kanal) if kanal.startswith('UC') else ('/' + (kanal if kanal.startswith('@') else '@' + kanal))
+    with urllib.request.urlopen(urllib.request.Request(YT_BAZA + put + '/live', headers=BRAUZER), timeout=20) as r:
+        html = r.read().decode('utf-8', 'replace')
+    h = html.replace(' ', '')
+    zr = None
+    if '"isLive":true' in h or '"isLiveNow":true' in h:
+        m = re.search(r'"originalViewCount":"(\d+)"', html) or \
+            re.search(r'"viewCount":\{"runs":\[\{"text":"([\d,.\s]+)"', html)
+        zr = chislo_yt(m.group(1)) if m else None
+    m = re.search(r'"subscriberCountText":\{.*?"(?:simpleText|content)":"([^"]+)"', html)
+    return zr, (chislo_yt(m.group(1)) if m else None)
+
+
+_se_kanaly = {}
+
+
+def se_vsego(jwt_put, klyuchi):
+    """Сколько всего фолловеров (подписчиков) по сессии StreamElements; ключа нет — None. Ключ — только в заголовок."""
+    jwt = prochest(jwt_put)
+    if not jwt:
+        return None
+    zag = {'Authorization': 'Bearer ' + jwt, 'Accept': 'application/json', 'User-Agent': BRAUZER['User-Agent']}
+    kid = _se_kanaly.get(jwt_put)
+    if not kid:
+        kid = _se_kanaly[jwt_put] = str(_json(SE_URL + '/channels/me', zag).get('_id') or '')
+    if not kid:
+        return None
+    d = _json(SE_URL + '/sessions/' + kid, zag).get('data') or {}
+    for k in klyuchi:
+        v = (d.get(k) or {}).get('count')
+        if isinstance(v, int):
+            return v
+    return None
+
+
+def schet_sobrat(zriteley_tw):
+    """Числа для моста: {'zr_tw': …, 'pod_kick': …}; что не узнали — не шлём (кроме «-»: площадка не в эфире).
+    Ошибки — по площадкам, во второй части ответа."""
+    q, osh = {}, {}
+    q['zr_tw'] = zriteley_tw if zriteley_tw is not None else '-'
+    if prochest(DONAT_SSYLKA):                              # мост мог перезапуститься без неё — напоминаем
+        q['ssylka'] = prochest(DONAT_SSYLKA)
+    for pl, f in (('kick', kick_dannye), ('yt', yt_dannye)):
+        try:
+            zr, pod = f()
+            q['zr_' + pl] = zr if zr is not None else '-'
+            if pod is not None:
+                q['pod_' + pl] = pod
+        except Exception as e:
+            osh[pl] = '%s %s' % (type(e).__name__, getattr(e, 'code', ''))
+    for pl, put, kl in (('tw', SE_JWT, ('follower-total',)), ('yt', SE_JWT_YT, ('subscriber-total', 'follower-total'))):
+        try:
+            n = se_vsego(put, kl)
+            if n is not None:
+                q['pod_' + pl] = n                          # у YouTube StreamElements точнее страницы (там «1.2K»)
+        except Exception as e:
+            osh['se_' + pl] = '%s %s' % (type(e).__name__, getattr(e, 'code', ''))
+    return q, osh
+
+
 # ---------- вечер ----------
 
 def vecher_put():
@@ -237,6 +360,9 @@ class Zal:
         self.zriteley = None        # число Twitch; None — неизвестно (нет ключа или эфира)
         self.ob_yavleno = 0         # до скольки уже сказали «нас стало больше»
         self.oshibka = ''
+        self.posl_schet = 0.0
+        self.schet = {}             # что послали мосту последним (2.8.2)
+        self.schet_osh = {}
         self.v = vecher()
 
     def chitat(self):
@@ -290,12 +416,30 @@ class Zal:
             if self.zriteley < self.ob_yavleno:
                 self.ob_yavleno = self.zriteley             # ушли — следующий приход снова заметим
 
+    def schetchiki(self, now, efir):
+        """2.8.2: раз в минуту, пока идёт эфир, — зрители и фолловеры всех площадок в мост (карточка справа вверху)."""
+        if not efir:
+            self.posl_schet = 0.0                           # эфир начнётся — сразу, не через минуту
+            return
+        if now - self.posl_schet < RAZ_SCHET:
+            return
+        self.posl_schet = now
+        q, self.schet_osh = schet_sobrat(self.zriteley)
+        for k, v in self.schet_osh.items():
+            log('счётчики:', k, v)
+        try:
+            urllib.request.urlopen(MOST + '/schet/upr?' + urllib.parse.urlencode(q), timeout=5).read()
+            self.schet = q
+        except Exception as e:
+            self.schet_osh['most'] = type(e).__name__
+
     def shag(self, now=None):
         """Один шаг цикла. Возвращает сказанное (или '')."""
         now = now or time.time()
         self.chitat()
         efir = efir_idyot()
         self.chislo(now, efir)
+        self.schetchiki(now, efir)
         skazano = ''
         if efir and not tiho() and not tesno():
             pervyy = min(self.zhdut.values()) if self.zhdut else None
@@ -325,7 +469,7 @@ class Zal:
     def zapisat(self, now):
         d = {'t': now, 'zriteley': self.zriteley, 'klyuch': est_klyuch(), 'oshibka': self.oshibka,
              'v_chate': sorted(self.v_chate), 'za_vecher': self.v['za_vecher'][-50:], 'maks': self.v.get('maks', 0),
-             'tiho': tiho()}
+             'tiho': tiho(), 'schet': self.schet, 'schet_osh': self.schet_osh}
         try:
             tmp = SOST + '.tmp'
             json.dump(d, open(tmp, 'w'), ensure_ascii=False)
@@ -409,8 +553,53 @@ def main(a):
         else:
             print('Ключ работает. ' + ('Сейчас смотрят: %d.' % n if n is not None else 'Канал сейчас не в эфире.'))
         return 0
+    if a and a[0] == 'donat' and len(a) == 2:               # 2.8.2: ссылка доната — внизу кадра и Плюсу
+        if a[1] == 'vykl':
+            ss = ''
+        else:
+            ss = re.sub(r'^(https?://)?(www\.)?', '', a[1].strip()).rstrip('/')
+            if not re.fullmatch(r'[A-Za-z0-9._/-]{4,60}', ss) or '.' not in ss:
+                print('Ссылка странная. Пример: zriteli donat streamelements.com/3xsks_fu_gun/tip')
+                return 1
+        os.makedirs(os.path.dirname(DONAT_SSYLKA), exist_ok=True)
+        if ss:
+            open(DONAT_SSYLKA, 'w').write(ss + '\n')
+        else:
+            try:
+                os.remove(DONAT_SSYLKA)
+            except OSError:
+                pass
+        try:
+            urllib.request.urlopen(MOST + '/schet/upr?' + urllib.parse.urlencode({'ssylka': ss}), timeout=5).read()
+            v_moste = ''
+        except Exception:
+            v_moste = ' (мост сейчас не ответил — передам сам, когда начнётся эфир)'
+        print(('Ссылка доната: %s — внизу кадра по очереди с ником, Плюс знает её.' % ss if ss else
+               'Ссылку доната убрал.') + v_moste)
+        return 0
+    if a and a[0] in ('tablo', 'nik') and len(a) >= 2:      # 2.8.2: счётчики и ник внизу эфира
+        if a[0] == 'tablo' and a[1] in ('vkl', 'vykl', 'zriteli', 'follovery'):
+            q = {'vkl': {'zr': 1, 'pod': 1}, 'vykl': {'zr': 0, 'pod': 0},
+                 'zriteli': {'zr': 1, 'pod': 0}, 'follovery': {'zr': 0, 'pod': 1}}[a[1]]
+        elif a[0] == 'nik' and a[1] in ('vkl', 'vykl'):
+            q = {'niki': int(a[1] == 'vkl')}
+        elif a[0] == 'nik' and re.fullmatch(r'[\w-]{1,25}', a[1]):
+            q = {'nik': a[1], 'niki': 1}
+        else:
+            print('zriteli tablo vkl|vykl|zriteli|follovery; zriteli nik ИМЯ | vkl | vykl')
+            return 1
+        try:
+            d = json.loads(urllib.request.urlopen(MOST + '/schet/upr?' + urllib.parse.urlencode(q), timeout=5).read())
+        except Exception as e:
+            print('Мост не ответил (%s) — захват идёт?' % type(e).__name__)
+            return 1
+        print('Счётчики в эфире: зрители — %s, фолловеры — %s; ник внизу — %s.' % (
+            'да' if d.get('zr') else 'нет', 'да' if d.get('pod') else 'нет',
+            d.get('nik') if d.get('niki') and d.get('nik') else 'нет'))
+        return 0
     if a and a[0] not in ('status', 's'):
-        print('zriteli — сколько смотрят и кто в чате; tiho | vkl; bot ИМЯ; klyuch.')
+        print('zriteli — сколько смотрят и кто в чате; tiho | vkl; bot ИМЯ; klyuch; tablo vkl|vykl; nik ИМЯ|vkl|vykl; '
+              'donat ССЫЛКА|vykl.')
         return 1
     try:
         d = json.load(open(SOST))
@@ -428,6 +617,16 @@ def main(a):
     zv = d.get('za_vecher') or []
     if zv:
         print('Заходили за вечер: ' + ', '.join(zv[-15:]))
+    sc = d.get('schet') or {}
+    if sc:
+        def vse(pref):
+            return sum(v for k, v in sc.items() if k.startswith(pref) and isinstance(v, int))
+        print('В эфире на табло: смотрят %d, фолловеров %d (%s).' % (vse('zr_'), vse('pod_'), ', '.join(
+            '%s %s' % (k, v) for k, v in sorted(sc.items()) if v != '-')))
+    if prochest(DONAT_SSYLKA):
+        print('Ссылка доната: ' + prochest(DONAT_SSYLKA))
+    if d.get('schet_osh'):
+        print('Счётчики не узнали: ' + ', '.join('%s (%s)' % kv for kv in sorted(d['schet_osh'].items())))
     print('Здороваюсь вслух: ' + ('нет (zriteli vkl — включить)' if d.get('tiho', tiho()) else 'да, пока идёт эфир'))
     if not d or time.time() - d.get('t', 0) > 30:
         print('(Помощник зрителей не отвечал больше 30 с — он запускается вместе с plus.)')

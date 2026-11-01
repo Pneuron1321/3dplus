@@ -74,19 +74,7 @@ class Opoveshchenie(private val ctx: Context, private val razvilka: () -> Razvil
         pokazano++
     }
 
-    private fun zvuk() {
-        try {
-            val p = MediaPlayer()
-            ctx.assets.openFd(ZVUK).use { p.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
-            p.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL).build())     // эфир его захватывает
-            p.setOnCompletionListener { it.release() }
-            p.setOnErrorListener { mp, _, _ -> mp.release(); true }
-            p.prepare()
-            p.start()
-        } catch (e: Exception) { Pamyat.zapis("оповещение: звук не сыгран (${e.message})") }
-    }
+    private fun zvuk() = zvuk(ctx, ZVUK)
 
     private fun narisovat(s: Sobytie, sdvig: Float, a: Float) {
         c.drawColor(0, PorterDuff.Mode.CLEAR)
@@ -108,6 +96,20 @@ class Opoveshchenie(private val ctx: Context, private val razvilka: () -> Razvil
     }
 
     companion object {
+        /** Звук из assets как медиа с захватом — его слышат и эфир, и шлем (2.8.2: и для строки доната). */
+        fun zvuk(ctx: Context, put: String) {
+            try {
+                val p = MediaPlayer()
+                ctx.assets.openFd(put).use { p.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
+                p.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL).build())     // эфир его захватывает
+                p.setOnCompletionListener { it.release() }
+                p.setOnErrorListener { mp, _, _ -> mp.release(); true }
+                p.prepare()
+                p.start()
+            } catch (e: Exception) { Pamyat.zapis("звук $put не сыгран (${e.message})") }
+        }
         const val ZVUK = "zvuki/folover.mp3"
         const val W = 720
         const val H = 130

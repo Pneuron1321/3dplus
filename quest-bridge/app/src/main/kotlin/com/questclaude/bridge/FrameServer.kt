@@ -62,6 +62,8 @@ import kotlin.concurrent.thread
  *                              1 — с отступом 3 % высоты; bok=4 — отступ сбоку, % ширины (0 — вплотную; 2.3.8)
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}
  *   GET /opoveshchenie?vid=follow|sub|raid&kto=НИК -> плашка сверху эфира на 6 с (2.7.8): «NEW FOLLOWER» и ник
+ *   GET /donat?kto=НИК&skolko=$5     -> маленькая строка «НИК donated $5!» слева вверху эфира (2.8.2)
+ *   GET /schet, /schet/upr?zr_tw=N&pod_kick=N&nik=…&zr=0|1&pod=0|1&niki=0|1 -> счётчики и ник внизу (2.8.2, Schet)
  *   GET /klip/upr[?rezhim=otdelno|efir|vykl] -> клип шлема: свой кодировщик без окна камеры (уступает игре) | сам эфир | нет
  *   GET /klip                -> «клип клип клип» (2.7.8): клипы камеры и эфира по 3 минуты в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
  *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 150) с видео телефона — MP4 в «Фильмы/Plus»
@@ -178,6 +180,8 @@ class FrameServer(
         fun igra(q: Map<String, String>?): String = "{}"
         /** Топ-донатор (2.3.0): q == null — состояние. */
         fun top(q: Map<String, String>?): String = "{}"
+        /** Счётчики зрителей и фолловеров, ник внизу (2.8.2): q == null — состояние. */
+        fun schet(q: Map<String, String>?): String = "{}"
         /** Чат Twitch в кадре (2.3.4): q == null — состояние. */
         fun chat(q: Map<String, String>?): String = "{}"
         /** Пачка сообщений чата (2.3.9): каждое — как /chat/upr. */
@@ -434,8 +438,14 @@ class FrameServer(
                         else -> k.status()
                     }.toByteArray(Charsets.UTF_8))
             }
+            "/donat" -> {                                 // 2.8.2: маленькая строка доната слева вверху эфира
+                val d = Hub.donatStroka
+                if (d == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8",
+                    d.pokazat(Titry.dekod(query["kto"] ?: ""), Titry.dekod(query["skolko"] ?: "")).toByteArray(Charsets.UTF_8))
+            }
             "/titr", "/cel", "/cel/upr", "/itogi", "/itogi/upr", "/igra", "/igra/upr", "/top", "/top/upr",
-            "/chat", "/chat/upr" -> {
+            "/schet", "/schet/upr", "/chat", "/chat/upr" -> {
                 if (path == "/chat/upr") ChatLenta.upr(query)        // 2.8.1: окно «Плюс · Чат» — и без захвата
                 val p = plashki()
                 if (p == null) reply(out, 503, "application/json", "{\"oshibka\":\"нет захвата\"}".toByteArray())
@@ -448,6 +458,8 @@ class FrameServer(
                     "/igra/upr" -> p.igra(query)
                     "/top" -> p.top(null)
                     "/top/upr" -> p.top(query)
+                    "/schet" -> p.schet(null)
+                    "/schet/upr" -> p.schet(query)
                     "/chat" -> p.chat(null)
                     "/chat/upr" -> p.chat(query)
                     else -> p.itogi(query)

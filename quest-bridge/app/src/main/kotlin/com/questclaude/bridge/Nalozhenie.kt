@@ -86,6 +86,8 @@ class Nalozhenie(
     private val glaza: (Int) -> Unit = { },
     /** Гости эфира (2.5.0): плитки, имена, пузыри субтитров. */
     private val gosti: Gosti? = null,
+    /** Счётчики зрителей и фолловеров, ник внизу (2.8.2; только стиль «Визор»). */
+    private val schet: Schet = Schet({ null }, { }),
 ) {
     /** Что показывать (запоминает CaptureService): лицо, налёт, радар. */
     class Pokaz(val lico: Boolean = true, val nalet: Boolean = true, val radar: Boolean = true)
@@ -133,6 +135,9 @@ class Nalozhenie(
     private val cPl by lazy { Canvas(plV) }
     private val lvV by lazy { Bitmap.createBitmap((Vizor.LV_W * Vizor.LV_K).toInt(), (Vizor.LV_H * Vizor.LV_K).toInt(), Bitmap.Config.ARGB_8888) }
     private val chatV by lazy { Bitmap.createBitmap(Vizor.CW, Vizor.CH, Bitmap.Config.ARGB_8888) }
+    /** Счётчики (2.8.2): картинка по числу строк — чат встаёт ровно под карточку. */
+    private val svV by lazy { (1..2).map { Bitmap.createBitmap(Vizor.SV_W, Vizor.schetH(it).toInt(), Bitmap.Config.ARGB_8888) } }
+    private val nkV by lazy { Bitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, Bitmap.Config.ARGB_8888) }
     private val titrV by lazy { Bitmap.createBitmap(Vizor.TW, Vizor.TH, Bitmap.Config.ARGB_8888) }
     private val mzV by lazy { Bitmap.createBitmap(Vizor.MZW, Vizor.MZH, Bitmap.Config.ARGB_8888) }
     private var scenaBmp: Bitmap? = null                         // 1920×1080 — только пока сцена на экране
@@ -205,6 +210,8 @@ class Nalozhenie(
             var muzMs = 0L
             var stilBylo = ""
             var scenaBylo = ""
+            var schetBylo = ""
+            var nikBylo = ""
             while (rabotaet) {
                 val now = System.currentTimeMillis()
                 val v = Oformlenie.viz
@@ -213,7 +220,7 @@ class Nalozhenie(
                     if (st != stilBylo) {
                         stilBylo = st                                 // и споткнувшись — не пробовать каждые 70 мс
                         bylo = ""; titrBylo = ""; igraBylo = ""; chatBylo = ""; muzBylo = ""; itogiBylo = ""
-                        puzyriBylo = ""; gostiBylo = ""
+                        puzyriBylo = ""; gostiBylo = ""; schetBylo = ""; nikBylo = ""
                         if (v) {
                             val vv = Bitmap.createBitmap(Vizor.W, Vizor.RAMKA_H, Bitmap.Config.ARGB_8888)
                             viz.ramka(vv)
@@ -311,6 +318,24 @@ class Nalozhenie(
                         else if (v) { viz.levyVerh(lvV); razvilka.sloy("lv", lvV) }       // визор: топ, цель, табло
                         else { levyVerh(); razvilka.sloy("lv", igraBmp) }
                         igraBylo = gKlyuch
+                    }
+                }
+                shag("счётчики") {                                    // 2.8.2: зрители и фолловеры, ник внизу — только визор
+                    val sk = if (!v) "net" else schet.klyuch()
+                    if (sk != schetBylo) {
+                        if (sk == "net") razvilka.sloy("sv", null)
+                        else {
+                            val b = svV[((if (schet.zrVidny) 1 else 0) + (if (schet.podVidny) 1 else 0) - 1).coerceIn(0, 1)]
+                            viz.schet(b, schet); razvilka.sloy("sv", b)
+                        }
+                        schetBylo = sk
+                    }
+                    val chto = if (v) schet.nizSeychas(now) else ""
+                    val nk = if (chto.isEmpty()) "net" else "$chto ${schet.nik} ${schet.ssylka}"
+                    if (nk != nikBylo) {
+                        if (nk == "net") razvilka.sloy("nk", null)
+                        else { viz.niki(nkV, chto, schet.nik, schet.ssylka); razvilka.sloy("nk", nkV) }
+                        nikBylo = nk
                     }
                 }
                 shag("чат") {

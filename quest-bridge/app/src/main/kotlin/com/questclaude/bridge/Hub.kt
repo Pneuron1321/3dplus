@@ -45,6 +45,8 @@ object Hub {
     @Volatile var klipUpr: ((Map<String, String>) -> String)? = null
     /** Оповещение в эфире (2.7.8): новый фоловер, подписка, рейд — плашка сверху; ставит служба глаз. */
     @Volatile var opoveshchenie: Opoveshchenie? = null
+    /** Строка доната в эфире (2.8.2): /donat. */
+    @Volatile var donatStroka: DonatStroka? = null
     /** Речь для субтитров по каждому голосу (2.5.0): фразы — демону sinhron (/titry/rech). */
     val rechi = Rechi()
     /** Эфир (/efir…): ставит служба глаз, пока жива. */
