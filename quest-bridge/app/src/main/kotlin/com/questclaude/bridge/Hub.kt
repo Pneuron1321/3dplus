@@ -47,6 +47,8 @@ object Hub {
     @Volatile var opoveshchenie: Opoveshchenie? = null
     /** Строка доната в эфире (2.8.2): /donat. */
     @Volatile var donatStroka: DonatStroka? = null
+    /** Счётчики эфира (2.8.2) — и для окна чата: сколько смотрят (2.8.4). */
+    @Volatile var schet: Schet? = null
     /** Речь для субтитров по каждому голосу (2.5.0): фразы — демону sinhron (/titry/rech). */
     val rechi = Rechi()
     /** Эфир (/efir…): ставит служба глаз, пока жива. */

@@ -84,6 +84,7 @@ object ChatLenta {
  * 2.8.3 (Александр 03.11): без слов — сверху только три точки площадок (красная YouTube, зелёная Kick, фиолетовая
  * Twitch), маленькие «−» и «+» (размер букв, запоминается) и «◐» — прозрачное окно: видно только сообщения и точки
  * (запоминается; если шлем не умеет прозрачные окна — будет просто тёмное). Сообщение — точка площадки, ник, текст.
+ * 2.8.4: рядом с точками — сколько смотрят (красная точка и число, как в кадре; есть, пока идёт захват и zriteli шлёт).
  */
 class ChatOkno : Activity() {
     private val ui = Handler(Looper.getMainLooper())
@@ -91,6 +92,7 @@ class ChatOkno : Activity() {
     private lateinit var tekst: TextView
     private lateinit var skrol: ScrollView
     private lateinit var knopki: List<Button>
+    private lateinit var zriteli: TextView
     private var versiya = -1L
     private var razmer = 22f
     private var prozrachno = false
@@ -127,6 +129,9 @@ class ChatOkno : Activity() {
             for (pl in listOf("yt", "kick", "tw")) addView(TextView(this@ChatOkno).apply {
                 text = "●"; textSize = 18f; setTextColor(ChatLenta.METKA[pl]?.second ?: Color.LTGRAY); setPadding(0, 0, 10, 0)
             })
+            // 2.8.4 (Александр 04.11): сколько смотрят — как в кадре: красная точка и число (все площадки вместе)
+            zriteli = TextView(this@ChatOkno).apply { textSize = 18f; setTextColor(Color.WHITE); setPadding(14, 0, 0, 0) }
+            addView(zriteli)
             addView(View(this@ChatOkno), LinearLayout.LayoutParams(0, 1, 1f))
             for (k in knopki) addView(k)
         }
@@ -166,6 +171,12 @@ class ChatOkno : Activity() {
     }
 
     private fun narisovat() {
+        val zr = Hub.schet?.takeIf { it.pokazZr }?.zriteli().orEmpty()
+        zriteli.text = if (zr.isEmpty()) "" else SpannableStringBuilder().also {
+            kusok(it, "● ", Vizor.VIZOR)
+            kusok(it, Schet.krasivo(zr.values.sum()), Color.WHITE, zhirno = true)
+        }
+        zriteli.setShadowLayer(if (prozrachno) 6f else 0f, 0f, 2f, Color.BLACK)
         val v = ChatLenta.versiya
         if (v == versiya) return
         versiya = v

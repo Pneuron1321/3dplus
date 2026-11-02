@@ -408,8 +408,9 @@ class VizorPlashki(
     /** Сцена прочь — картинку Плюса в полный рост отпустить. */
     fun osvobodit() { rost?.recycle(); rost = null }
 
+    /** 2.8.4 (Александр 04.11: «в итогах — не старый Плюс, а новый, в полный рост»): тот же, что в эфире (plus-telo). */
     private fun rostPlyusa(): Bitmap? = rost ?: try {
-        ctx.assets.open("plus-rost.png").use { BitmapFactory.decodeStream(it) }
+        ctx.assets.open("plus-telo.png").use { BitmapFactory.decodeStream(it) }
     } catch (e: Exception) { null }.also { rost = it }
 
     /** Фон сцен: почти чёрный, тёплое пятно за Плюсом, золотая сетка 64, скобы крупнее, чем в эфире. */

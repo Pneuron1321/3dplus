@@ -153,7 +153,7 @@ class FonMiks(private val zapasKadrov: Int = ZAPAS_MS * Vstavka.RATE / 1000) {
     companion object {
         const val BLOK = 1024                 // кадров за шаг (21 мс)
         const val ZAPAS_MS = 12_000
-        const val DUCK = 0.33f
+        const val DUCK = 0.9f                 // 04.11 (Александр: «тише всего лишь на 10 %»), было 0,33
         const val VNIZ_MS = 150f
         const val VVERH_MS = 1000f
         const val GOVORIT_DB = -42f           // как «говорит» у гостей (Mikser)

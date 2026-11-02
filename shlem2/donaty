@@ -475,6 +475,17 @@ def iz_se():
     return out
 
 
+KANAL_FOLLOW_OK = os.environ.get('DONATY_KANAL_FOLLOW_OK', '/tmp/kanal.follow-ok')
+
+
+def follow_cherez_kanal():
+    """04.11: kanal видит фолловеров Twitch прямо от Twitch (свежая метка за 2 мин) — StreamElements их не дублирует."""
+    try:
+        return time.time() - float(open(KANAL_FOLLOW_OK).read().strip()) < 120
+    except (OSError, ValueError):
+        return False
+
+
 def iz_se_follow(jwt=None, posl_put=None, tipy=('follow',)):
     """Новые фоловеры (2.7.8) — лента StreamElements (тот же ключ, что у чаевых). Первый раз — только отметка.
     29.10: второй StreamElements на YouTube (`kluch se-youtube`) — новые подписчики YouTube (тип subscriber) — как фоловеры."""
@@ -542,7 +553,8 @@ def demon():
         for d in iz_chata():
             obrabotat(d)
         if time.time() >= sled_se:
-            for d in iz_se() + iz_se_follow() + iz_se_youtube():
+            se_f = iz_se_follow()                      # читаем всегда — указатель идёт вперёд, повторов потом нет
+            for d in iz_se() + ([] if follow_cherez_kanal() else se_f) + iz_se_youtube():
                 obrabotat(d)
             sled_se = time.time() + SE_RAZ
         time.sleep(TAKT)

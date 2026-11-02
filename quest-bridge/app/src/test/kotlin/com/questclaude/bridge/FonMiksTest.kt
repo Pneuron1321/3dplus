@@ -43,7 +43,7 @@ class FonMiksTest {
     }
 
     @Test fun prigluschaetsyaPodGolosomIVozvraschaetsya() {
-        val m = FonMiks()
+        val m = FonMiks().apply { duck = 0.33f }                          // глубокое приглушение — видно на проверке
         m.dobavit(ton(5.0), m.zhdatMesta(100))
         val sh = ShortArray(2 * B)
         val ef = ShortArray(2 * B)
@@ -58,6 +58,10 @@ class FonMiksTest {
         assertTrue(m.gShlem > m.duck && m.gShlem < 0.4f)
         repeat(50) { m.vzyat(B, sh, ef, false, false) }                   // ~1 с
         assertEquals(1f, m.gShlem, 1e-4f)
+    }
+
+    @Test fun poUmolchaniyuTisheVsegoNa10() {
+        assertEquals(0.9f, FonMiks().duck, 1e-4f)                         // Александр 04.11: «тише всего лишь на 10 %»
     }
 
     @Test fun gromkostShlemaIEfiraOtdelno() {

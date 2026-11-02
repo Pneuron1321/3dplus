@@ -20,7 +20,7 @@ import os, sys
 moy, n = int(sys.argv[1]), min(19, int(sys.argv[2]))
 os.setpriority(os.PRIO_PROCESS, moy, n)
 # уже запущенные (до обновления) Claude, tmux и помощники — тоже, каждым потоком
-SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'raciya', b'nagruzka', b'plus-mcp',
+SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'kanal', b'raciya', b'nagruzka', b'plus-mcp',
         b'sinhron', b'gosti', b'cloudflared'}
 for d in os.listdir('/proc'):
     if not d.isdigit():
@@ -96,6 +96,8 @@ while :; do
   setsid nohup /usr/local/bin/vedushchiy demon >> /tmp/vedushchiy.log 2>&1 < /dev/null &
   setsid nohup /usr/local/bin/donaty demon >> /tmp/donaty.log 2>&1 < /dev/null &
   setsid nohup /usr/local/bin/zriteli demon >> /tmp/zriteli.log 2>&1 < /dev/null &
+  # канал (04.11): Twitch и Kick по API — табло, фолловеры, награды, объявления, Плюс в чате, «3xxx»
+  [ -x /usr/local/bin/kanal ] && setsid nohup /usr/local/bin/kanal demon >> /tmp/kanal.log 2>&1 < /dev/null &
   # Синхронист (2.5.0): субтитры по каждому голосу — Александр, игра, гости (Whisper и перевод в Groq);
   # пока нет эфира или фраз, только ждёт приложение. Гости и туннель — по команде: gosti start.
   [ -x /usr/local/bin/sinhron ] && setsid nohup /usr/local/bin/sinhron demon >> /tmp/sinhron-demon.log 2>&1 < /dev/null &

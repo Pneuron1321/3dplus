@@ -262,6 +262,7 @@ class CaptureService : Service() {
         Hub.donatStroka = DonatStroka(this) { razvilka }
         schet = Schet({ try { File(filesDir, SCHET).readText() } catch (e: Exception) { SCHET_PERVYJ } },
             { t -> try { File(filesDir, SCHET).writeText(t) } catch (e: Exception) { } })
+        Hub.schet = schet
         nalet = Nalet({ try { File(filesDir, NALET).readText().trim().toLong() } catch (e: Exception) { 0L } },
             { sek -> try { File(filesDir, NALET).writeText(sek.toString()) } catch (e: Exception) { } })
         pokaz = try {
@@ -756,6 +757,7 @@ class CaptureService : Service() {
         Hub.klipUpr = null
         Hub.opoveshchenie = null
         Hub.donatStroka = null
+        Hub.schet = null
         gosti?.let { it.otklyuchit(); it.stop(zabyt = false) }
         gosti = null
         Hub.nalet = null
