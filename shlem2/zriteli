@@ -51,6 +51,7 @@ SE_JWT_YT = os.environ.get('ZR_SE_JWT_YT', '/root/.se-jwt-youtube')        # с�
 BRAUZER = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
            'Accept-Language': 'en-US,en;q=0.9', 'Cookie': 'SOCS=CAI; CONSENT=YES+cb'}
 RAZ_SCHET = 60      # счётчики в эфир — раз в минуту
+DONATY_VHOD = os.environ.get('ZR_DONATY', '/tmp/donaty.jsonl')     # 05.11: новые фолловеры Kick — плашкой через donaty
 DONAT_SSYLKA = os.environ.get('ZR_DONAT_SSYLKA', '/root/.zriteli/donat-ssylka')   # ссылка доната: внизу кадра, уши
 SKAZHI = os.environ.get('ZR_SKAZHI', '/usr/local/bin/skazhi')
 GOLOS_Q = os.environ.get('ZR_GOLOS_Q', '/tmp/golos/q')
@@ -362,6 +363,7 @@ class Zal:
         self.oshibka = ''
         self.posl_schet = 0.0
         self.schet = {}             # что послали мосту последним (2.8.2)
+        self.pod_kick = None        # 05.11: фолловеры Kick минуту назад — выросло, а события нет (Kick не шлёт) — плашка
         self.schet_osh = {}
         self.v = vecher()
 
@@ -427,11 +429,30 @@ class Zal:
         q, self.schet_osh = schet_sobrat(self.zriteley)
         for k, v in self.schet_osh.items():
             log('счётчики:', k, v)
+        self.kick_follovery(q.get('pod_kick'))
         try:
             urllib.request.urlopen(MOST + '/schet/upr?' + urllib.parse.urlencode(q), timeout=5).read()
             self.schet = q
         except Exception as e:
             self.schet_osh['most'] = type(e).__name__
+
+    def kick_follovery(self, n):
+        """05.11 (отчёт Плюса 02.11: «фоловер Kick не запускает плашку и звук»): Kick событий без events:subscribe не
+        шлёт, а число фолловеров видно — выросло, пока идёт эфир, — каждому новому плашка и звук через donaty (ника нет:
+        «Kick_8» — номером фолловера; «спасибо» без ника). Не больше трёх за раз (скачок — не события, а пересчёт)."""
+        if not isinstance(n, int):
+            return
+        bylo, self.pod_kick = self.pod_kick, n
+        if bylo is None or n <= bylo:
+            return
+        try:
+            with open(DONATY_VHOD, 'a') as f:
+                for k in range(bylo + 1, min(n, bylo + 3) + 1):
+                    f.write(json.dumps({'t': time.time(), 'istochnik': 'follow', 'kto': 'Kick_%d' % k, 'pl': 'kick',
+                                        'anonim': True}) + '\n')
+            log('фолловеры Kick: %d → %d — плашка' % (bylo, n))
+        except OSError:
+            pass
 
     def shag(self, now=None):
         """Один шаг цикла. Возвращает сказанное (или '')."""
@@ -577,6 +598,14 @@ def main(a):
         print(('Ссылка доната: %s — внизу кадра по очереди с ником, Плюс знает её.' % ss if ss else
                'Ссылку доната убрал.') + v_moste)
         return 0
+    if a and a[0] == 'cel' and len(a) == 2 and re.fullmatch(r'\d{1,9}', a[1]):   # 05.11: цель фолловеров на табло
+        try:
+            urllib.request.urlopen(MOST + '/schet/upr?cel_pod=' + a[1], timeout=5).read()
+        except Exception as e:
+            print('Мост не ответил (%s) — захват идёт?' % type(e).__name__)
+            return 1
+        print('Цель фолловеров на табло: %s.' % ('нет' if a[1] == '0' else '{:,}'.format(int(a[1]))))
+        return 0
     if a and a[0] in ('tablo', 'nik') and len(a) >= 2:      # 2.8.2: счётчики и ник внизу эфира
         if a[0] == 'tablo' and a[1] in ('vkl', 'vykl', 'zriteli', 'follovery'):
             q = {'vkl': {'zr': 1, 'pod': 1}, 'vykl': {'zr': 0, 'pod': 0},
@@ -599,7 +628,7 @@ def main(a):
         return 0
     if a and a[0] not in ('status', 's'):
         print('zriteli — сколько смотрят и кто в чате; tiho | vkl; bot ИМЯ; klyuch; tablo vkl|vykl; nik ИМЯ|vkl|vykl; '
-              'donat ССЫЛКА|vykl.')
+              'donat ССЫЛКА|vykl; cel N (цель фолловеров, 0 — нет).')
         return 1
     try:
         d = json.load(open(SOST))

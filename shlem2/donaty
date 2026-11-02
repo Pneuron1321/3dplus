@@ -372,6 +372,8 @@ def obrabotat(d):
             return zapis
         if n == 1:
             zapis['povtor'] = 2
+        elif d.get('anonim'):                          # 05.11: Kick без ника (видно только число) — «спасибо» без имени
+            rech = 'Спасибо за фоллоу на Kick! Добро пожаловать.'
         else:
             rech = 'Спасибо за фоллоу, %s! Добро пожаловать.' % kto
     vid = {'follow': 'follow', 'sub': 'sub', 'resub': 'sub', 'subgift': 'sub', 'submysterygift': 'sub', 'raid': 'raid'}.get(ist)

@@ -60,6 +60,9 @@ STOP = os.environ.get('GOLOS_STOP', '/tmp/golos.stop')
 USKOR = os.environ.get('GOLOS_USKOR', '/tmp/golos.uskor')
 PAUZA = os.environ.get('GOLOS_PAUZA', '/tmp/golos.pauza')
 DALSHE = os.environ.get('GOLOS_DALSHE', '/tmp/golos.dalshe')
+# 05.11 «плюс пауза» (уши ставят/снимают файл): пока файл есть — звучащее замолкает и ничего не начинается; сняли —
+# продолжает с места остановки (по словам, если есть метки, иначе с прерванного предложения). Не устаревает.
+DERZHAT = os.environ.get('GOLOS_DERZHAT', '/tmp/golos.derzhat')
 PROPUSK = os.environ.get('GOLOS_PROPUSK', '/tmp/golos.propusk')   # 03.11: «плюс темп» — этот ответ пропустить, дальше следующий
 REZHIM = os.environ.get('GOLOS_REZHIM', '/root/.golos-rezhim')
 OFF = os.environ.get('GOLOS_OFF', '/root/.golos-off')
@@ -1226,6 +1229,16 @@ class Golos:
                     log('Александр говорил дольше %d с — остаток не договариваю' % PLUS_DOLGO)
                 else:
                     log('Александр замолчал — Плюс продолжает')
+        if os.path.exists(DERZHAT):
+            if self.igrok and not getattr(self.igrok, 'vne_ocheredi', False):
+                ig = self.igrok
+                proshlo = time.time() - getattr(ig, 't0', time.time())
+                self.stop_igrok()
+                self.s_prervannoy(ig, proshlo)   # продолжит с места остановки
+                self.zhdu_dosluh = False
+                log('пауза голоса («плюс пауза»)')
+            self.srez_plus = 0.0
+            self.dl = max(self.dl, time.time())  # ожидание «дальше» не копится — после снятия пауза не тянется
         tp = vremya(PROPUSK)
         if tp > self.tp:
             self.tp = tp
@@ -1471,6 +1484,8 @@ class Golos:
                 log('не сыграл:', getattr(igrok, 'err', '') or end)
                 uid = k.uid
                 self.vybrosit(lambda x: x.uid == uid)   # реплику не мучаем кусками
+        if os.path.exists(DERZHAT):
+            return                         # «плюс пауза» — ждём, пока снимут
         if self.pauza() or os.path.exists(OFF):
             self.zhdu_dosluh = False       # Александр позвал сам — его фразу слушают уши
             if os.path.exists(OFF) and self.q:

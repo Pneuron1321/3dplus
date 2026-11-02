@@ -122,8 +122,23 @@ def bez_vyzova(w, lead):
     return w2 if w2 != w else PLUS1.sub('', w, count=1)
 ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
+PAUZA_G = ('пауза',)                          # 05.11: «плюс пауза» — голос на паузу, ещё раз — дальше с того же места
+G_DERZHAT = os.environ.get('USHI_G_DERZHAT', '/tmp/golos.derzhat')
 TEMP = ('темп', 'пропусти', 'следующий')       # 03.11: «плюс темп» — этот ответ пропустить, дальше следующий
 G_PROPUSK = os.environ.get('USHI_G_PROPUSK', '/tmp/golos.propusk')
+
+
+def pauza_golosa():
+    """«Плюс пауза»: первый раз — голос на паузу, второй — продолжить с того же места."""
+    try:
+        if os.path.exists(G_DERZHAT):
+            os.remove(G_DERZHAT)
+            print(time.strftime('%H:%M:%S'), 'пауза голоса снята', flush=True)
+        else:
+            open(G_DERZHAT, 'w').write('%f\n' % time.time())
+            print(time.strftime('%H:%M:%S'), 'пауза голоса', flush=True)
+    except OSError:
+        pass
 
 
 def propustit():
@@ -1032,6 +1047,8 @@ def handle(e, sluh):
         subprocess.run(['tiho'])
     elif kind == 'temp':                # 2.8.5: «плюс темп» из моста — ответ пропустить
         propustit()
+    elif kind == 'pauza':               # 2.8.5: «плюс пауза» из моста — пауза / продолжить
+        pauza_golosa()
     chek = kind == 'chek'           # «чек чек плюс»: плёнка уйдёт и без слов
     lead, syroy = 0.0, ''           # слова вызова, с; текст Whisper как есть
     if kind in ('text', 'chek'):
@@ -1094,6 +1111,8 @@ def handle(e, sluh):
         subprocess.run(['tiho'])
     elif kind == 'text' and low in TEMP:
         propustit()
+    elif kind == 'text' and low in PAUZA_G:
+        pauza_golosa()
     elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
         povtori()
     elif kind == 'rezhim' or kind == 'text' and low in REZHIMY:
