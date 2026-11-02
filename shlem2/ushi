@@ -124,6 +124,15 @@ ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
 TEMP = ('темп', 'пропусти', 'следующий')       # 03.11: «плюс темп» — этот ответ пропустить, дальше следующий
 G_PROPUSK = os.environ.get('USHI_G_PROPUSK', '/tmp/golos.propusk')
+
+
+def propustit():
+    """«Плюс темп» / «плюс плюс темп»: голосу — этот ответ пропустить, следующий сразу."""
+    try:
+        open(G_PROPUSK + '.tmp', 'w').write('%f' % time.time())
+        os.replace(G_PROPUSK + '.tmp', G_PROPUSK)
+    except OSError:
+        pass
 COMPACT = (
     '/compact Сохрани: что делаем сейчас, '
     'принятые решения, открытые задачи, '
@@ -1021,6 +1030,8 @@ def handle(e, sluh):
         metka('vyzov', e['id'], e.get('ms'))
     elif kind == 'tiho':
         subprocess.run(['tiho'])
+    elif kind == 'temp':                # 2.8.5: «плюс темп» из моста — ответ пропустить
+        propustit()
     chek = kind == 'chek'           # «чек чек плюс»: плёнка уйдёт и без слов
     lead, syroy = 0.0, ''           # слова вызова, с; текст Whisper как есть
     if kind in ('text', 'chek'):
@@ -1082,11 +1093,7 @@ def handle(e, sluh):
     elif kind == 'text' and low in TIHO:
         subprocess.run(['tiho'])
     elif kind == 'text' and low in TEMP:
-        try:
-            open(G_PROPUSK + '.tmp', 'w').write('%f' % time.time())
-            os.replace(G_PROPUSK + '.tmp', G_PROPUSK)
-        except OSError:
-            pass
+        propustit()
     elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
         povtori()
     elif kind == 'rezhim' or kind == 'text' and low in REZHIMY:
