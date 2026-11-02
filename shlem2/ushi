@@ -122,6 +122,8 @@ def bez_vyzova(w, lead):
     return w2 if w2 != w else PLUS1.sub('', w, count=1)
 ME = os.path.abspath(__file__)
 TIHO = ('тихо', 'замолчи', 'стоп', 'хватит')
+TEMP = ('темп', 'пропусти', 'следующий')       # 03.11: «плюс темп» — этот ответ пропустить, дальше следующий
+G_PROPUSK = os.environ.get('USHI_G_PROPUSK', '/tmp/golos.propusk')
 COMPACT = (
     '/compact Сохрани: что делаем сейчас, '
     'принятые решения, открытые задачи, '
@@ -1079,6 +1081,12 @@ def handle(e, sluh):
         chek_plus(t, VYZOV_MS[0], e['id'])
     elif kind == 'text' and low in TIHO:
         subprocess.run(['tiho'])
+    elif kind == 'text' and low in TEMP:
+        try:
+            open(G_PROPUSK + '.tmp', 'w').write('%f' % time.time())
+            os.replace(G_PROPUSK + '.tmp', G_PROPUSK)
+        except OSError:
+            pass
     elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
         povtori()
     elif kind == 'rezhim' or kind == 'text' and low in REZHIMY:
@@ -1824,7 +1832,7 @@ class ChatKick(threading.Thread):
     def run(self):
         pauza = 5
         while True:
-            k = prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+)?')
+            k = prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+){0,2}')
             if not k:
                 time.sleep(30)
                 continue
@@ -1840,7 +1848,7 @@ class ChatKick(threading.Thread):
                     sost_plosh('kick_sobytiya', 'номер канала неизвестен — фоловеров Kick не вижу (chat kanal kick ИМЯ ЧАТ КАНАЛ)')
                 sost_plosh('kick', 'слушаю kick.com/%s' % kanal)
                 print(time.strftime('%H:%M:%S'), 'чат Kick: слушаю', kanal, flush=True)
-                while prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+)?') == k:
+                while prochest_kanal(KICK_KANAL, r'[\w-]{2,40}(\s+\d+){0,2}') == k:
                     stroka = ws.poluchit()
                     if '"pusher:error"' in stroka:      # 30.10: ключ сменили (4001) — в следующий раз спросить заново
                         _kick_ws_kesh[:] = []

@@ -379,6 +379,16 @@ def obrabotat(d):
         try:
             get('/opoveshchenie?vid=%s&kto=%s' % (vid, urllib.parse.quote(kto)))
             zapis['plashka'] = True
+            if ist == 'follow':                            # 1.11: новый фоловер — строкой и в чат в кадре, с площадкой
+                try:
+                    pl = {'kick': 'kick', 'youtube': 'yt', 'yt': 'yt'}.get(d.get('pl') or '', '')
+                    nazv = {'kick': 'Kick', 'yt': 'YouTube'}.get(pl, 'Twitch')
+                    q = {'kto': 'NEW FOLLOWER', 'login': 'plus', 'tekst': '%s — %s' % (kto, nazv)[:120], 'cvet': '#D4AF37'}
+                    if pl:
+                        q['pl'] = pl
+                    get('/chat/upr?' + urllib.parse.urlencode(q))
+                except Exception:
+                    pass
             if ist == 'follow' and rech:
                 time.sleep(ZVUK_SEK)                       # звук фоловера (≈4 с) — договорит, потом «спасибо»
         except Exception:

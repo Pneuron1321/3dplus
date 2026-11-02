@@ -60,6 +60,7 @@ STOP = os.environ.get('GOLOS_STOP', '/tmp/golos.stop')
 USKOR = os.environ.get('GOLOS_USKOR', '/tmp/golos.uskor')
 PAUZA = os.environ.get('GOLOS_PAUZA', '/tmp/golos.pauza')
 DALSHE = os.environ.get('GOLOS_DALSHE', '/tmp/golos.dalshe')
+PROPUSK = os.environ.get('GOLOS_PROPUSK', '/tmp/golos.propusk')   # 03.11: «плюс темп» — этот ответ пропустить, дальше следующий
 REZHIM = os.environ.get('GOLOS_REZHIM', '/root/.golos-rezhim')
 OFF = os.environ.get('GOLOS_OFF', '/root/.golos-off')
 ZAMER = os.environ.get('GOLOS_ZAMER', '/tmp/zamer.log')
@@ -238,12 +239,16 @@ VED_TISHINA = 1.0
 # 30.10 (Александр: «не остановился… и делает очень большие паузы»): Плюс, замолчавший из-за Александра, продолжает
 # сам, когда тот замолчал PLUS_TISHINA с (раньше ждал «дальше» от ушей — а на простую речь без «плюс плюс» его нет,
 # и пауза тянулась до PAUZA_MAKS). Микрофона нет — продолжает через PLUS_BEZ_MIK с.
-PLUS_TISHINA = 2.0                 # 30.10 вечером (Александр: «начинает сразу, а я могу продолжить») — было 1,2
+PLUS_TISHINA = 3.0                 # 03.11 (Александр: «ждёт на секунду дольше») — было 2,0 (30.10), до того 1,2
 # Ответ Плюса начинается, только когда Александр молчит PLUS_PERED с (он мог просто перевести дух); говорит дольше
 # PLUS_PERED_MAKS — Плюс всё равно начинает (ответ не теряется).
 PLUS_PERED = 1.0
 PLUS_PERED_MAKS = 12.0
 PLUS_BEZ_MIK = 3.0
+# 1.11 (Александр: «перебил — замолчи, договорил — продолжи с места обрыва, не повторяй сказанное»):
+PLUS_DOLGO = 30.0                  # с: Александр говорил дольше — остаток оборванного ответа не договариваем
+LAT_ZVUKA = 0.2                    # с: звук доходит до уха позже метки времени (буфер моста) — берём с запасом
+KONEC_PREDL = 0.4                  # с: до конца предложения остаётся меньше — оно уже, считай, прозвучало
 VED_ZHDAT = 30.0
 VED_DOGOVOR = 2.0                  # с тишины, после которой соведущая договаривает оборванное (21.10); ждёт не дольше VED_ZHDAT
 VED_PEREBIT = 2                    # замеров подряд (по 0,15 с) громче порога, пока она говорит, — он перебил
@@ -251,6 +256,21 @@ VED_PEREBIT = 2                    # замеров подряд (по 0,15 с) 
 # громче порога 0,3 с (два замера), даже если говорит не ему. Прерванное не теряется: «плюс плюс» — и Плюс продолжит
 # с прерванной фразы; не позвали за PAUZA_MAKS — не договаривает. Порог — /root/.golos-porog (дБ), нет — как у соведущей.
 GOLOS_POROG_F = os.environ.get('GOLOS_POROG', '/root/.golos-porog')
+# 03.11 (Александр): как Плюс уступает, когда Александр заговорил поверх — /root/.golos-perebivat:
+#   нет файла — основной режим «фраза»: Плюс договаривает начатое предложение (или порцию, если меток нет), потом
+#     молчит, пока Александр не помолчит PLUS_TISHINA с, и продолжает со следующего предложения;
+#   srazu — замолкает сразу (как было с 29.10); net — не уступает вовсе (остановит только «тихо»/«стоп»).
+# `golos perebivat fraza|srazu|net`.
+PEREBIVAT_F = os.environ.get('GOLOS_PEREBIVAT', '/root/.golos-perebivat')
+PEREBIVAT = ('fraza', 'srazu', 'net')
+
+
+def perebivat_rezhim():
+    try:
+        r = open(PEREBIVAT_F).read().strip()
+    except OSError:
+        return 'fraza'
+    return r if r in PEREBIVAT else 'fraza'
 
 
 def log(*a):
@@ -461,6 +481,39 @@ def razmetka(predl, sobytiya, dlit):
     for j in range(1, len(otvet)):                 # время не идёт назад
         otvet[j] = max(otvet[j], otvet[j - 1])
     return otvet
+
+
+def slovesnye(sob, predl):
+    """Метки синтеза — по словам, а не по предложениям (edge-tts 7.x по умолчанию даёт только предложения)?"""
+    if not sob or len(sob) <= len(predl):
+        return False
+    return sum(len((s or '').split()) for _, _, s in sob) <= 1.5 * len(sob)
+
+
+def ostatok_po_slovam(predl, sob, pos):
+    """Что не прозвучало к моменту pos (с): список предложений, первое — обрезок предложения с первого
+    недосказанного слова. [] — всё уже прозвучало; None — по меткам не найти."""
+    nachala = [0]
+    for f in predl[:-1]:
+        nachala.append(nachala[-1] + len(f) + 1)
+    tekst = ' '.join(predl)
+    low = tekst.lower()
+    if len(low) != len(tekst):
+        return None
+    poz, nashli = 0, 0
+    for t, d, slova in sob:
+        s = (slova or '').strip().lower()
+        if not s:
+            continue
+        i = low.find(s, poz)
+        if i < 0:
+            continue
+        nashli += 1
+        poz = i + len(s)
+        if t + d > pos:
+            j = max(n for n, x in enumerate(nachala) if x <= i)
+            return [tekst[i:nachala[j] + len(predl[j])]] + list(predl[j + 1:])
+    return [] if nashli else None
 
 
 def zagruzit_titr():
@@ -855,6 +908,8 @@ class Kusok:
         self.mp3 = {}             # темп → путь, False — не вышел, PUSTO — сказать нечего
         self.nachala = {}         # темп → где в звуке начинается каждое предложение (с)
         self.dlit = {}            # темп → длительность звука (с)
+        self.sob = {}             # темп → метки синтеза (с, длительность, текст): по словам или по предложениям
+        self.vid = None           # откуда пришло: hook, pre, potok0, potok, ved… (потом — «новая ли это реплика»)
 
     @property
     def temp(self):
@@ -901,8 +956,12 @@ class Golos:
         self.perebil_plus = 0.0    # 29.10: когда Александр заговорил поверх Плюса (Плюс замолкает до «плюс плюс»)
         self.perebil_plus_uchten = 0.0
         self.perebil_zhdu = 0.0    # 30.10: Плюс молчит из-за Александра (время) — продолжит, когда тот замолчит
+        self.srez_plus = 0.0       # 03.11: Александр заговорил — Плюс договаривает предложение и замолкает (режим «фраза»)
+        self.tp = vremya(PROPUSK)
         self.plus_zhdu = None      # 30.10: (uid, с какого времени) — начало ответа ждёт секунду тишины
         self.mik_plus = 0
+        self.plus_ostatok = None   # 1.11: (uid, когда) ответа Плюса, оборванного Александром: остаток договорит после тишины
+        self.perebil_nachalo = 0.0 # когда Александр заговорил поверх Плюса (сколько он говорил — mik_gromko минус это)
         self.perebil = 0.0         # когда Александр заговорил поверх соведущей (её обрываем)
         self.perebil_uchten = 0.0
         self.ved_ostatok = None    # uid реплики соведущей, оборванной Александром: остаток договорит после тишины
@@ -1041,6 +1100,7 @@ class Golos:
                 if vid == 'ved':
                     k.golos = VOICE_VED    # соведущая — голосом Серафины (12.10), остальное как у Авы
                 k.uho = vid == 'uho'
+                k.vid = vid
                 self.q.append(k)
             self.cv.notify_all()
 
@@ -1087,7 +1147,7 @@ class Golos:
             self.q.pop(0)
             self.ubrat_mp3(k)
             nov = Kusok(k.predl[j:], k.uid, k.t, False, k.dosluh)
-            nov.bystro, nov.golos = k.bystro, k.golos
+            nov.bystro, nov.golos, nov.vid, nov.uho = k.bystro, k.golos, k.vid, k.uho
             i = 0
             while i < len(self.q) and self.q[i].chat:
                 i += 1
@@ -1134,10 +1194,19 @@ class Golos:
         if self.perebil_plus > self.perebil_plus_uchten:
             self.perebil_plus_uchten = self.perebil_plus
             ig = self.igrok
-            if ig is not None and getattr(getattr(ig, 'kusok', None), 'golos', None) != VOICE_VED:
+            if ig is not None and getattr(getattr(ig, 'kusok', None), 'golos', None) != VOICE_VED \
+                    and perebivat_rezhim() == 'fraza':
+                if not self.srez_plus:
+                    self.srez_plus = time.time()  # договорит предложение — srez_perebil
+                    log('Александр заговорил — Плюс договорит фразу и замолчит')
+            elif ig is not None and getattr(getattr(ig, 'kusok', None), 'golos', None) != VOICE_VED:
                 proshlo = time.time() - getattr(ig, 't0', time.time())
+                kk = getattr(ig, 'kusok', None)
                 self.stop_igrok()
-                self.s_prervannoy(ig, proshlo)   # «плюс плюс» — продолжит с прерванной фразы
+                self.s_prervannoy(ig, proshlo)   # продолжит с места обрыва, сказанное не повторяет
+                if kk is not None and not kk.chat:
+                    self.plus_ostatok = (kk.uid, time.time())
+                self.perebil_nachalo = time.time()
                 self.vnesh = time.time()         # пауза: продолжит, когда Александр замолчит (или «дальше»)
                 self.zhdu_dosluh = False
                 self.perebil_zhdu = self.mik_gromko = time.time()
@@ -1150,7 +1219,17 @@ class Golos:
                     and now - self.perebil_zhdu >= PLUS_TISHINA:
                 self.perebil_zhdu = 0.0
                 self.dl = now
-                log('Александр замолчал — Плюс продолжает')
+                if self.plus_ostatok and self.mik_gromko - self.perebil_nachalo > PLUS_DOLGO:
+                    uid = self.plus_ostatok[0]
+                    self.vybrosit(lambda x: x.uid == uid)
+                    self.plus_ostatok = None
+                    log('Александр говорил дольше %d с — остаток не договариваю' % PLUS_DOLGO)
+                else:
+                    log('Александр замолчал — Плюс продолжает')
+        tp = vremya(PROPUSK)
+        if tp > self.tp:
+            self.tp = tp
+            self.propustit_otvet()
         self.ostatok_ustarel()
         dl = vremya(DALSHE)
         if dl > self.dl:
@@ -1172,9 +1251,65 @@ class Golos:
             log('пауза затянулась — прерванное не договариваю')
         self.novyy_efir()
 
+    def propustit_otvet(self):
+        """«Плюс темп»: звучащий ответ (все его порции) — не договаривать; следующий в очереди — сразу."""
+        k = getattr(self.igrok, 'kusok', None)
+        with self.cv:
+            if k is None and self.q:
+                k = self.q[0]
+        if k is None:
+            log('темп: пропускать нечего')
+            return
+        uid = k.uid
+        self.stop_igrok()
+        self.vybrosit(lambda x: x.uid == uid)
+        self.srez_plus = self.perebil_zhdu = 0.0
+        self.plus_ostatok = None
+        self.vnesh, self.dl = 0.0, time.time()             # и пауза снята: следующий — без ожидания
+        self.zhdu_dosluh = False
+        log('темп: ответ пропущен, дальше — следующий')
+
+    def pauza_perebil(self, uid=None):
+        """Плюс договорил фразу при Александре — молчит, пока тот не помолчит PLUS_TISHINA с. Остаток (uid) — как
+        у обрыва «сразу»: Александр говорил дольше PLUS_DOLGO или пришла новая реплика — не договаривает."""
+        if uid is not None:
+            self.plus_ostatok = (uid, time.time())
+        self.perebil_nachalo = self.srez_plus or time.time()
+        self.srez_plus = 0.0
+        self.vnesh = time.time()
+        self.zhdu_dosluh = False
+        self.perebil_zhdu = self.mik_gromko = time.time()
+        log('Плюс договорил фразу — ждёт, пока Александр замолчит')
+
+    def srez_perebil(self):
+        """Режим «фраза»: Александр заговорил — оборвать в паузе перед следующим предложением (как для чата),
+        несказанное — первым в очереди; последнее предложение порции — доиграет, пауза — после (igra)."""
+        igrok = self.igrok
+        k = getattr(igrok, 'kusok', None)
+        with self.cv:
+            if not self.q or k is not self.q[0] or k.golos == VOICE_VED:
+                self.srez_plus = 0.0
+                return
+            nachala = k.nachala.get(getattr(igrok, 'temp', None)) or []
+            proshlo = time.time() - getattr(igrok, 't0', time.time())
+            j = next((i for i, n in enumerate(nachala) if i > 0 and n > proshlo), None)
+            if j is None or j >= len(k.predl) or proshlo < nachala[j] - SREZ_ZAPAS:
+                return
+        self.stop_igrok()
+        with self.cv:
+            if self.q and self.q[0] is k:
+                self.q.pop(0)
+                self.ubrat_mp3(k)
+                nov = Kusok(k.predl[j:], k.uid, k.t, False, k.dosluh)
+                nov.bystro, nov.golos, nov.vid, nov.uho = k.bystro, k.golos, k.vid, k.uho
+                self.q.insert(0, nov)
+                self.cv.notify_all()
+        self.pauza_perebil(None if k.chat else k.uid)
+
     def ostatok_ustarel(self):
         """Остаток оборванной реплики соведущей не договариваем, если уже есть новая реплика соведущей
         или ответ Плюса (звучит или ждёт в очереди); чат вслух не в счёт. Сам остаток кончился — забываем."""
+        self.plus_ostatok_ustarel()
         uid = self.ved_ostatok
         if uid is None:
             return
@@ -1187,6 +1322,23 @@ class Golos:
             self.vybrosit(lambda x: x.uid == uid)
             self.ved_ostatok = None
             log('остаток соведущей не договариваю: уже есть новая реплика')
+
+    def plus_ostatok_ustarel(self):
+        """Остаток ответа Плюса, оборванного Александром, не договариваем, если после обрыва пришла новая реплика
+        Плюса (не продолжение рации, не соведущая, не чат). Сам остаток кончился — забываем."""
+        if not self.plus_ostatok:
+            return
+        uid, t = self.plus_ostatok
+        with self.cv:
+            est = any(k.uid == uid for k in self.q)
+            novaya = any(k.uid != uid and not k.chat and k.golos != VOICE_VED and k.vid != 'potok'
+                         and k.t > t - 0.5 for k in self.q)
+        if not est:
+            self.plus_ostatok = None
+        elif novaya:
+            self.vybrosit(lambda x: x.uid == uid)
+            self.plus_ostatok = None
+            log('остаток Плюса не договариваю: уже есть новая реплика')
 
     def pauza(self):
         return max(self.pz, self.vnesh) > self.dl
@@ -1226,29 +1378,59 @@ class Golos:
         self.titry.otmena()
 
     def s_prervannoy(self, igrok, proshlo):
-        """Порцию оборвали на proshlo с: дальше — с начала прерванного предложения (по меткам
-        синтеза), а не с начала всей порции."""
+        """Порцию оборвали на proshlo с: уже прозвучавшее не повторяем. Метки по словам есть — продолжим с первого
+        недосказанного слова; только по предложениям (edge-tts 7.x) — с начала прерванного предложения (точнее без
+        меток не сказать); предложение почти досказано (<KONEC_PREDL с) — со следующего, досказано всё — порция
+        снимается. Порция не тронута (оборвали в первом предложении) — звук в кэше, играет заново сразу."""
         with self.cv:
             if not self.q or getattr(igrok, 'kusok', None) is not self.q[0]:
                 return
             k = self.q[0]
-            nachala = k.nachala.get(getattr(igrok, 'temp', None))
-            if len(k.predl) < 2 or not nachala:
+            temp = getattr(igrok, 'temp', None)
+            pos = proshlo - LAT_ZVUKA
+            dlit = k.dlit.get(temp) or 0.0
+            nachala = k.nachala.get(temp)
+            if not nachala and dlit > 0:
+                nachala = razmetka(k.predl, None, dlit)        # меток нет — по доле знаков
+            sob = k.sob.get(temp)
+            ost, kak = None, ''
+            if sob and slovesnye(sob, k.predl):
+                ost, kak = ostatok_po_slovam(k.predl, sob, pos), 'по словам'
+            if ost is None:
+                if not nachala:
+                    return
+                j = max([i for i, n in enumerate(nachala) if n <= pos + 0.05] or [0])
+                konec = nachala[j + 1] if j + 1 < len(nachala) else dlit
+                if konec and pos > nachala[j] + 0.1 and konec - pos < KONEC_PREDL:
+                    j += 1                                       # предложение уже, считай, прозвучало (что-то звучало)
+                ost, kak = list(k.predl[j:]), 'по предложениям'
+            if ost == list(k.predl):
                 return
-            j = max(i for i, n in enumerate(nachala) if n <= proshlo + 0.05)
-            if j == 0:
+            if not ost:
+                self.q.pop(0)
+                self.ubrat_mp3(k)
+                self.cv.notify_all()
+                log('порция уже прозвучала — не повторяю (%s)' % kak)
                 return
-            nov = Kusok(k.predl[j:], k.uid, k.t, False, k.dosluh)
-            nov.bystro, nov.golos = k.bystro, k.golos
+            nov = Kusok(ost, k.uid, k.t, False, k.dosluh)
+            nov.bystro, nov.golos, nov.chat, nov.uho, nov.vid = k.bystro, k.golos, k.chat, k.uho, k.vid
+            if ost[0] not in k.predl:       # обрезок предложения: перевод для субтитра — от целого
+                for f in k.predl:
+                    if f.endswith(ost[0]):
+                        pv = getattr(self.titry, 'perevody', {}).get(k.uid)
+                        if pv and f in pv:
+                            pv[ost[0]] = pv[f]
             self.ubrat_mp3(k)
             self.q[0] = nov
             self.cv.notify_all()
-            log('продолжу с фразы %d из %d' % (j + 1, len(k.predl)))
+            log('продолжу с места обрыва (%s): осталось %d из %d' % (kak, len(ost), len(k.predl)))
 
     # --- игра ---
     def igra(self):
         if self.igrok:
             self.srez_dlya_chata()
+        if self.igrok and self.srez_plus:
+            self.srez_perebil()
         if self.igrok:
             end = self.igrok.konec()
             if end is None:
@@ -1262,6 +1444,13 @@ class Golos:
                 if k is not None:
                     self.vybrosit(lambda x: x is k)
                     self.zhdat_dosluh(k)
+                if self.srez_plus:                 # «фраза»: договорил порцию при Александре — дальше после тишины
+                    with self.cv:
+                        est = bool(self.q)
+                    if est:
+                        self.pauza_perebil()            # порция досказана целиком — следующие порции ответа ждут
+                    else:
+                        self.srez_plus = 0.0
             elif end == 'stopped':
                 self.vnesh = time.time()   # мост оборвал сам — это вызов, ждём «дальше»
                 self.titry.otmena()
@@ -1386,7 +1575,7 @@ class Golos:
                         self.mik_gromko = now
                 else:
                     self.mik_podryad = 0
-                if zvuchit_plus:              # 29.10: Плюс — так же: два замера громче порога — замолкает
+                if zvuchit_plus and perebivat_rezhim() != 'net':   # 29.10: два замера громче порога — уступает
                     self.mik_plus = self.mik_plus + 1 if db <= golos_porog() else 0
                     if self.mik_plus >= VED_PEREBIT:
                         self.perebil_plus, self.mik_plus = now, 0
@@ -1475,10 +1664,13 @@ class Golos:
                 except OSError:
                     dlit = 0.0
                 nachala = razmetka(k.predl, getattr(self.sintez, 'metki', None), dlit)
+            sob = getattr(self.sintez, 'metki', None) if ok else None
             with self.cv:
                 k.mp3[temp] = put if ok else (PUSTO if ok is None else False)
                 if ok:
                     k.nachala[temp], k.dlit[temp] = nachala, dlit
+                    if sob:
+                        k.sob[temp] = list(sob)
                 if k not in self.q and ok:
                     try:
                         os.remove(put)
@@ -1702,6 +1894,21 @@ if __name__ == '__main__':
         else:
             print('Голос Плюса: %s (со следующей фразы). Соведущая — как была.' % (
                 'свой (ElevenLabs, ниже на %s полутона)' % eleven_nizhe() if a[1] == 'moy' else golos_plusa()))
+        sys.exit(0)
+    if a and a[0] == 'perebivat':
+        if len(a) != 2 or a[1] not in PEREBIVAT:
+            print('golos perebivat fraza | srazu | net — сейчас: %s' % perebivat_rezhim())
+            sys.exit(1)
+        if a[1] == 'fraza':
+            try:
+                os.remove(PEREBIVAT_F)
+            except OSError:
+                pass
+        else:
+            open(PEREBIVAT_F, 'w').write(a[1] + '\n')
+        print({'fraza': 'Заговоришь поверх — Плюс договорит фразу и подождёт, пока ты замолчишь (%g с).' % PLUS_TISHINA,
+               'srazu': 'Заговоришь поверх — Плюс замолкает сразу.',
+               'net': 'Плюс не уступает: договаривает всё; остановить — «тихо» или «стоп».'}[a[1]])
         sys.exit(0)
     if a and a[0] in ('nizhe', 'ton'):
         if len(a) < 2 or not re.fullmatch(r'\d{1,2}', a[1]):

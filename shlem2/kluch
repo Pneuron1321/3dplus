@@ -56,6 +56,14 @@ if [ "$1" = eleven ]; then
   esac
   exit 0
 fi
+if [ "$1" = kick-id ] || [ "$1" = kick-secret ]; then
+  case "$k" in *[!A-Za-z0-9_-]*|'') echo "В буфере не ${1#kick-} приложения Kick: только латинские буквы, цифры, - и _."; exit 1 ;; esac
+  [ ${#k} -ge 16 ] && [ ${#k} -le 128 ] || { echo "В буфере не ${1#kick-} приложения Kick: длина ${#k}."; exit 1; }
+  printf '%s\n' "$k" > "$D/.kick-app-${1#kick-}"
+  timeout 10 $T/termux-clipboard-set ' ' 2> /dev/null
+  echo "${1#kick-} приложения Kick сохранён (${#k} знаков). Буфер очищен."
+  exit 0
+fi
 if [ "$1" = twitch-id ] || [ "$1" = twitch-secret ]; then
   case "$k" in *[!a-z0-9]*|'') echo "В буфере не ${1#twitch-} приложения Twitch: там только строчные латинские буквы и цифры (около 30)."; exit 1 ;; esac
   [ ${#k} -ge 20 ] && [ ${#k} -le 40 ] || { echo "В буфере не ${1#twitch-} приложения Twitch: длина ${#k}, а должно быть около 30."; exit 1; }
