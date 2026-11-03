@@ -97,7 +97,7 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     val zazor = Vizor.ZAZOR.toInt()
     val chatNiz = H - kameraVerhGl - zazor                                                      // музыка — слева под Плюсом
     val schet = Schet({ null }, { }).apply {
-        upr(mapOf("zr_tw" to "37", "zr_kick" to "12", "zr_yt" to "5", "pod_tw" to "1284", "pod_kick" to "310", "pod_yt" to "96",
+        upr(mapOf("zr_tw" to "37", "zr_kick" to "12", "zr_yt" to "5", "pod_tw" to "37", "pod_kick" to "8",
             "nik" to "3xsks_fu_gun", "ssylka" to "streamelements.com/3xsks_fu_gun/tip"))
     }
     val svH = if (v.schet) Vizor.schetH(2) + Vizor.ZAZOR else 0f
@@ -186,6 +186,7 @@ private fun scenaViz(sc: String, min: String, t: String, dir: File): ABitmap {
     val b = ABitmap.createBitmap(1920, 1080, ABitmap.Config.ARGB_8888)
     val now = System.currentTimeMillis()
     val plyus = { c: ACanvas, r: android.graphics.RectF -> zvat(n, "plyusKrupno", c, r); Unit }
+    viz.zhivoyPlyus = true                                      // 2.8.5: Плюс — живым слоем "sp" поверх (как в приложении)
     if (sc.isEmpty()) viz.itogi(b, 47 * 60_000L, plyus = plyus)
     else {
         Oformlenie.scenaUpr(mapOf("s" to sc, "min" to min, "t" to t), now)
@@ -197,5 +198,12 @@ private fun scenaViz(sc: String, min: String, t: String, dir: File): ABitmap {
     val kc = ACanvas(kadr)
     igraFon(kc.sk(), 1920, 1080)
     kc.drawBitmap(b, 0f, 0f, null)
+    val (cx, niz, vys) = Vizor.spMesto(sc == "skoro" || sc == "otoshyol")
+    val sp = ABitmap.createBitmap(Vizor.SP_W, Vizor.SP_H, ABitmap.Config.ARGB_8888)
+    val kt = vys / Vizor.TELO_H
+    zvat(n, "teloViz", ACanvas(sp), "govorit", now, (Vizor.SP_W - Vizor.TELO_W * kt) / 2f, Vizor.SP_H - 12f - vys, kt,
+        Vizor.SP_W.toFloat(), Vizor.SP_H.toFloat())
+    kc.drawBitmap(sp, cx - Vizor.SP_W / 2f, niz + 12f - Vizor.SP_H, null)                       // sp — живой Плюс
+    viz.zhivoyPlyus = false
     return kadr
 }

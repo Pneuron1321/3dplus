@@ -441,6 +441,16 @@ class EarService : Service() {
                             Hub.ear.post("tiho")
                             status = "Уши: тихо."
                         }
+                        h.action == "temp" -> {                   // 2.8.5: «плюс темп» — этот ответ пропустить (голос в Termux)
+                            beep(Signal.Kind.TIHO)
+                            Hub.ear.post("temp")
+                            status = "Уши: темп — следующий ответ."
+                        }
+                        h.action == "pauza" -> {                  // 2.8.5: «плюс пауза» — голос на паузу / дальше с того же места
+                            beep(Signal.Kind.TIHO)
+                            Hub.ear.post("pauza")
+                            status = "Уши: пауза голоса (ещё раз — дальше)."
+                        }
                         h.action.startsWith("compact:") -> {
                             beep(Signal.Kind.COMPACT)
                             Hub.ear.post("compact", h.action.removePrefix("compact:"))

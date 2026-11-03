@@ -204,6 +204,15 @@ object Vizor {
     const val NK_H = 36
     val NK_VERH = H - NK_H - 2f
 
+    // слой "sp" — живой Плюс на сценах и в итогах (2.8.5, Александр 05.11: «в итогах — анимация разговора и моргания»):
+    // во весь рост, поверх "vse" и "sc"; место — по сцене (Nalozhenie кладёт сюда, развилка берёт)
+    const val SP_W = 600
+    const val SP_H = 920
+    /** Низ и центр фигуры: «скоро» и «отошёл» — (1440; 1020), рост 900; итоги и конец — (1470; 1000), рост 860. */
+    fun spMesto(skoro: Boolean): Triple<Float, Float, Float> = if (skoro) Triple(1440f, 1020f, 900f) else Triple(1470f, 1000f, 860f)
+    @Volatile var spX = 0f
+    @Volatile var spY = 0f
+
     // слой "dn" — строка доната (2.8.2): слева вверху, под карточкой топа (её нет — на её месте)
     val DN_VERH = LV.b + ZAZOR
 

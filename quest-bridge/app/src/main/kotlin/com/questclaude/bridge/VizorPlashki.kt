@@ -232,6 +232,7 @@ class VizorPlashki(
     // ---------- счётчики (правый столбец под налётом) и ник внизу (2.8.2) ----------
 
     private val schetK = kist.kist(kist.zagolovki, Vizor.SCHET)
+    private val celK = kist.kist(kist.zagolovki, Vizor.METKA, 0xB3EEF2F7.toInt())
     private val serdceP = Path()
     private val krug = Paint(Paint.ANTI_ALIAS_FLAG)
     private val nikNizK = kist.kist(kist.zagolovki, Vizor.NIK_NIZ)
@@ -258,8 +259,12 @@ class VizorPlashki(
             else { krug.color = Vizor.FIOLET; serdce(c, p + 10f, cy, 8f) }
             val chislo = Schet.krasivo(m.values.sum())
             schetK.color = if (zr) Vizor.LED else Vizor.ZOLOTO
-            // точки площадок справа — если число влезает и с ними (число не режем никогда)
-            if (p + 26f + schetK.measureText(chislo) + 8f + 14f * m.size <= w - p) {
+            // 2.8.5: у фолловеров — цель «/ 13,000» мельче, если влезает (тогда без точек площадок)
+            val cel = if (!zr && s.celPod > 0) " / " + Schet.krasivo(s.celPod) else ""
+            if (cel.isNotEmpty() && p + 26f + schetK.measureText(chislo) + celK.measureText(cel) <= w - p) {
+                c.drawText(cel, p + 26f + schetK.measureText(chislo), cy + 9f, celK)
+            } else if (p + 26f + schetK.measureText(chislo) + 8f + 14f * m.size <= w - p) {
+                // точки площадок справа — если число влезает и с ними (число не режем никогда)
                 var tx = w - p - 6f
                 for (pl in Schet.PLOSHCHADKI.reversed()) if (pl in m) {
                     krug.color = Vizor.ploshchadka(pl).second
@@ -404,6 +409,8 @@ class VizorPlashki(
     // ---------- во весь кадр: итоги и сцены ----------
 
     private var rost: Bitmap? = null                  // Плюс в полный рост — только пока сцена на экране
+    /** 2.8.5: Плюс на сцене рисуется живым отдельным слоем "sp" (Nalozhenie) — на картинке сцены его нет. */
+    @Volatile var zhivoyPlyus = false
 
     /** Сцена прочь — картинку Плюса в полный рост отпустить. */
     fun osvobodit() { rost?.recycle(); rost = null }
@@ -495,6 +502,7 @@ class VizorPlashki(
             stroki.forEachIndexed { i, l -> c.drawText(l, r.left + 24f, r.top + 22f + 32f + i * 44f, frazaK) }
         }
         val rp = rostPlyusa()
+        if (zhivoyPlyus) return
         if (skoro && rp != null) {
             val vys = 900f
             val shir = vys * rp.width / rp.height
@@ -538,6 +546,7 @@ class VizorPlashki(
         c.drawText("Thanks for watching!", x, 1032f, tekstK)
         tekstK.color = Vizor.LED
         val rp = rostPlyusa()
+        if (zhivoyPlyus) return
         if (rp != null) {
             val vys = 860f
             val shir = vys * rp.width / rp.height

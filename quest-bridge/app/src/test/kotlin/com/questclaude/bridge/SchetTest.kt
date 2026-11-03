@@ -78,4 +78,13 @@ class SchetTest {
         s.upr(mapOf("niki" to "0"))
         assertEquals("", s.nizSeychas(0))
     }
+
+    @Test fun celFolloverov13000() {
+        val s = novyj()
+        assertEquals(13_000L, s.celPod)                                         // Александр 02.11
+        s.upr(mapOf("cel_pod" to "20 000"))
+        assertEquals(20_000L, novyj().celPod)
+        s.upr(mapOf("cel_pod" to "0"))
+        assertEquals(0L, s.celPod)
+    }
 }

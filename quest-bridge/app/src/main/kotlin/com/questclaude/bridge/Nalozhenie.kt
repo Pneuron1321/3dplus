@@ -141,6 +141,7 @@ class Nalozhenie(
     private val titrV by lazy { Bitmap.createBitmap(Vizor.TW, Vizor.TH, Bitmap.Config.ARGB_8888) }
     private val mzV by lazy { Bitmap.createBitmap(Vizor.MZW, Vizor.MZH, Bitmap.Config.ARGB_8888) }
     private var scenaBmp: Bitmap? = null                         // 1920×1080 — только пока сцена на экране
+    private var spBmp: Bitmap? = null                            // 2.8.5: живой Плюс сцены (Vizor.SP_W×SP_H), пока сцена
     private val dvizhenie = Roza3D.Dvizhenie()                        // как крутится роза в этом эфире
     @Volatile private var rabotaet = false
     private var potok: Thread? = null
@@ -210,6 +211,8 @@ class Nalozhenie(
             var muzMs = 0L
             var stilBylo = ""
             var scenaBylo = ""
+            var spBylo = ""
+            var spMs = 0L
             var schetBylo = ""
             var nikBylo = ""
             while (rabotaet) {
@@ -230,6 +233,8 @@ class Nalozhenie(
                     }
                 }
                 val sost = sostoyanie(now)
+                val zhivoy = v && telo != null && Oformlenie.lico == "plus" && (Oformlenie.scena.isNotEmpty() || itogi.vidny)
+                if (v) viz.zhivoyPlyus = zhivoy                       // 2.8.5: до сцен — на их картинке Плюса нет
                 val razgovor = sost == "govorit" || sost == "slushaet" || sost == "dumaet"
                 val tesnoIgre = Hub.dispetcher.igre                   // тесно игре — бридж сбрасывает своё
                 mimika(now, sost == "govorit", sost == "obychno",
@@ -353,7 +358,7 @@ class Nalozhenie(
                 }
                 shag("итоги") {
                     val e = efir()                                    // итоги — во весь кадр, раз в секунду
-                    val iKlyuch = if (!itogi.vidny) "net" else "${itogi.versiya} ${now / 1000} ${cel.status()}"
+                    val iKlyuch = if (!itogi.vidny) "net" else "${itogi.versiya} ${now / 1000} ${cel.status()} $zhivoy"
                     if (iKlyuch != itogiBylo) {
                         if (!itogi.vidny) {
                             razvilka.sloy("vse", null)
@@ -374,8 +379,8 @@ class Nalozhenie(
                     val tajmer = Oformlenie.doMs != 0L
                     val sKlyuch = when {
                         sc.isEmpty() -> "net"
-                        sc == "konec" -> "${Oformlenie.versiya} $sc ${itogi.versiya} ${now / 1000}"
-                        else -> "${Oformlenie.versiya} $sc ${if (tajmer) (ost + 999) / 1000 else 0}"
+                        sc == "konec" -> "${Oformlenie.versiya} $sc ${itogi.versiya} ${now / 1000} $zhivoy"
+                        else -> "${Oformlenie.versiya} $sc ${if (tajmer) (ost + 999) / 1000 else 0} $zhivoy"
                     }
                     if (sKlyuch != scenaBylo) {
                         if (sc.isEmpty()) {
@@ -392,7 +397,30 @@ class Nalozhenie(
                         scenaBylo = sKlyuch
                     }
                 }
-                Thread.sleep(if (anim || Hub.fon?.plashkaVidna(now) == true) 70 else 200)                // шаг 70 мс; что перерисовать — решают плашки
+                shag("живой Плюс") {                                  // 2.8.5: на сценах и в итогах — говорит и моргает
+                    val sc = Oformlenie.scena
+                    if (!zhivoy) {
+                        if (spBylo.isNotEmpty()) { razvilka.sloy("sp", null); spBmp?.recycle(); spBmp = null }
+                        spBylo = ""
+                    } else {
+                        val govorit = sost == "govorit"
+                        val k = "$sost $morgaet $ulybka ${if (govorit) now / 110 else now / 400}"
+                        if (k != spBylo && now - spMs >= 100L) {
+                            val (cx, niz, vys) = Vizor.spMesto(sc == "skoro" || sc == "otoshyol")
+                            val b = spBmp ?: Bitmap.createBitmap(Vizor.SP_W, Vizor.SP_H, Bitmap.Config.ARGB_8888).also { spBmp = it }
+                            val cs = Canvas(b)
+                            cs.drawColor(0, PorterDuff.Mode.CLEAR)
+                            val kt = vys / Vizor.TELO_H
+                            teloViz(cs, sost, now, (Vizor.SP_W - Vizor.TELO_W * kt) / 2f, Vizor.SP_H - 12f - vys, kt,
+                                Vizor.SP_W.toFloat(), Vizor.SP_H.toFloat())
+                            Vizor.spX = cx - Vizor.SP_W / 2f
+                            Vizor.spY = niz + 12f - Vizor.SP_H
+                            razvilka.sloy("sp", b)
+                            spBylo = k; spMs = now
+                        }
+                    }
+                }
+                Thread.sleep(if (anim || spBylo.isNotEmpty() || Hub.fon?.plashkaVidna(now) == true) 70 else 200)                // шаг 70 мс; что перерисовать — решают плашки
             }
         }
     }
@@ -415,9 +443,10 @@ class Nalozhenie(
         rabotaet = false
         potok?.join(1000)
         kompas.stop()
-        try { for (u in listOf("pv", "pl", "lv", "nc", "pc", "vse", "lg", "lb", "mz", "vv", "vn", "sc")) razvilka.sloy(u, null) } catch (e: Exception) { }
+        try { for (u in listOf("pv", "pl", "lv", "nc", "pc", "vse", "lg", "lb", "mz", "vv", "vn", "sc", "sp", "sv", "nk")) razvilka.sloy(u, null) } catch (e: Exception) { }
         itogiBmp?.recycle(); itogiBmp = null
         scenaBmp?.recycle(); scenaBmp = null
+        spBmp?.recycle(); spBmp = null
         Oformlenie.sbros()                                            // следующий эфир — без прошлой заставки
         itogi.konecEfira()
         nalet.zapisat()

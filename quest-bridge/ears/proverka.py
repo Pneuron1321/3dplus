@@ -22,7 +22,7 @@ MIN = T['minConf']
 MODELS = {lang: Model('app/src/main/assets/' + m['asset']) for lang, m in T['models'].items()}
 
 RU = {'плюс плюс': 'wake', 'зум зум': 'zoom:x2', 'зум зум зум': 'zoom:x4',
-      'зум зум центр': 'zoom:centr', 'плюс тихо': 'tiho',
+      'зум зум центр': 'zoom:centr', 'плюс тихо': 'tiho', 'плюс темп': 'temp', 'плюс пауза': 'pauza',
       'плюс плюс компакт': 'compact:prep', 'плюс плюс компакт плюс': 'compact:go',
       'плюс плюс в ухо': 'rezhim:uho', 'плюс плюс вслух': 'rezhim:vsluh',
       'чек чек': 'plenka:7', 'зум чек': 'plenka:13', 'чек чек плюс': 'wake:chek'}

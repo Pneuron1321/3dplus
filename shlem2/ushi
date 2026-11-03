@@ -933,9 +933,12 @@ def ved_plus_otvet():
         pass
 
 
+VED_POMETKA_ZNAKOV = 600         # 05.11: было 200 — Плюс не видел конца мысли соведущей
+
+
 def ved_pometka():
     """«(с соведущей с прошлого раза: Александр: «…» — она: «…»)» — новые записи журнала разговора с ней
-    (не больше 3, по 200 знаков, без дублей); нет новых — пусто. Плюс знает о них без команд."""
+    (не больше 3, по VED_POMETKA_ZNAKOV знаков, без дублей); нет новых — пусто. Плюс знает о них без команд."""
     ved_plus_otvet()
     try:
         last = float(open(VED_DOSTAVLENO).read() or 0)
@@ -954,7 +957,9 @@ def ved_pometka():
             if time.time() - z.get('t', 0) > VED_POMETKA_MIN * 60:
                 continue
             if z.get('rol') == 'ved' or (z.get('rol') == 'alex' and z.get('komu') == 'ved'):
-                tx = ' '.join(str(z.get('ru') or z.get('tekst') or '').split())[:200]
+                tx = ' '.join(str(z.get('ru') or z.get('tekst') or '').split())
+                if len(tx) > VED_POMETKA_ZNAKOV:              # 05.11 (отчёт Плюса 02.11: «обрезает на ~200, конец мысли не видно»)
+                    tx = tx[:VED_POMETKA_ZNAKOV].rsplit(' ', 1)[0] + '…'
                 kto = 'она' if z.get('rol') == 'ved' else 'Александр'
                 if tx and (kto, tx) not in vidno:
                     vidno.add((kto, tx))
@@ -1030,6 +1035,19 @@ def zahvat_oborvan(t):
     threading.Thread(target=napomnit, daemon=True).start()
 
 
+def chuzhoy_razgovor(t, syroy, dosluh):
+    """05.11 (отчёт Плюса 02.11: «Александр говорил по-английски зрителю и гостю — фразы ушли Плюсу, едят токены»):
+    Плюсу Александр говорит по-русски. Фраза без единой русской буквы, где Whisper не слышал «плюс»/«plus», — разговор
+    с кем-то другим: после ответа (дослух) — всегда, с вызовом — когда вызов, похоже, ложный."""
+    if re.search(r'[а-яё]', t.lower()):
+        return False
+    if len(re.findall(r'[a-z]', t.lower())) < 6:
+        return False
+    if PLUS_SLYSHEN.search(syroy or ''):
+        return False
+    return True
+
+
 def handle(e, sluh):
     kind = e['kind']
     t = e.get('text', '').strip()
@@ -1094,6 +1112,10 @@ def handle(e, sluh):
             w, t = None, ''
         if w:
             t = w.strip(' .!?…').strip()
+            if chuzhoy_razgovor(t, syroy, dosluh):
+                print(time.strftime('%H:%M:%S'), 'чужой разговор (не по-русски, без «плюс») — не отправляю', flush=True)
+                if not chek:
+                    return
         elif rech_f < 0.25 and not t:
             print(time.strftime('%H:%M:%S'),
                   'речи нет — не отправляю', flush=True)

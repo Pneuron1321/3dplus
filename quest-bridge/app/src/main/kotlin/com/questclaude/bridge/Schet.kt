@@ -20,6 +20,9 @@ class Schet(zagruzit: () -> String?, private val sohranit: (String) -> Unit, pri
     /** Ссылка доната внизу кадра (2.8.2): «streamelements.com/…/tip»; пусто — нет. */
     @Volatile var ssylka = ""
         private set
+    /** Цель фолловеров (2.8.5, Александр 02.11: «цель подписчиков на Kick и Twitch 13 000»): «♥ 45 / 13,000»; 0 — без цели. */
+    @Volatile var celPod = CEL_POD
+        private set
     @Volatile var pokazZr = true
         private set
     @Volatile var pokazPod = true
@@ -37,6 +40,7 @@ class Schet(zagruzit: () -> String?, private val sohranit: (String) -> Unit, pri
                 "pokaz" -> { pokazZr = p.getOrNull(1) != "0"; pokazPod = p.getOrNull(2) != "0"; pokazNik = p.getOrNull(3) != "0" }
                 "nik" -> nik = Top.nik(p.getOrNull(1) ?: "")
                 "ssylka" -> ssylka = chistaSsylka(p.getOrNull(1) ?: "")
+                "cel" -> celPod = p.getOrNull(1)?.toLongOrNull()?.takeIf { it in 0..MAKS } ?: CEL_POD
                 "pod" -> if (p.getOrNull(1) in PLOSHCHADKI) p.getOrNull(2)?.toLongOrNull()?.takeIf { it >= 0 }?.let { pod[p[1]] = it }
             }
         }
@@ -45,7 +49,7 @@ class Schet(zagruzit: () -> String?, private val sohranit: (String) -> Unit, pri
     /**
      * /schet/upr: zr_tw, zr_kick, zr_yt — зрителей сейчас («-» — нет эфира на площадке); pod_tw, pod_kick, pod_yt —
      * фолловеров всего («-» — забыть); nik — ник внизу (пусто — убрать); ssylka — ссылка доната (пусто — убрать);
-     * zr, pod, niki — показывать 0/1.
+     * cel_pod — цель фолловеров (0 — без цели); zr, pod, niki — показывать 0/1.
      */
     @Synchronized fun upr(q: Map<String, String>): String {
         val now = chasy()
@@ -55,11 +59,12 @@ class Schet(zagruzit: () -> String?, private val sohranit: (String) -> Unit, pri
         }
         q["nik"]?.let { nik = Top.nik(Titry.dekod(it)) }
         q["ssylka"]?.let { ssylka = chistaSsylka(Titry.dekod(it)) }
+        q["cel_pod"]?.let { chislo(it) }?.let { celPod = it }
         q["zr"]?.let { pokazZr = it != "0" }
         q["pod"]?.let { pokazPod = it != "0" }
         q["niki"]?.let { pokazNik = it != "0" }
         versiya++
-        sohranit((listOf("pokaz\t${b(pokazZr)}\t${b(pokazPod)}\t${b(pokazNik)}", "nik\t$nik", "ssylka\t$ssylka") +
+        sohranit((listOf("pokaz\t${b(pokazZr)}\t${b(pokazPod)}\t${b(pokazNik)}", "nik\t$nik", "ssylka\t$ssylka", "cel\t$celPod") +
             pod.map { (pl, n) -> "pod\t$pl\t$n" }).joinToString("\n"))
         return status()
     }
@@ -101,7 +106,7 @@ class Schet(zagruzit: () -> String?, private val sohranit: (String) -> Unit, pri
         val z = zriteli(); val p = podpischiki()
         fun m(m: Map<String, Long>) = m.entries.joinToString(",", "{", "}") { "\"${it.key}\":${it.value}" }
         return "{\"zriteli\":${m(z)},\"zriteli_vsego\":${z.values.sum()},\"podpischiki\":${m(p)}," +
-            "\"podpischiki_vsego\":${p.values.sum()},\"nik\":${FrameServer.json(nik)},\"ssylka\":${FrameServer.json(ssylka)}," +
+            "\"podpischiki_vsego\":${p.values.sum()},\"nik\":${FrameServer.json(nik)},\"ssylka\":${FrameServer.json(ssylka)},\"cel_pod\":$celPod," +
             "\"zr\":$pokazZr,\"pod\":$pokazPod," +
             "\"niki\":$pokazNik,\"vidna\":$vidna,\"nik_viden\":$nikViden}"
     }
@@ -111,6 +116,7 @@ class Schet(zagruzit: () -> String?, private val sohranit: (String) -> Unit, pri
         /** Значки внизу кадра: площадки и соцсети (Александр 01.11: «добавь инстаграм и тикток»). */
         val ZNACHKI = listOf("tw", "kick", "yt", "ig", "tt")
         const val MAKS_SSYLKA = 60
+        const val CEL_POD = 13_000L
 
         /** Ссылка без «https://» и «www.», только буквы, цифры и . / _ - ; длиннее MAKS_SSYLKA — нет. */
         fun chistaSsylka(s: String): String {

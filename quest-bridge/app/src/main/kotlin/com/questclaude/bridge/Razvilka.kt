@@ -500,6 +500,7 @@ class Razvilka(private val w: Int, private val h: Int) {
                 for ((ugol, sl) in sloi) if (ugol !in POZZHE) plashkaNa(o, ugol, sl)
                 sloi["vse"]?.let { plashkaNa(o, "vse", it) }               // итоги вечера — поверх всего
                 sloi["sc"]?.let { plashkaNa(o, "sc", it) }                 // сцена визора — и поверх итогов
+                sloi["sp"]?.let { plashkaNa(o, "sp", it) }                 // 2.8.5: живой Плюс — поверх сцены и итогов
             }
             if (o.stamp) EGLExt.eglPresentationTimeANDROID(display, o.egl, ts)
             EGL14.eglSwapBuffers(display, o.egl)
@@ -586,6 +587,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
             "al" -> { x = (o.w - w) / 2; y = gl(Opoveshchenie.VERH) }                      // 2.7.8: оповещение — сверху по центру
+            "sp" -> { x = (Vizor.spX * s).toInt(); y = gl(Vizor.spY) }                    // 2.8.5: живой Плюс сцены
             "sv" -> y = gl(Vizor.SCHET_VERH)                                                 // 2.8.2: счётчики — под налётом
             "nk" -> { x = ((titryLevo(o) + Vizor.TW / 2f - Vizor.NK_W / 2f) * s).toInt(); y = gl(Vizor.NK_VERH) }   // ник — под субтитрами
             "dn" -> {                                                                        // строка доната — под карточкой топа
@@ -889,7 +891,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         private const val EGL_RECORDABLE_ANDROID = 0x3142
         /** Слои скоб визора — рисуются первыми; POZZHE — не в общем проходе (свой черёд). */
         private val RAMKA = listOf("vv", "vn")
-        private val POZZHE = setOf("vv", "vn", "vse", "sc")
+        private val POZZHE = setOf("vv", "vn", "vse", "sc", "sp")
         /** Копия картинки как есть (с умноженной альфой) — в буфер ящика. */
         private val KOPIYA = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC) }
         private val VERTEX = """
