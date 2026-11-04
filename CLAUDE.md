@@ -56,10 +56,12 @@
   Полный обзор проекта + проверка здоровья — quest-claude docs/OBZOR-VSEGO.md (10 пунктов «требует решения»: PLUS CALLS в
   кадре, навыки otmychka/trezubets не ставит obnovi, 10 тестов не в CI, нагрузка на лимит, цель 13,000 на табло…).
 - **05.11 поздно (скрипты, зеркало e47d1d7):** «PLUS CALLS» выкл (ставки соведущей — `touch /root/.vedushchiy/stavki-vkl`
-  вернуть); цель доната с копией /root/.donat-cel.json (donaty возвращает, если мост сбросил: «потерялись 50 €», Александр
-  ставит 55 €); идеи — opus effort medium, `kanal idei vykl|vkl`; `zamer modeli [ч]` — расход модели (/root/.modeli.jsonl +
+  вернуть); цель доната с копией /root/.donat-cel.json (donaty возвращает, если мост сбросил); идеи — opus effort medium, `kanal idei vykl|vkl`; `zamer modeli [ч]` — расход модели (/root/.modeli.jsonl +
   журналы Claude Code). Цель «♥ N / 13,000» — оставить. Память проекта сверх обзора — quest-claude docs/PAMYAT-PROEKTA.md
-  (ждёт ответа, отложено, идеи в запасе, dolg.txt, Mar3l_2001 гость Kick, LTCOLUMBO, ключ Tripo3D деактивировать).
+  (ждёт ответа, отложено, идеи в запасе, dolg.txt).
+- **05.11 ночь, позже (зеркало e3f859c):** счёт эфира (kanal SchetEfira: пришло/новых/вернулись/писали/подписались/пик,
+  /root/.kanal/videli.json, schet-efirov.jsonl, итог в ухо; конец эфира — 10 мин без эфира), тихий режим /root/.tihiy-rezhim
+  (`kanal tihiy vkl|vykl`: идеи в ухо 9+, без «Клип?», Splus голосом только срочное), Splus — честная память.
 - **05.11 ночь (зеркало ccefe81):** разбор моста по версиям — docs/MOST-VERSII.md (хвосты: компас без розы, «сменить все
   ключи гостей» не подключено, место клипов ~740 МБ — ждут «да»); проверка Плюса — docs/PLUS-PROVERKA.md: правила без
   ставок, выводы по догадкам не на экран итогов (флаг /root/.kanal/dogadki-publichno), `obnovi pravila` ставит dumat,
