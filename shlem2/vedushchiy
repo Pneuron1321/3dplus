@@ -1316,10 +1316,11 @@ def vyvody(prichina='itogi'):
     tetrad_pisat(d)
     stroki = [s for s in (_chistaya_stroka(v, 90) for v in (o.get('vyvody_en') or [])[:3]) if s]
     luchshaya = max((z for z in otkr if z.get('ocenka')), key=lambda z: z['ocenka'], default=None)
-    if luchshaya:
+    publichno = os.path.exists(os.path.join(KANAL_PAPKA, 'dogadki-publichno'))   # 05.11: догадки — не тема для зрителей
+    if luchshaya and publichno:
         stroki.append(_chistaya_stroka('Closest guess: %s — %d/21' % (luchshaya['tekst'], luchshaya['ocenka']), 90) or '')
     pr, n_oc = tochnost(d)
-    if pr is not None:
+    if pr is not None and publichno:
         stroki.append('Plus accuracy: %d%% after %d guesses' % (pr, n_oc))
     u = o.get('urok') if isinstance(o.get('urok'), dict) else None
     ud = _kanal_json('urok-dnya.json')

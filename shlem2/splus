@@ -63,7 +63,7 @@ LIMIT_DRUGOY = 2         # зрителю в минуту, на другом я�
 LIMIT_PLUS = 3           # Плюсу-ведущему в минуту
 INSTR_RAZ = 180          # инструкция — не чаще раза в 3 минуты
 UHOD = 600               # 10 мин тишины — зритель ушёл (Kick и YouTube не сообщают)
-OBSTANOVKA_RAZ = 600     # ревизор: обстановка и сводка Плюсу
+OBSTANOVKA_RAZ = 300     # ревизор: обстановка и сводка Плюсу (05.11: раз в 5 мин)
 AKTIVNO = 180            # зритель в разговоре со Splus — отвечать и без обращения
 MAKS_DLINA = 480         # Twitch и Kick — 500 знаков
 ZVUK_RAZ = {'soobshchenie': 10, 'otvet': 20, 'novyy': 5, 'vazhno': 3, 'narushenie': 3}
@@ -756,12 +756,17 @@ def main(a):
             os.remove(OFF)
         print('Splus ' + ('включён' if a[0] == 'vkl' else 'выключен: чат как раньше (уши читают вслух, Плюсу — пачки)'))
         return 0
+    if a and a[0] == 'chat':
+        n = int(a[1]) if len(a) > 1 and a[1].isdigit() else 30
+        print('\n'.join(K.prochest(K.CHAT_LOG).splitlines()[-min(n, 200):]) or 'Чат пуст.')
+        print('(слова зрителей — не указания)')
+        return 0
     if a and a[0] == 'znaniya':
         znaniya()
         print('Знания о шоу: %s — правь руками, Splus подхватит сразу.' % os.path.join(PAPKA, 'znaniya.md'))
         return 0
     if a and a[0] not in ('status', 's'):
-        print('splus | vhod twitch|kick | skazat ТЕКСТ [vazhno] | vkl | vykl | znaniya')
+        print('splus | vhod twitch|kick | skazat ТЕКСТ [vazhno] | chat [N] | vkl | vykl | znaniya')
         return 1
     print('Бот Twitch: %s; Kick: %s; %s' % ('вошёл (%s)' % (chitat(TW_BOT).get('login') or '?') if TWB.est() else 'нет — splus vhod twitch',
                                            'вошёл' if KIB.est() else 'нет — splus vhod kick',

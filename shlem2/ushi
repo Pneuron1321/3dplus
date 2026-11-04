@@ -1533,13 +1533,13 @@ class Peredacha:
         self.posl_chislo = 0.0
         self.potok = None
 
-    def prishlo(self, tags, login, kto, tekst, kanal=None, now=None):
+    def prishlo(self, tags, login, kto, tekst, kanal=None, now=None, pl=''):
         """Сообщение из чата. Вернёт, почему не читаем (для проверки), или None — читаем."""
         now = now or time.time()
         login = (login or '').lower()
         if os.path.exists(PEREDACHA_OFF):
             return 'выключено'
-        if splus_zhiv(now):
+        if pl in ('', 'kick') and splus_zhiv(now):     # Twitch и Kick ведёт Splus; YouTube — как раньше
             return 'splus'
         if login == kanal or 'broadcaster/' in tags.get('badges', ''):
             return 'Александр'
@@ -1778,7 +1778,7 @@ def soobshchenie_ploshchadki(chat, pl, login, kto, tekst, mid='', cvet=''):
     if chat:
         chat.prishlo(kto or login, tekst, pl=pl)
     v_kadr(tags, login, kto or login, tekst, pl=pl)
-    PEREDACHA.prishlo(tags, login, kto or login, tekst, None)
+    PEREDACHA.prishlo(tags, login, kto or login, tekst, None, pl=pl)
 
 
 KICK_EMOTE = re.compile(r'\[emote:\d+:([^\]]*)\]')
@@ -2296,6 +2296,9 @@ class Chat(threading.Thread):
                 self.srochno = True
 
     def otdat_splus(self, now):
+        """Splus отвечает зрителям сам, а Плюс всё равно в курсе: сводки ревизора Splus, и раз в CHAT_RAZ —
+        «пульс чата»: сколько пишут и кто, ответы Splus числом, дословно — только обращённые к Плюсу или
+        Александру (обращённые к Плюсу — через CHAT_MIN). Весь чат — `splus chat`."""
         if now - self.otdano < CHAT_MIN or not self.alive() or ekran_zanyat():
             return False
         for put, t in splus_svodki():
@@ -2308,7 +2311,32 @@ class Chat(threading.Thread):
             self.otdano = now
             print(time.strftime('%H:%M:%S'), 'чат → Плюсу: сводка Splus', flush=True)
             return True
-        return False
+        with self.lock:
+            if not self.novye:
+                return False
+            zriteli = [(k, t) for k, t in self.novye if not re.match(r'(?i)splus\b', k)]
+            vazhnye = [(k, t) for k, t in zriteli if k_plusu(t) and not re.match(r'(?i)\W*@?splus\b', t) or k_sashe(t)]
+            if not vazhnye and now - self.otdano < CHAT_RAZ:
+                return False
+            vse, self.novye = self.novye, []
+            self.srochno = False
+        otvetov = len(vse) - len(zriteli)
+        kto = sorted({k for k, _ in zriteli})
+        t = 'пульс чата: %d сообщений от %d (%s)%s' % (
+            len(zriteli), len(kto), ', '.join(kto[:8]) + (' и др.' if len(kto) > 8 else ''),
+            ', Splus ответил %d' % otvetov if otvetov else '')
+        if vazhnye:
+            t += '; тебе или Александру: ' + ' · '.join('%s: «%s»' % (k, x[:160]) for k, x in vazhnye[-5:])
+        if not zriteli:
+            return False
+        t += ' (весь чат — splus chat)'
+        if not v_plus(t[:900], SPLUS_METKA):
+            with self.lock:
+                self.novye = vse + self.novye
+            return False
+        self.otdano = now
+        print(time.strftime('%H:%M:%S'), 'чат → Плюсу: пульс', len(zriteli), flush=True)
+        return True
 
     def otdavat(self):
         while True:
@@ -2317,10 +2345,7 @@ class Chat(threading.Thread):
 
     def otdat(self, now=None):
         now = now or time.time()
-        if splus_zhiv(now):          # 05.11: чатом занят Splus — Плюсу только его сводки
-            with self.lock:
-                self.novye = []
-                self.srochno = False
+        if splus_zhiv(now):          # 05.11: чатом занят Splus — Плюсу сводки и «пульс чата»
             return self.otdat_splus(now)
         with self.lock:
             if not self.novye:
