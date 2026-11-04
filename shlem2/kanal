@@ -434,8 +434,15 @@ def pamyat():
 def svoi():
     """Свои ники — сообщения канала (и бота) агент не берёт."""
     s = {prochest('/root/.twitch-kanal').lstrip('#').lower(), (prochest('/root/.kick-kanal').split() or [''])[0].lower(),
-         'streamelements', 'nightbot', 'botrixoficial', 'kickbot'}
+         'streamelements', 'nightbot', 'botrixoficial', 'kickbot', 'splus'}
     return {x for x in s if x}
+
+
+def splus_zhiv():
+    try:
+        return time.time() - os.path.getmtime(os.environ.get('KANAL_SPLUS_ZHIV', '/tmp/splus.zhiv')) < 60
+    except OSError:
+        return False
 
 
 def agent_vkl():
@@ -582,6 +589,9 @@ class Kanal:
 
     def agent(self):
         if not agent_vkl() or not self.ochered:
+            return
+        if splus_zhiv():             # 05.11: чатом занят Splus — агент молчит, без двойных ответов
+            self.ochered = []
             return
         sobshch, self.ochered = self.ochered[-15:], []
         pm = pamyat()

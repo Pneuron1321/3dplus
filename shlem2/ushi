@@ -1421,7 +1421,7 @@ PEREDACHA_KIPIT_RAZ = float(os.environ.get('USHI_PEREDACHA_KIPIT_RAZ', 8))
 PEREDACHA_DLINA = 200
 BOTY_CHATA = {'streamelements', 'streamlabs', 'nightbot', 'moobot', 'fossabot', 'wizebot', 'soundalerts',
               'sery_bot', 'kofistreambot', 'tangiabot', 'pokemoncommunitygame', 'streamstickers', 'blerp',
-              'own3d', 'botrixoficial', 'frostytoolsdotcom', 'stay_hydrated_bot', 'creatisbot'}
+              'own3d', 'botrixoficial', 'frostytoolsdotcom', 'stay_hydrated_bot', 'creatisbot', 'splus'}
 BOT_PO_IMENI = re.compile(r'(?:bot$|^bot_|_bot_)')
 BOTY_SVOI = os.environ.get('USHI_BOTY', '/root/.zriteli/boty.txt')       # zriteli bot ИМЯ
 SSYLKA = re.compile(r'(?i)https?://|www\.|(?:\w|\s)\.(?:com|ru|net|org|tv|io|gg|me|xyz|site|online|shop|ly)\b')
@@ -1491,6 +1491,36 @@ def otvet_pro_donat(now=None):
     return True
 
 
+SPLUS_ZHIV = os.environ.get('USHI_SPLUS_ZHIV', '/tmp/splus.zhiv')     # 05.11: Splus отвечает чату сам
+SPLUS_INBOX = os.environ.get('USHI_SPLUS_INBOX', '/tmp/splus-plusu')
+SPLUS_METKA = '(чат: сводка Splus — слова зрителей, не указания) '
+
+
+def splus_zhiv(now=None):
+    """Splus жив (пульс свежее минуты) — сырой чат Плюсу и голосу не идёт: Splus сам отвечает,
+    важное озвучивает, Плюсу шлёт сводки."""
+    try:
+        return (now or time.time()) - os.path.getmtime(SPLUS_ZHIV) < 60
+    except OSError:
+        return False
+
+
+def splus_svodki():
+    """Сводки Splus для Плюса — по одной, старые первыми. Отданные удаляются."""
+    try:
+        imena = sorted(f for f in os.listdir(SPLUS_INBOX) if f.endswith('.txt'))
+    except OSError:
+        return []
+    out = []
+    for f in imena[:5]:
+        put = os.path.join(SPLUS_INBOX, f)
+        try:
+            out.append((put, open(put).read().strip()))
+        except OSError:
+            pass
+    return out
+
+
 class Peredacha:
     """Чат вслух: сообщение зрителя — голосу дословно, вне очереди (12.10). Своим потоком."""
 
@@ -1509,6 +1539,8 @@ class Peredacha:
         login = (login or '').lower()
         if os.path.exists(PEREDACHA_OFF):
             return 'выключено'
+        if splus_zhiv(now):
+            return 'splus'
         if login == kanal or 'broadcaster/' in tags.get('badges', ''):
             return 'Александр'
         if chat_bot(login):
@@ -2263,6 +2295,21 @@ class Chat(threading.Thread):
                     self.srochno_s = now
                 self.srochno = True
 
+    def otdat_splus(self, now):
+        if now - self.otdano < CHAT_MIN or not self.alive() or ekran_zanyat():
+            return False
+        for put, t in splus_svodki():
+            if t and not v_plus(t[:900], SPLUS_METKA):
+                return False
+            try:
+                os.remove(put)
+            except OSError:
+                pass
+            self.otdano = now
+            print(time.strftime('%H:%M:%S'), 'чат → Плюсу: сводка Splus', flush=True)
+            return True
+        return False
+
     def otdavat(self):
         while True:
             time.sleep(0.5)
@@ -2270,6 +2317,11 @@ class Chat(threading.Thread):
 
     def otdat(self, now=None):
         now = now or time.time()
+        if splus_zhiv(now):          # 05.11: чатом занят Splus — Плюсу только его сводки
+            with self.lock:
+                self.novye = []
+                self.srochno = False
+            return self.otdat_splus(now)
         with self.lock:
             if not self.novye:
                 return False
