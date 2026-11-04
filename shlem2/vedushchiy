@@ -1338,9 +1338,10 @@ def vyvody(prichina='itogi'):
             z['ocenka'], z['ocenka_pochemu'], z['t_ocenki'] = oc, _chistaya_stroka(x.get('pochemu'), 160, 2), time.time()
             n += 1
     tetrad_pisat(d)
-    stroki = [s for s in (_chistaya_stroka(v, 90) for v in (o.get('vyvody_en') or [])[:3]) if s]
-    luchshaya = max((z for z in otkr if z.get('ocenka')), key=lambda z: z['ocenka'], default=None)
     publichno = os.path.exists(os.path.join(KANAL_PAPKA, 'dogadki-publichno'))   # 05.11: догадки — не тема для зрителей
+    # выводы по догадкам — тоже только с флагом (Александр 05.11: угадывания публике неинтересны); урок и сезон — всегда
+    stroki = [s for s in (_chistaya_stroka(v, 90) for v in (o.get('vyvody_en') or [])[:3]) if s] if publichno else []
+    luchshaya = max((z for z in otkr if z.get('ocenka')), key=lambda z: z['ocenka'], default=None)
     if luchshaya and publichno:
         stroki.append(_chistaya_stroka('Closest guess: %s — %d/21' % (luchshaya['tekst'], luchshaya['ocenka']), 90) or '')
     pr, n_oc = tochnost(d)

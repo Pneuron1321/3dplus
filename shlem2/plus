@@ -100,7 +100,7 @@ while :; do
   [ -x /usr/local/bin/kanal ] && setsid nohup /usr/local/bin/kanal demon >> /tmp/kanal.log 2>&1 < /dev/null &
   # Splus (05.11): друг чата Twitch и Kick со своего аккаунта; без входа бота — сам выходит
   [ -x /usr/local/bin/splus ] && setsid nohup /usr/local/bin/splus demon >> /tmp/splus.log 2>&1 < /dev/null &
-  # Режиссёр (05.11): сам сохраняет до 3 клипов по 5 минут за эфир, «Клип?» в ухо раз в 4,5 мин
+  # Режиссёр (05.11): сам сохраняет до 3 клипов по 5 минут в час, «Клип?» в ухо раз в 4,5 мин
   [ -x /usr/local/bin/rezhisser ] && setsid nohup /usr/local/bin/rezhisser demon >> /tmp/rezhisser.log 2>&1 < /dev/null &
   # Синхронист (2.5.0): субтитры по каждому голосу — Александр, игра, гости (Whisper и перевод в Groq);
   # пока нет эфира или фраз, только ждёт приложение. Гости и туннель — по команде: gosti start.

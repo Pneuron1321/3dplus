@@ -132,6 +132,19 @@ if [ "$1" = pravila ]; then
     stavit_pravila "$T/$f"
     echo "правила: обновлены (+$plus −$minus строк; прежние — в $REZ). Теперь /exit"
   fi
+  # 05.11: помощник dumat и навыки «Отмычка», «Трезубец» — раньше ставились только при первой установке; dolg.txt —
+  # только если его нет (его отмечает Плюс)
+  CL=$(dirname "$PRAVILA")
+  for x in agents/dumat.md skills/otmychka/SKILL.md skills/otmychka/references/otmychka.md \
+           skills/trezubets/SKILL.md skills/trezubets/references/trezubets.md; do
+    if curl -fsSL "$B/$x?t=$(date +%s)" -o "$T/pomoshch" 2> /dev/null && [ -s "$T/pomoshch" ] && ! cmp -s "$T/pomoshch" "$CL/$x"; then
+      mkdir -p "$(dirname "$CL/$x")" "$REZ"
+      [ -f "$CL/$x" ] && cp "$CL/$x" "$REZ/$(echo "$x" | tr / _).$(date +%Y%m%d-%H%M%S)"
+      cp "$T/pomoshch" "$CL/$x" && echo "$x: поставлен"
+    fi
+  done
+  DOLG=${OBNOVI_DOLG:-/root/dolg.txt}
+  [ -f "$DOLG" ] || { curl -fsSL "$B/dolg.txt?t=$(date +%s)" -o "$DOLG" 2> /dev/null && echo "dolg.txt: поставлен"; }
   rm -rf "$T"; exit 0
 fi
 
