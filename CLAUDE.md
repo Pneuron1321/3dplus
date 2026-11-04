@@ -51,7 +51,10 @@
   Splus, отзывы) → 5 кандидатов → критик sonnet, проходит 8+/10 → лучшая в ухо; `kanal idei + N …`, «!idea» от зрителей
   (`kanal idei zriteley`, ники — только у нас); подготовка к компакту сама в ushi (35–45 мин, тихий миг, молча: ответ «—»;
   выкл /root/.kompakt-avto-off); режиссёр — 3 клипа в ЧАС; страны сезона (`kanal strana/strany`, Splus «strana»).
-  Сезон: 1 «Plus comes alive» + 2 «Around the world in VR» — да; 3 «Road to 13,000» — разобрать в начале сезона.
+  Сезон: 1 «Plus comes alive» + 2 «Around the world in VR» — да; 3 «Road to 13,000» — ИЗОЛИРОВАН (Александр 05.11: не трогать,
+  не предлагать, пока сам не вернётся). **Мост 2.8.6 СОБРАН 05.11** (зеркало 252a0c9, APK app-2.8.6/plus2-2.8.6.apk).
+  Полный обзор проекта + проверка здоровья — quest-claude docs/OBZOR-VSEGO.md (10 пунктов «требует решения»: PLUS CALLS в
+  кадре, навыки otmychka/trezubets не ставит obnovi, 10 тестов не в CI, нагрузка на лимит, цель 13,000 на табло…).
 - **Скрипты шлема — зеркало 9fb1fa7** (с мостом). Главное:
   - **kanal (новый, 04.11, одобрены п. 1–8 отчёта Плюса 01.11; вживую НЕ проверен):** Twitch/Kick по API на входах Плюса
     (/root/plus twitch_vhod.py, kick_vhod.py — прочитаны, чистые; токены /root/.twitch-user, /root/.kick-user — секреты).
