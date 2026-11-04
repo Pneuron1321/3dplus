@@ -35,6 +35,12 @@
   учителя Плюса («!lesson» из чата → урок дня, `kanal urok`, `kanal uchitelya`), сезон-эксперимент (`kanal sezon "ВОПРОС" 30`,
   `kanal sezon otchet`). Описание YouTube — quest-claude docs/YOUTUBE-OPISANIE.txt. **2.8.6 ждёт «одобряю»** (настоящие значки
   площадок внизу кадра; баннер со значками отдан). Ask Studio: Shorts 8–15 с, короткие названия, хук в 1-ю секунду.
+- **Splus (05.11, скрипты, зеркало 4b38402; вживую НЕ проверен):** ИИ чата Twitch+Kick со своего бота (shlem/splus):
+  сабплюс на зрителя (low), 60 ответов/ч, 3/мин англ., 2/мин др. язык (+перевод EN), ревизор medium (память
+  /root/.splus/pamyat, обстановка, сводки Плюсу /tmp/splus-plusu), !forget, нарушение: предупреждение → бан/тишина,
+  инструкция раз в 3 мин. Пока /tmp/splus.zhiv свеж — уши не читают сырой чат, агент kanal молчит. Тест splus_test.
+  Вход бота: `splus vhod twitch`/`gotovo`, `splus vhod kick`/`КОД`, `/mod` боту. Звуки чата — мост 2.8.6 (/zvuk,
+  5 mp3) — **2.8.6 ждёт «одобряю»** (значки + звуки). Новое описание канала — quest-claude docs/YOUTUBE-OPISANIE.txt.
 - **Скрипты шлема — зеркало 9fb1fa7** (с мостом). Главное:
   - **kanal (новый, 04.11, одобрены п. 1–8 отчёта Плюса 01.11; вживую НЕ проверен):** Twitch/Kick по API на входах Плюса
     (/root/plus twitch_vhod.py, kick_vhod.py — прочитаны, чистые; токены /root/.twitch-user, /root/.kick-user — секреты).
