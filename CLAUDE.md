@@ -55,6 +55,11 @@
   не предлагать, пока сам не вернётся). **Мост 2.8.6 СОБРАН 05.11** (зеркало 252a0c9, APK app-2.8.6/plus2-2.8.6.apk).
   Полный обзор проекта + проверка здоровья — quest-claude docs/OBZOR-VSEGO.md (10 пунктов «требует решения»: PLUS CALLS в
   кадре, навыки otmychka/trezubets не ставит obnovi, 10 тестов не в CI, нагрузка на лимит, цель 13,000 на табло…).
+- **05.11 поздно (скрипты, зеркало e47d1d7):** «PLUS CALLS» выкл (ставки соведущей — `touch /root/.vedushchiy/stavki-vkl`
+  вернуть); цель доната с копией /root/.donat-cel.json (donaty возвращает, если мост сбросил: «потерялись 50 €», Александр
+  ставит 55 €); идеи — opus effort medium, `kanal idei vykl|vkl`; `zamer modeli [ч]` — расход модели (/root/.modeli.jsonl +
+  журналы Claude Code). Цель «♥ N / 13,000» — оставить. Память проекта сверх обзора — quest-claude docs/PAMYAT-PROEKTA.md
+  (ждёт ответа, отложено, идеи в запасе, dolg.txt, Mar3l_2001 гость Kick, LTCOLUMBO, ключ Tripo3D деактивировать).
 - **Скрипты шлема — зеркало 9fb1fa7** (с мостом). Главное:
   - **kanal (новый, 04.11, одобрены п. 1–8 отчёта Плюса 01.11; вживую НЕ проверен):** Twitch/Kick по API на входах Плюса
     (/root/plus twitch_vhod.py, kick_vhod.py — прочитаны, чистые; токены /root/.twitch-user, /root/.kick-user — секреты).
