@@ -44,6 +44,24 @@ ZADANIE = (
     'Текст консоли, коды, ключи и адреса с кадра не переписывай. Без вступлений.')
 
 
+UCHET_MODELEY = os.environ.get('UCHET_MODELEY', '/root/.modeli.jsonl')   # 05.11: расход модели по вызовам — `zamer modeli`
+
+
+def uchet(kto, model, effort, stdout):
+    """Записать расход одного вызова claude -p (токены, условная цена, время) — для замера лимитов в эфире."""
+    try:
+        d = json.loads(stdout)
+        u = d.get('usage') or {}
+        z = {'t': round(time.time()), 'kto': kto, 'model': model, 'effort': effort or '',
+             'in': u.get('input_tokens', 0), 'out': u.get('output_tokens', 0),
+             'cache_read': u.get('cache_read_input_tokens', 0), 'cache_new': u.get('cache_creation_input_tokens', 0),
+             'usd': d.get('total_cost_usd', 0), 'ms': d.get('duration_ms', 0)}
+        with open(UCHET_MODELEY, 'a') as f:
+            f.write(json.dumps(z) + '\n')
+    except Exception:
+        pass
+
+
 def log(*a):
     print(time.strftime('%H:%M:%S'), 'obzor:', *a, file=sys.stderr, flush=True)
 
@@ -118,6 +136,7 @@ def vzglyad():
            '--output-format', 'json', '--system-prompt', ZADANIE, zapros]
     try:
         r = subprocess.run(cmd, cwd=DIR, env=env, capture_output=True, text=True, timeout=150)
+        uchet('obzor', MODEL, '', r.stdout)
         otvet = json.loads(r.stdout).get('result', '') if r.stdout.strip() else ''
     except Exception as e:
         log('Haiku не ответил:', type(e).__name__, str(e)[:80])

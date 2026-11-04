@@ -144,6 +144,24 @@ def poslednie_5_minut(now):
     return {'rech': rech[-40:], 'shlem': shlem, 'chat': chat[-40:], 'chat_soobshcheniy': len(chat), 'sobytiya': sob}
 
 
+UCHET_MODELEY = os.environ.get('UCHET_MODELEY', '/root/.modeli.jsonl')   # 05.11: расход модели по вызовам — `zamer modeli`
+
+
+def uchet(kto, model, effort, stdout):
+    """Записать расход одного вызова claude -p (токены, условная цена, время) — для замера лимитов в эфире."""
+    try:
+        d = json.loads(stdout)
+        u = d.get('usage') or {}
+        z = {'t': round(time.time()), 'kto': kto, 'model': model, 'effort': effort or '',
+             'in': u.get('input_tokens', 0), 'out': u.get('output_tokens', 0),
+             'cache_read': u.get('cache_read_input_tokens', 0), 'cache_new': u.get('cache_creation_input_tokens', 0),
+             'usd': d.get('total_cost_usd', 0), 'ms': d.get('duration_ms', 0)}
+        with open(UCHET_MODELEY, 'a') as f:
+            f.write(json.dumps(z) + '\n')
+    except Exception:
+        pass
+
+
 def model(zapros_):
     env = dict(os.environ, CLAUDE_CODE_DISABLE_CLAUDE_MDS='1', CLAUDE_CODE_DISABLE_AUTO_MEMORY='1')
     os.makedirs(PAPKA, exist_ok=True)
@@ -152,6 +170,7 @@ def model(zapros_):
     try:
         r = subprocess.run(cmd, cwd=PAPKA, env=env, capture_output=True, text=True, timeout=120,
                            stdin=subprocess.DEVNULL)
+        uchet('rezhisser', MODEL, 'medium', r.stdout)
         t = json.loads(r.stdout).get('result', '') if r.stdout.strip() else ''
         m = re.search(r'\{.*\}', t, re.S)
         return json.loads(m.group(0)) if m else None

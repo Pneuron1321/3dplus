@@ -5,7 +5,7 @@
     знаниями о шоу и памятью ревизора о зрителе; писать в память он не может — только отметить «важно» и спросить
     ревизора (справка), если без памяти не ответить;
   • ревизор (effort medium) — единственный, кто пишет на диск: зритель ушёл (Twitch PART или 10 мин тишины) — сжимает
-    его разговор в долгую память; раз в 10 мин — обстановка чата и сводка Плюсу-ведущему (вместо сырого чата);
+    его разговор в долгую память; раз в 5 мин — обстановка чата и сводка Плюсу-ведущему (вместо сырого чата);
   • лимиты: зрителю — 3 ответа в минуту (не по-английски — 2), всем сабплюсам — 60 в час (кончились — короткий звук
     Александру: глянь в чат); Плюс-ведущий — 3 сообщения в минуту (`splus skazat`), важное — сверх;
   • ответ — на языке зрителя, не по-английски — ещё перевод его слов и ответ по-английски;
@@ -278,6 +278,24 @@ def plusu(tekst):
 _SEMAFOR = threading.Semaphore(2)     # шлем: не больше двух вызовов разом
 
 
+UCHET_MODELEY = os.environ.get('UCHET_MODELEY', '/root/.modeli.jsonl')   # 05.11: расход модели по вызовам — `zamer modeli`
+
+
+def uchet(kto, model, effort, stdout):
+    """Записать расход одного вызова claude -p (токены, условная цена, время) — для замера лимитов в эфире."""
+    try:
+        d = json.loads(stdout)
+        u = d.get('usage') or {}
+        z = {'t': round(time.time()), 'kto': kto, 'model': model, 'effort': effort or '',
+             'in': u.get('input_tokens', 0), 'out': u.get('output_tokens', 0),
+             'cache_read': u.get('cache_read_input_tokens', 0), 'cache_new': u.get('cache_creation_input_tokens', 0),
+             'usd': d.get('total_cost_usd', 0), 'ms': d.get('duration_ms', 0)}
+        with open(UCHET_MODELEY, 'a') as f:
+            f.write(json.dumps(z) + '\n')
+    except Exception:
+        pass
+
+
 def model(sistema, zapros_, effort='low', timeout=90):
     env = dict(os.environ, CLAUDE_CODE_DISABLE_CLAUDE_MDS='1', CLAUDE_CODE_DISABLE_AUTO_MEMORY='1', GOLOS_RACIYA='1')
     os.makedirs(PAPKA, exist_ok=True)
@@ -287,6 +305,7 @@ def model(sistema, zapros_, effort='low', timeout=90):
         try:
             r = subprocess.run(cmd, cwd=PAPKA, env=env, capture_output=True, text=True, timeout=timeout,
                                stdin=subprocess.DEVNULL)
+            uchet('splus:' + ('sabplus' if sistema is ZADANIE_SUB else 'revizor'), MODEL, effort, r.stdout)
             t = json.loads(r.stdout).get('result', '') if r.stdout.strip() else ''
             m = re.search(r'\{.*\}', t, re.S)
             return json.loads(m.group(0)) if m else None

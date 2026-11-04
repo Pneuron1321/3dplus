@@ -89,6 +89,24 @@ ZADANIE = (
     '{"otvet": "...", "vyzov_ru": "", "vyzov_en": ""}')
 
 
+UCHET_MODELEY = os.environ.get('UCHET_MODELEY', '/root/.modeli.jsonl')   # 05.11: расход модели по вызовам — `zamer modeli`
+
+
+def uchet(kto, model, effort, stdout):
+    """Записать расход одного вызова claude -p (токены, условная цена, время) — для замера лимитов в эфире."""
+    try:
+        d = json.loads(stdout)
+        u = d.get('usage') or {}
+        z = {'t': round(time.time()), 'kto': kto, 'model': model, 'effort': effort or '',
+             'in': u.get('input_tokens', 0), 'out': u.get('output_tokens', 0),
+             'cache_read': u.get('cache_read_input_tokens', 0), 'cache_new': u.get('cache_creation_input_tokens', 0),
+             'usd': d.get('total_cost_usd', 0), 'ms': d.get('duration_ms', 0)}
+        with open(UCHET_MODELEY, 'a') as f:
+            f.write(json.dumps(z) + '\n')
+    except Exception:
+        pass
+
+
 def log(*a):
     print(time.strftime('%H:%M:%S'), 'donaty:', *a, file=sys.stderr, flush=True)
 
@@ -127,10 +145,42 @@ def v_cel(summa, valyuta):
     k = DOLLAR.get(vc.upper() if len(vc) > 1 else vc)
     plus = v_dollarah(summa, valyuta) / k if k else summa
     try:
-        get('/cel/upr?plus=%.2f' % plus)
+        cel_kopiya(json.loads(get('/cel/upr?plus=%.2f' % plus)))
     except Exception:
         return None
     return round(plus, 2)
+
+
+CEL_KOPIYA = os.environ.get('DONATY_CEL_KOPIYA', '/root/.donat-cel.json')   # 05.11: общая с `donat`
+
+
+def cel_kopiya(d):
+    try:
+        if d.get('summa'):
+            with open(CEL_KOPIYA + '.tmp', 'w') as f:
+                json.dump({k: d.get(k) for k in ('imya', 'summa', 'sobrano', 'valyuta', 'pokaz')}, f, ensure_ascii=False)
+            os.replace(CEL_KOPIYA + '.tmp', CEL_KOPIYA)
+    except OSError:
+        pass
+
+
+def cel_vernut():
+    """Мост потерял цель (собрано 0, а у нас в копии больше) — вернуть её целиком. 05.11: так пропали 50 €."""
+    try:
+        k = json.load(open(CEL_KOPIYA))
+        cel = json.loads(get('/cel'))
+    except Exception:
+        return False
+    if float(cel.get('sobrano') or 0) > 0 or float(k.get('sobrano') or 0) <= 0:
+        return False
+    q = {'summa': k.get('summa'), 'sobrano': k.get('sobrano'), 'valyuta': k.get('valyuta') or '$',
+         'imya': k.get('imya') or '', 'pokaz': '1' if k.get('pokaz', True) else '0'}
+    try:
+        get('/cel/upr?' + urllib.parse.urlencode(q, quote_via=urllib.parse.quote))
+    except Exception:
+        return False
+    log('цель', 'мост её потерял — вернул из копии: собрано', k.get('sobrano'))
+    return True
 
 
 def otvet_haiku(kto, summa_tekst, soobshchenie):
@@ -143,6 +193,7 @@ def otvet_haiku(kto, summa_tekst, soobshchenie):
            '--settings', '{"disableAllHooks":true}', '--output-format', 'json', '--system-prompt', ZADANIE, zapros]
     try:
         r = subprocess.run(cmd, cwd=DIR, env=env, capture_output=True, text=True, timeout=90)
+        uchet('donaty', 'haiku', '', r.stdout)
         t = json.loads(r.stdout).get('result', '')
         m = re.search(r'\{.*\}', t, re.S)
         return json.loads(m.group(0)) if m else {'otvet': t.strip()}
@@ -551,6 +602,7 @@ def demon():
         obnovilsya(mt)
         if time.time() >= sled_top:                          # приложение перезапускали — плашка снова верная
             obnovit_top()
+            cel_vernut()                                     # 05.11: и цель доната — если мост её потерял
             sled_top = time.time() + TOP_RAZ
         for d in iz_chata():
             obrabotat(d)

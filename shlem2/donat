@@ -16,6 +16,18 @@ import urllib.parse
 import urllib.request
 
 U = os.environ.get('DONAT_URL', 'http://localhost:8766')
+KOPIYA = os.environ.get('DONAT_KOPIYA', '/root/.donat-cel.json')   # 05.11: копия цели — мост её терял (50 € пропали)
+
+
+def sohranit_kopiyu(d):
+    """Копия цели у нас: мост сбросился (переустановка, очистка) — donaty вернёт собранное."""
+    try:
+        if d.get('summa'):
+            with open(KOPIYA + '.tmp', 'w') as f:
+                json.dump({k: d.get(k) for k in ('imya', 'summa', 'sobrano', 'valyuta', 'pokaz')}, f, ensure_ascii=False)
+            os.replace(KOPIYA + '.tmp', KOPIYA)
+    except OSError:
+        pass
 
 
 def zapros(q=None):
@@ -58,6 +70,7 @@ def main(a):
     except Exception:
         print('Приложение 2 не отвечает: открой Quest Claude Bridge 2 и «Начать захват».')
         return 1
+    sohranit_kopiyu(d)
     print(skazat(d))
     return 0
 

@@ -414,6 +414,24 @@ ZADANIE_3XXX = (
     '"nagrada": {"imya": "…", "cena": 500, "chto": "…"} или null, "sezon": "наблюдение" или null}')
 
 
+UCHET_MODELEY = os.environ.get('UCHET_MODELEY', '/root/.modeli.jsonl')   # 05.11: расход модели по вызовам — `zamer modeli`
+
+
+def uchet(kto, model, effort, stdout):
+    """Записать расход одного вызова claude -p (токены, условная цена, время) — для замера лимитов в эфире."""
+    try:
+        d = json.loads(stdout)
+        u = d.get('usage') or {}
+        z = {'t': round(time.time()), 'kto': kto, 'model': model, 'effort': effort or '',
+             'in': u.get('input_tokens', 0), 'out': u.get('output_tokens', 0),
+             'cache_read': u.get('cache_read_input_tokens', 0), 'cache_new': u.get('cache_creation_input_tokens', 0),
+             'usd': d.get('total_cost_usd', 0), 'ms': d.get('duration_ms', 0)}
+        with open(UCHET_MODELEY, 'a') as f:
+            f.write(json.dumps(z) + '\n')
+    except Exception:
+        pass
+
+
 def haiku(sistema, zapros_, model='haiku', timeout=120, effort=None):
     os.makedirs(PAPKA, exist_ok=True)
     env = dict(os.environ, CLAUDE_CODE_DISABLE_CLAUDE_MDS='1', CLAUDE_CODE_DISABLE_AUTO_MEMORY='1', GOLOS_RACIYA='1')
@@ -421,6 +439,8 @@ def haiku(sistema, zapros_, model='haiku', timeout=120, effort=None):
            '--settings', '{"disableAllHooks":true}', '--output-format', 'json', '--system-prompt', sistema, zapros_]
     try:
         r = subprocess.run(cmd, cwd=PAPKA, env=env, capture_output=True, text=True, timeout=timeout)
+        uchet('kanal:' + ('idei' if sistema.startswith(ZADANIE_IDEI) else 'kritik' if sistema is ZADANIE_KRITIK
+                          else model), model, effort, r.stdout)
         t = json.loads(r.stdout).get('result', '')
         m = re.search(r'\{.*\}', t, re.S)
         return json.loads(m.group(0)) if m else None
@@ -717,6 +737,8 @@ class Kanal:
         """Плюс 2.0 (05.11): раз в 15 минут эфира — идеи через «3xxx» в два прохода: большие размышления генерируют
         5 кандидатов по данным эфира, строгий критик пропускает только непримитивные (балл 8+). Лучшая — Саше в ухо;
         все — в idei.md и idei.jsonl с баллом; ничего не дотянуло — тишина."""
+        if os.path.exists(os.path.join(PAPKA, 'idei-vykl')):    # 05.11: беречь лимит — `kanal idei vykl`
+            return
         kozyri = '\n\n'.join(open(p).read()[:12000] for p in KOZYRI if os.path.exists(p))
         proshlye = idei_vse(30)
         sost = {'efir_15_minut': efir_dannye(), 'zriteli': most('/schet'), 'cel': most('/cel'),
@@ -727,7 +749,7 @@ class Kanal:
                 'vopros_sezona': sezon().get('vopros'), 'strany_sezona': len(strany()),
                 'urok_dnya': urok_dnya().get('tekst'), 'pamyat_zriteley': len(pamyat())}
         o = haiku(ZADANIE_IDEI + ('\n\n=== Методы ===\n' + kozyri if kozyri else ''),
-                  json.dumps(sost, ensure_ascii=False), model=IDEI_MODEL, timeout=360, effort='high')
+                  json.dumps(sost, ensure_ascii=False), model=IDEI_MODEL, timeout=360, effort='medium')
         kand = [k for k in (o or {}).get('kandidaty') or [] if isinstance(k, dict) and k.get('ideya')][:6]
         if not kand:
             return
@@ -957,6 +979,15 @@ def main(a):
             f.write('- %s #%s %s %s\n' % (time.strftime('%Y-%m-%d'), a[2].lstrip('#'), 'НРАВИТСЯ' if a[1] == '+' else 'ПРИМИТИВНО/НЕТ',
                                           ' '.join(a[3:])[:300]))
         print('Запомнил отзыв к идее #%s — следующие идеи учтут.' % a[2].lstrip('#'))
+        return 0
+    if a and a[0] == 'idei' and a[1:2] in (['vykl'], ['vkl']):
+        f = os.path.join(PAPKA, 'idei-vykl')
+        os.makedirs(PAPKA, exist_ok=True)
+        if a[1] == 'vykl':
+            open(f, 'w').close()
+        elif os.path.exists(f):
+            os.remove(f)
+        print('Идеи раз в 15 минут:', 'выключены (бережём лимит)' if a[1] == 'vykl' else 'включены')
         return 0
     if a and a[0] == 'idei' and a[1:2] == ['zriteley']:
         L = chitat(os.path.join(PAPKA, 'idei-zriteley.json'), [])

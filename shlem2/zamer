@@ -7,6 +7,11 @@
 #   zamer svid — свидетели: пары меток одного факта, которые обязаны сойтись
 #     (уши вписали → Claude принял; ответ готов → голос взял; взял → зазвучал).
 #   zamer dolg — что из обещанного проверит только шлем: подтверждено / нет.
+#   zamer modeli [ЧАСОВ] — расход модели за N часов (по умолчанию 3): кто сколько раз звал, токены, условная цена
+#     (как по ценам API — чтобы сравнить вес потребителей; лимит подписки — /usage в Claude Code). Плюс-окно и рация —
+#     из журналов Claude Code, демоны — из /root/.modeli.jsonl (05.11).
+import glob
+import json
 import os
 import sys
 import time
@@ -129,7 +134,75 @@ def dolg():
     return 0
 
 
+UCHET = os.environ.get('UCHET_MODELEY', '/root/.modeli.jsonl')
+ZHURNALY = os.environ.get('ZAMER_ZHURNALY', '/root/.claude/projects')
+
+
+def modeli(chasov=3.0, now=None):
+    """Сводка расхода: {кто: [вызовов, вход, выход, кэш, $]} за последние часы."""
+    now = now or time.time()
+    ot = now - chasov * 3600
+    s = {}
+
+    def dob(kto, vh, vy, kesh, usd):
+        r = s.setdefault(kto, [0, 0, 0, 0, 0.0])
+        r[0] += 1; r[1] += vh; r[2] += vy; r[3] += kesh; r[4] += usd
+    try:
+        for l in open(UCHET, errors='replace'):
+            try:
+                z = json.loads(l)
+            except ValueError:
+                continue
+            if z.get('t', 0) >= ot:
+                dob(z.get('kto', '?'), z.get('in', 0) + z.get('cache_new', 0), z.get('out', 0), z.get('cache_read', 0),
+                    float(z.get('usd') or 0))
+    except OSError:
+        pass
+    for f in glob.glob(os.path.join(ZHURNALY, '*', '*.jsonl')):      # Плюс-окно и рация: журналы Claude Code
+        try:
+            if os.path.getmtime(f) < ot:
+                continue
+            for l in open(f, errors='replace'):
+                if '"usage"' not in l or '"assistant"' not in l:
+                    continue
+                try:
+                    z = json.loads(l)
+                except ValueError:
+                    continue
+                ts = z.get('timestamp', '')
+                try:
+                    t = time.mktime(time.strptime(ts[:19], '%Y-%m-%dT%H:%M:%S')) - time.timezone
+                except ValueError:
+                    continue
+                u = (z.get('message') or {}).get('usage') or {}
+                if t >= ot and u:
+                    dob('Плюс (окно/рация)', u.get('input_tokens', 0) + u.get('cache_creation_input_tokens', 0),
+                        u.get('output_tokens', 0), u.get('cache_read_input_tokens', 0), 0.0)
+        except OSError:
+            continue
+    return s
+
+
+def pechat_modeli(chasov):
+    s = modeli(chasov)
+    if not s:
+        print('За %g ч вызовов модели нет.' % chasov)
+        return
+    print('Расход модели за %g ч (вызовов · вход · выход · из кэша · условно $):' % chasov)
+    for kto, (n, vh, vy, kesh, usd) in sorted(s.items(), key=lambda x: -(x[1][1] + x[1][2] * 5)):
+        print('  %-22s %5d · %8d · %7d · %9d · %s' % (kto, n, vh, vy, kesh, ('%.2f' % usd) if usd else '—'))
+    v = [sum(r[i] for r in s.values()) for i in range(5)]
+    print('  %-22s %5d · %8d · %7d · %9d · %.2f' % ('ВСЕГО', v[0], v[1], v[2], v[3], v[4]))
+    print('Лимит подписки в процентах — /usage в окне Плюса (до и после эфира).')
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'modeli':
+        try:
+            chasov = float(sys.argv[2].replace(',', '.')) if len(sys.argv) > 2 else 3.0
+        except ValueError:
+            chasov = 3.0
+        return pechat_modeli(chasov)
     if len(sys.argv) > 1 and sys.argv[1] == 'dolg':
         return dolg()
     if len(sys.argv) > 1 and sys.argv[1] == 'svid':

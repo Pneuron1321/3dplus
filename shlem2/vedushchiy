@@ -378,11 +378,16 @@ def otkrytaya(spisok):
     return next((x for x in reversed(spisok) if x.get('itog') is None), None)
 
 
+STAVKI_VKL = os.path.exists(os.environ.get('VED_STAVKI_VKL', '/root/.vedushchiy/stavki-vkl'))   # Александр 05.11: выкл
+
+
 def tablo(k):
     """Счёт — в кадр (табло слева вверху)."""
     st = [x for x in k['stavki'] if x.get('itog') in ('da', 'net')]
     vz = [x for x in k['vyzovy'] if x.get('itog') in ('da', 'net')]
     ov = otkrytaya(k['vyzovy'])
+    if not STAVKI_VKL:
+        st = []                    # 05.11: «PLUS CALLS» в кадре нет — ставки (угадывания) не тема для зрителей
     q = {'popal': sum(x['itog'] == 'da' for x in st), 'stavok': len(st), 'vyzov': (ov or {}).get('en', ''),
          'sdelano': sum(x['itog'] == 'da' for x in vz), 'vyzovov': len(vz)}
     try:
@@ -1075,6 +1080,24 @@ def iskhody(k, ot):
     return res
 
 
+UCHET_MODELEY = os.environ.get('UCHET_MODELEY', '/root/.modeli.jsonl')   # 05.11: расход модели по вызовам — `zamer modeli`
+
+
+def uchet(kto, model, effort, stdout):
+    """Записать расход одного вызова claude -p (токены, условная цена, время) — для замера лимитов в эфире."""
+    try:
+        d = json.loads(stdout)
+        u = d.get('usage') or {}
+        z = {'t': round(time.time()), 'kto': kto, 'model': model, 'effort': effort or '',
+             'in': u.get('input_tokens', 0), 'out': u.get('output_tokens', 0),
+             'cache_read': u.get('cache_read_input_tokens', 0), 'cache_new': u.get('cache_creation_input_tokens', 0),
+             'usd': d.get('total_cost_usd', 0), 'ms': d.get('duration_ms', 0)}
+        with open(UCHET_MODELEY, 'a') as f:
+            f.write(json.dumps(z) + '\n')
+    except Exception:
+        pass
+
+
 def legkaya_model(sistema, zapros, timeout=150):
     """Один короткий вызов той же модели: без картинок, без инструментов, без хуков, усилие low. dict или None."""
     env = dict(os.environ, CLAUDE_CODE_DISABLE_CLAUDE_MDS='1', CLAUDE_CODE_DISABLE_AUTO_MEMORY='1', GOLOS_RACIYA='1')
@@ -1084,6 +1107,7 @@ def legkaya_model(sistema, zapros, timeout=150):
            '--settings', '{"disableAllHooks":true}', '--output-format', 'json', '--system-prompt', sistema, zapros]
     try:
         r = subprocess.run(cmd, cwd=DIR, env=env, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        uchet('vedushchiy:lyogkiy', model, 'low', r.stdout)
         t = json.loads(r.stdout).get('result', '') if r.stdout.strip() else ''
         m = re.search(r'\{.*\}', t, re.S)
         return json.loads(m.group(0)) if m else None
@@ -1625,6 +1649,7 @@ def haiku(kartinki, kontekst):
            '--system-prompt', ZADANIE, 'Картинки (читай по порядку Read-ом): %s\n%s' % (' ; '.join(kartinki), kontekst)]
     try:
         r = subprocess.run(cmd, cwd=DIR, env=env, capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        uchet('vedushchiy', model, usilie, r.stdout)
         t = json.loads(r.stdout).get('result', '') if r.stdout.strip() else ''
         m = re.search(r'\{.*\}', t, re.S)
         if not m:
@@ -1818,7 +1843,7 @@ def cikl(nemoy=False, seychas=False, tranzitor=None):
     pusto = tishina_chata() >= PUSTOY_ZAL
     tr = tranzitor_seychas(k) if tranzitor is None else bool(tranzitor)
     razresheno = ['molchu', 'kozyr']
-    if not tr and h != 'проигрывает' and st is None and k.get('stavka_replik', 0) >= STAVKA_CHEREZ and nk >= MIN_KUSKOV_STAVKA:
+    if STAVKI_VKL and not tr and h != 'проигрывает' and st is None and k.get('stavka_replik', 0) >= STAVKA_CHEREZ and nk >= MIN_KUSKOV_STAVKA:
         razresheno.append('stavka')                           # раз в 100 реплик; не когда проигрывает; ленты ≥5 минут; пока старая не закрыта — не открываем
     if not tr and h == 'выигрывает' and vz is None and min_(k['posl_vyzov']) >= RAZ_VYZOV:
         razresheno.append('vyzov')                            # 09.10: вызов — когда выигрывает (Транзитор — ставка и вызов ждут)
