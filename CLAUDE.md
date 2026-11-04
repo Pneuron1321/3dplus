@@ -60,6 +60,10 @@
   ставит 55 €); идеи — opus effort medium, `kanal idei vykl|vkl`; `zamer modeli [ч]` — расход модели (/root/.modeli.jsonl +
   журналы Claude Code). Цель «♥ N / 13,000» — оставить. Память проекта сверх обзора — quest-claude docs/PAMYAT-PROEKTA.md
   (ждёт ответа, отложено, идеи в запасе, dolg.txt, Mar3l_2001 гость Kick, LTCOLUMBO, ключ Tripo3D деактивировать).
+- **05.11 ночь (зеркало ccefe81):** разбор моста по версиям — docs/MOST-VERSII.md (хвосты: компас без розы, «сменить все
+  ключи гостей» не подключено, место клипов ~740 МБ — ждут «да»); проверка Плюса — docs/PLUS-PROVERKA.md: правила без
+  ставок, выводы по догадкам не на экран итогов (флаг /root/.kanal/dogadki-publichno), `obnovi pravila` ставит dumat,
+  otmychka, trezubets, dolg.txt (если нет).
 - **Скрипты шлема — зеркало 9fb1fa7** (с мостом). Главное:
   - **kanal (новый, 04.11, одобрены п. 1–8 отчёта Плюса 01.11; вживую НЕ проверен):** Twitch/Kick по API на входах Плюса
     (/root/plus twitch_vhod.py, kick_vhod.py — прочитаны, чистые; токены /root/.twitch-user, /root/.kick-user — секреты).
