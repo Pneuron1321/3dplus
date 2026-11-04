@@ -691,7 +691,64 @@ def pauza():
             pass
 
 
+KOMPAKT_POSL = os.environ.get('USHI_KOMPAKT_POSL', '/tmp/kompakt.posl')   # mtime — последняя подготовка к компакту
+KOMPAKT_OT = float(os.environ.get('USHI_KOMPAKT_OT', 35 * 60))
+KOMPAKT_DO = float(os.environ.get('USHI_KOMPAKT_DO', 45 * 60))
+KOMPAKT_OFF = os.environ.get('USHI_KOMPAKT_OFF', '/root/.kompakt-avto-off')
+KOMPAKT_TEKST = ('компакт: подготовка (сама, раз в 35–45 мин) — перепиши /root/pamyat.md как обычно; '
+                 'вслух не отвечай: ответ — одна строка «—»')
+PLUS_RABOTAET = re.compile(r'esc to interrupt|Esc to interrupt')
+
+
+def kompakt_moment(now, el):
+    """Подходящий ли миг для подготовки к компакту (05.11, Плюс 2.0): Плюс не работает и молчит, Александр не
+    говорит хотя бы 20 с, на экране нет вопроса. К 45-й минуте — уже без ожидания тишины Александра."""
+    try:
+        nizh = ekran()
+    except Exception:
+        return False
+    if DIALOG.search(nizh) or PLUS_RABOTAET.search(nizh):
+        return False
+    try:
+        if any(not f.endswith('.tmp') for f in os.listdir(G_Q)):
+            return False                    # голос ещё говорит или ждёт
+    except OSError:
+        pass
+    if el >= KOMPAKT_DO:
+        return True
+    try:
+        hv = open(VED_DIALOG, 'rb').read()[-4000:].decode('utf-8', 'replace').splitlines()
+        alex = max((json.loads(l).get('t', 0) for l in hv if '"alex"' in l), default=0)
+    except (OSError, ValueError):
+        alex = 0
+    return now - alex >= 20
+
+
+def kompakt_avto(now=None):
+    """Раз в 35–45 мин — тихая подготовка к компакту в лучший миг окна. Вернёт True, если отправили."""
+    now = now or time.time()
+    if os.path.exists(KOMPAKT_OFF):
+        return False
+    try:
+        posl = os.path.getmtime(KOMPAKT_POSL)
+    except OSError:
+        open(KOMPAKT_POSL, 'w').close()
+        return False
+    el = now - posl
+    if el < KOMPAKT_OT or not kompakt_moment(now, el):
+        return False
+    if not v_plus(KOMPAKT_TEKST, '(служебное) '):
+        return False
+    os.utime(KOMPAKT_POSL, (now, now))
+    print(time.strftime('%H:%M:%S'), 'компакт: подготовка сама, через', int(el // 60), 'мин', flush=True)
+    return True
+
+
 def compact(kind):
+    try:
+        open(KOMPAKT_POSL, 'w').close()    # и подготовка, и сжатие — отсчёт 35–45 мин заново
+    except OSError:
+        pass
     if kind == 'go':
         if ekran_zanyat():
             say('На экране вопрос разрешения — сначала '
@@ -2535,7 +2592,7 @@ def main():
     st, alive = stamp(), plus_alive()
     nst = nastroyki_st()
     sled = dict(alive=0, retr=0, golos=0, stamp=0, zhdut=0,
-                pamyat=0)
+                pamyat=0, kompakt=0)
     vyzov = None       # Ава на паузе с этого времени
     podyom = 0.0       # когда подняли после убийства
     chat = Chat(plus_alive)
@@ -2552,6 +2609,12 @@ def main():
         if now > sled['golos']:
             golos_zhiv()
             sled['golos'] = now + 30
+        if now > sled['kompakt'] and alive:
+            sled['kompakt'] = now + 10
+            try:
+                kompakt_avto(now)
+            except Exception as e:
+                print(time.strftime('%H:%M:%S'), 'компакт сам:', type(e).__name__, flush=True)
         if now > sled['pamyat']:
             sled['pamyat'] = now + 30
             try:

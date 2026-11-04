@@ -1,16 +1,16 @@
 #!/data/data/com.termux/files/usr/bin/python3
-"""Режиссёр Плюса (05.11, Александр: «плюс сам сохраняет 3 клипа по 5 минут исходя из своих решений… и коротко
+"""Режиссёр Плюса (05.11, Александр: «плюс сам сохраняет 3 клипа по 5 минут исходя из своих решений [в каждый час]… и коротко
 напоминает мне в ухо раз в 4,5 минуты, что нужны клипы»).
 
 Пока идёт эфир:
   • раз в 2,5 мин смотрит последние 5 минут — речь Александра и Плюса (dialog.jsonl), что видно в шлеме (obzor.log),
     чат (chat.log), донаты и фолловеры (donaty.jsonl) — и решает сам (модель + своя память «какие клипы хорошие»),
     стоит ли сохранить клип. Да — мост сохраняет два видео на одно время: эфир и камеру телефона в полном качестве,
-    по 5 минут (/klip?sek=300; мост до 2.8.6 — по 3 минуты). Сам — не больше 3 за эфир и не внахлёст.
+    по 5 минут (/klip?sek=300; мост до 2.8.6 — по 3 минуты). Сам — не больше 3 в час и не внахлёст.
   • раз в 4,5 мин — коротко в ухо «Клип?» (только Александру; если клип только что сохранён — молчит).
 Отзывы Александра («клип хороший / плохой, потому что…») — в память режиссёра: следующие решения учитывают их.
 
-rezhisser                       — что сейчас: эфир, клипов за эфир, напоминания
+rezhisser                       — что сейчас: эфир, клипы, напоминания
 rezhisser klip [МИНУТ]          — сохранить сейчас (по умолчанию 5 минут; «клип 3 минуты» — rezhisser klip 3)
 rezhisser klipy                 — клипы, сохранённые режиссёром (когда, почему, название)
 rezhisser otzyv + ТЕКСТ         — хороший клип и почему; «-» — плохой
@@ -46,7 +46,7 @@ MODEL = E('REZH_MODEL', 'sonnet')
 SEK = float(E('REZH_SEK', 1))
 
 KLIP_SEK = 300            # клип — 5 минут (Александр 05.11)
-AVTO_MAKS = 3             # сам — не больше 3 за эфир
+AVTO_MAKS = 3             # сам — не больше 3 в час (Александр 05.11)
 PROVERKA = 150            # смотреть последние 5 минут раз в 2,5 мин — момент не уйдёт из круга моста
 NAPOMINANIE = 270         # «Клип?» в ухо раз в 4,5 мин
 POROG = 7                 # оценка 0–10, с которой сохраняет; без клипов час — 6, два часа — 5
@@ -192,7 +192,7 @@ class Rezhisser:
     def __init__(self, now=None):
         now = now or time.time()
         self.efir_s = None
-        self.avto = 0                 # сам сохранил за этот эфир
+        self.avto_t = []              # когда сам сохранял (за час)
         self.posl_avto = 0.0
         self.posl_proverka = now
         self.posl_napominanie = now
@@ -205,8 +205,8 @@ class Rezhisser:
         now = now or time.time()
         if not K.efir_idyot():
             if self.efir_s:
-                log('эфир кончился; сам сохранил', self.avto)
-            self.efir_s, self.avto = None, 0
+                log('эфир кончился')
+            self.efir_s = None
             return
         if self.efir_s is None:
             self.efir_s, self.posl_proverka, self.posl_napominanie = now, now, now
@@ -219,7 +219,8 @@ class Rezhisser:
                 self.posl_napominanie = now
                 if now - posl >= raz:         # клип только что был — не мешаем
                     v_uho('Клип?')
-        if n.get('avto', True) is not False and self.avto < AVTO_MAKS and now - self.posl_proverka >= PROVERKA * SEK:
+        self.avto_t = [x for x in self.avto_t if now - x < 3600 * SEK]
+        if n.get('avto', True) is not False and len(self.avto_t) < AVTO_MAKS and now - self.posl_proverka >= PROVERKA * SEK:
             self.posl_proverka = now
             if now - posl < KLIP_SEK * SEK:   # клипы внахлёст не нужны
                 return
@@ -245,7 +246,7 @@ class Rezhisser:
         z = sohranit(KLIP_SEK, 'режиссёр', str(o.get('pochemu', ''))[:120], str(o.get('nazvanie', ''))[:80],
                      str(o.get('huk', ''))[:80])
         if z['ok']:
-            self.avto += 1
+            self.avto_t.append(now)
             self.posl_avto = now
             v_uho('Сохранил клип: %s.' % (z['pochemu'] or 'момент'))
         return o
@@ -313,7 +314,7 @@ def main(a):
         print(__doc__.split('\n\n')[-1])
         return 1
     n = nastroyki()
-    print('Эфир: %s; сам сохраняю: %s (до %d за эфир, по 5 мин); «Клип?» в ухо: %s; клипов режиссёра всего: %d' % (
+    print('Эфир: %s; сам сохраняю: %s (до %d в час, по 5 мин); «Клип?» в ухо: %s; клипов режиссёра всего: %d' % (
         'идёт' if K.efir_idyot() else 'нет', 'да' if n.get('avto', True) is not False else 'нет', AVTO_MAKS,
         ('раз в %d с' % int(n.get('napominanie_sek') or NAPOMINANIE)) if n.get('napominanie', True) is not False else 'выкл',
         len(klipy(1000))))
