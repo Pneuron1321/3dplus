@@ -63,9 +63,10 @@ import kotlin.concurrent.thread
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}
  *   GET /opoveshchenie?vid=follow|sub|raid&kto=НИК -> плашка сверху эфира на 6 с (2.7.8): «NEW FOLLOWER» и ник
  *   GET /donat?kto=НИК&skolko=$5     -> маленькая строка «НИК donated $5!» слева вверху эфира (2.8.2)
+ *   GET /zvuk?imya=soobshchenie|otvet|novyy|vazhno|narushenie[&efir=1] -> короткий звук чата Splus (2.8.6; без efir — шлем)
  *   GET /schet, /schet/upr?zr_tw=N&pod_kick=N&nik=…&zr=0|1&pod=0|1&niki=0|1 -> счётчики и ник внизу (2.8.2, Schet)
  *   GET /klip/upr[?rezhim=otdelno|efir|vykl] -> клип шлема: свой кодировщик без окна камеры (уступает игре) | сам эфир | нет
- *   GET /klip                -> «клип клип клип» (2.7.8): клипы камеры и эфира по 3 минуты в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
+ *   GET /klip[?sek=300]      -> «клип клип клип» (2.7.8): клипы камеры и эфира на одно время (2.8.6: 5 минут, sek — меньше) в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
  *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 150) с видео телефона — MP4 в «Фильмы/Plus»
  *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}
  *   GET /karta/upr?vkl=0|1&g=100 -> звук карты в шлем и эфир вкл/выкл, громкость %
@@ -422,10 +423,11 @@ class FrameServer(
                 if (f == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())
                 else reply(out, 200, "application/json; charset=utf-8", f(query).toByteArray(Charsets.UTF_8))
             }
-            "/klip" -> {                                  // 2.7.8: «клип клип клип» — камера и эфир по 3 минуты
+            "/klip" -> {                                  // 2.7.8: «клип клип клип» — камера и эфир (2.8.6: 5 минут или ?sek=)
                 val f = Hub.klipKlip
                 if (f == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())
-                else reply(out, 200, "application/json; charset=utf-8", f().toByteArray(Charsets.UTF_8))
+                else reply(out, 200, "application/json; charset=utf-8",
+                    f(query["sek"]?.toIntOrNull() ?: CaptureService.KLIP_SEK).toByteArray(Charsets.UTF_8))
             }
             "/kamera", "/kamera/vid", "/kamera/stranica", "/kamera/klip" -> {
                 val k = kamera()
@@ -438,6 +440,9 @@ class FrameServer(
                         else -> k.status()
                     }.toByteArray(Charsets.UTF_8))
             }
+            "/zvuk" ->                                    // 2.8.6: короткий звук чата Splus (efir=1 — и в эфир)
+                reply(out, 200, "application/json; charset=utf-8",
+                    Hub.zvukChata(query["imya"] ?: "", query["efir"] == "1").toByteArray(Charsets.UTF_8))
             "/donat" -> {                                 // 2.8.2: маленькая строка доната слева вверху эфира
                 val d = Hub.donatStroka
                 if (d == null) reply(out, 503, "application/json", "{\"oshibka\":\"захват не идёт\"}".toByteArray())

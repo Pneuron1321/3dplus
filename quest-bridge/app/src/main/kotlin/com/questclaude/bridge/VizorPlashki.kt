@@ -298,7 +298,33 @@ class VizorPlashki(
         val donat = chto == "donat"
         val zn = if (donat) listOf("DONATE" to Vizor.ZOLOTO) else Schet.ZNACHKI.map { Vizor.ploshchadka(it) }
         if (donat) return nizPilyulya(c, b, h, zn, ssylka)
-        nizPilyulya(c, b, h, zn, nik)
+        val ik = Schet.ZNACHKI.mapNotNull { znachok(it) }
+        if (ik.size == Schet.ZNACHKI.size) return nizIkonki(c, b, h, ik, nik)
+        nizPilyulya(c, b, h, zn, nik)                                  // значков нет в сборке — буквами, как было
+    }
+
+    /** Настоящие значки площадок (2.8.6, Александр 05.11: «оригинальные значки, не YT буквами»): картинки assets/znachki (tw, kick, yt, ig, tt). */
+    private val znachki = HashMap<String, Bitmap?>()
+    private val ikonkaK = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    private fun znachok(pl: String): Bitmap? = znachki.getOrPut(pl) {
+        try { ctx.assets.open("znachki/$pl.png").use { BitmapFactory.decodeStream(it) } } catch (e: Exception) { null }
+    }
+
+    private fun nizIkonki(c: Canvas, b: Bitmap, h: Float, ik: List<Bitmap>, nik: String) {
+        val zh = 26f
+        val nw = nikNizK.measureText(nik)
+        val w = minOf(b.width - 8f, 12f + ik.size * (zh + 6f) + 6f + nw + 16f)
+        val x0 = (b.width - w) / 2f
+        val r = RectF(x0, 4f, x0 + w, h - 4f)
+        kist.karta(c, r, radius = r.height() / 2, ten = false)
+        var x = x0 + 12f
+        val zy = r.centerY() - zh / 2
+        for (bm in ik) {
+            c.drawBitmap(bm, null, RectF(x, zy, x + zh, zy + zh), ikonkaK)
+            x += zh + 6f
+        }
+        c.drawText(kist.vlezet(nikNizK, nik, r.right - x - 14f), x + 6f, r.centerY() + 7f, nikNizK)
     }
 
     private fun nizPilyulya(c: Canvas, b: Bitmap, h: Float, zn: List<Pair<String, Int>>, nik: String) {

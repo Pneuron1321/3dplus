@@ -96,14 +96,15 @@ class Opoveshchenie(private val ctx: Context, private val razvilka: () -> Razvil
     }
 
     companion object {
-        /** Звук из assets как медиа с захватом — его слышат и эфир, и шлем (2.8.2: и для строки доната). */
-        fun zvuk(ctx: Context, put: String) {
+        /** Звук из assets как медиа: с захватом — слышат эфир и шлем (2.8.2: и строка доната); efir=false — только шлем. */
+        fun zvuk(ctx: Context, put: String, efir: Boolean = true) {
             try {
                 val p = MediaPlayer()
                 ctx.assets.openFd(put).use { p.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
                 p.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL).build())     // эфир его захватывает
+                    .setAllowedCapturePolicy(if (efir) AudioAttributes.ALLOW_CAPTURE_BY_ALL     // эфир его захватывает
+                        else AudioAttributes.ALLOW_CAPTURE_BY_NONE).build())                   // 2.8.6: только в шлеме
                 p.setOnCompletionListener { it.release() }
                 p.setOnErrorListener { mp, _, _ -> mp.release(); true }
                 p.prepare()

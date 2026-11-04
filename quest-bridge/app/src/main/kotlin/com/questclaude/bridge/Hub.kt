@@ -38,7 +38,7 @@ object Hub {
     /** Гостя слышно в шлеме (за последние 1,2 с): голос гостя из динамиков не должен будить Плюса. */
     @Volatile var gostiZvuchat = false
     /** «Клип клип клип» (2.7.8): сохранить клипы камеры и эфира по 3 минуты; ставит служба глаз. Ответ — JSON. */
-    @Volatile var klipKlip: (() -> String)? = null
+    @Volatile var klipKlip: ((Int) -> String)? = null     // 2.8.6: секунд (по умолчанию 300)
     /** Камера получила ключевой кадр — эфиру тоже (2.7.9: клипы на одно время); ставит служба глаз на время эфира. */
     @Volatile var klyuchevoyEfira: (() -> Unit)? = null
     /** Режим клипа шлема (2.7.9): otdelno | efir | vykl; ставит служба глаз. */
@@ -71,7 +71,20 @@ object Hub {
     /** Страница клипов для айфона (2.7.0, /klipy…): ставит первая служба (нужен Context для галереи). */
     @Volatile var klipy: KlipyStranica? = null
 
+    /** Приложение — для коротких звуков чата (2.8.6, /zvuk): ставит первая служба. */
+    @Volatile var app: android.content.Context? = null
+
+    /** Короткий звук чата Splus (2.8.6): assets/zvuki/chat-ИМЯ.mp3; efir=false — только в шлеме (захват его не берёт). */
+    fun zvukChata(imya: String, efir: Boolean): String {
+        val c = app ?: return "{\"ok\":false,\"oshibka\":\"служб нет\"}"
+        if (imya !in ZVUKI_CHATA) return "{\"ok\":false,\"oshibka\":\"звуки: ${ZVUKI_CHATA.joinToString("|")}\"}"
+        Opoveshchenie.zvuk(c, "zvuki/chat-$imya.mp3", efir)
+        return "{\"ok\":true}"
+    }
+    val ZVUKI_CHATA = setOf("soobshchenie", "otvet", "novyy", "vazhno", "narushenie")
+
     @Synchronized fun kartaZapustit(ctx: android.content.Context, dir: java.io.File) {
+        app = ctx.applicationContext
         if (karta == null) karta = try { KartaZvuk(ctx.applicationContext, dir).also { it.start() } } catch (e: Exception) { null }
         if (kartinka == null) kartinka = try { KartaKartinka(ctx.applicationContext, dir).also { it.start() } } catch (e: Exception) { null }
         if (klipy == null) klipy = KlipyStranica(KlipyGalereya(ctx), { Kamera.ip() })   // клипы (2.7.0): порт — только по команде

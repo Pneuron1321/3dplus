@@ -46,6 +46,8 @@ class CaptureService : Service() {
 
     companion object {
         private const val KLIP_REZHIM = "klip-rezhim"
+        /** 2.8.6: «клип клип клип» и /klip — 5 минут (Александр 05.11). */
+        const val KLIP_SEK = 300
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"
         const val ACTION_STOP = "com.questclaude.bridge.STOP"
@@ -125,9 +127,11 @@ class CaptureService : Service() {
             "\"sekund\":${efirKlip.sekund},\"so_sleduyushchego_efira\":${q.containsKey("rezhim")}}"
     }
 
-    /** «Клип клип клип»: камера и шлем (эфир; в режиме otdelno — без окна камеры) по 3 минуты в «Фильмы/Plus», на одно
+    /** «Клип клип клип»: камера и шлем (эфир; в режиме otdelno — без окна камеры) по [sekZapros] с (2.8.6: 5 минут; по
+     *  запросу — меньше) в «Фильмы/Plus», на одно
      *  и то же время; ответ — {"kamera":{…},"efir":{…},"sinhron":…,"rashozhdenie_ms":…}. */
-    private fun klipKlip(): String {
+    private fun klipKlip(sekZapros: Int = KLIP_SEK): String {
+        val sek = sekZapros.coerceIn(10, KlipMp4.MAKS_SEK - 5)
         val vremya = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
         val kz = kamera?.klip
         val shlemNet = klipRezhim() == "vykl"
@@ -135,7 +139,7 @@ class CaptureService : Service() {
         // «3 минуты назад», конец — одно мгновение; имена с одним временем — пара видна в галерее
         if (kz != null && !shlemNet) {
             val t1 = listOfNotNull(kz.konecVremya(), efirKlip.konecVremya()).takeIf { it.size == 2 }?.minOrNull()
-            val para = t1?.let { KlipSinhron.vybrat(kz.klyuchevyeVremya(), efirKlip.klyuchevyeVremya(), it - (KlipMp4.MAKS_SEK - 5) * 1_000_000L) }
+            val para = t1?.let { KlipSinhron.vybrat(kz.klyuchevyeVremya(), efirKlip.klyuchevyeVremya(), it - sek * 1_000_000L) }
             if (t1 != null && para != null) {
                 // 2.8.0 (Александр 29.10): у камеры звука не надо — звук общий, в клипе эфира (два видео на одно время)
                 val k = KlipMp4.sohranitSnimok(this, { kz.snimokVremya(para.kamera, t1) }, "plus-klip-kamera", vremya, zvuk = false)
@@ -144,10 +148,10 @@ class CaptureService : Service() {
             }
         }
         val efirEst = !shlemNet && efirKlip.sekund > 0                // звук — в клипе эфира; эфира нет — у камеры свой звук
-        val k = kz?.let { KlipMp4.sohranit(this, it, KlipMp4.MAKS_SEK - 5, "plus-klip-kamera", zvuk = !efirEst) }
+        val k = kz?.let { KlipMp4.sohranit(this, it, sek, "plus-klip-kamera", zvuk = !efirEst) }
             ?: "{\"oshibka\":\"камера не подключена\"}"
         val e = if (shlemNet) "{\"oshibka\":\"клип шлема выключен (efir klip efir — включить)\"}"
-            else KlipMp4.sohranit(this, efirKlip, KlipMp4.MAKS_SEK - 5, "plus-klip-shlem")
+            else KlipMp4.sohranit(this, efirKlip, sek, "plus-klip-shlem")
         return "{\"kamera\":$k,\"efir\":$e,\"sinhron\":false}"
     }
 
@@ -256,7 +260,7 @@ class CaptureService : Service() {
         }
         Hub.micTapy += rechYa
         // 2.7.8: «клип клип клип» — два клипа по 3 минуты: камера телефона и эфир (что в очках, со слоями), без пережатия
-        Hub.klipKlip = { klipKlip() }
+        Hub.klipKlip = { sek -> klipKlip(sek) }
         Hub.klipUpr = { q -> klipUpr(q) }
         Hub.opoveshchenie = Opoveshchenie(this) { razvilka }
         Hub.donatStroka = DonatStroka(this) { razvilka }

@@ -19,8 +19,8 @@ import java.util.Locale
 object KlipMp4 {
     private val zanyat = java.util.concurrent.atomic.AtomicBoolean(false)
     const val PAPKA = "Movies/Plus"
-    /** Клип — до 3 минут (2.7.8, «клип клип клип»: два клипа по 3 минуты); круг KlipZapis держит чуть больше. */
-    const val MAKS_SEK = 185
+    /** Клип — до 5 минут (2.8.6; «клип клип клип» — два клипа по 5 минут); круг KlipZapis держит чуть больше. */
+    const val MAKS_SEK = 305                       // 2.8.6: клип до 5 минут (было 185 под 3 мин)
 
     /** Ответ JSON: {"ok":true,"put":"Movies/Plus/…mp4","sek":150,"mb":88} или {"oshibka":"…"}. */
     fun sohranit(ctx: Context, z: KlipZapis, sek: Int, nachalo: String = "plus-klip", zvuk: Boolean = true): String =

@@ -20,7 +20,7 @@ import java.io.InputStream
  */
 class KlipZapis(
     private val dir: File,
-    private val derzhatMs: Long = 200_000,                 // 2.7.8: клип до 3 минут (было 160 с под 2,5 мин)
+    private val derzhatMs: Long = 320_000,                 // 2.8.6: клип до 5 минут (Александр 05.11; было 200 с под 3 мин)
     private val kuskomMs: Long = 10_000,
     /** Часы шлема, мкс (2.7.9): общие для всех кругов — по ним два клипа режутся на одно и то же время. */
     private val chasyUs: () -> Long = { System.nanoTime() / 1000 },
