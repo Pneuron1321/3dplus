@@ -16,6 +16,8 @@
   kanal agent vkl|vykl        — Плюс в чате текстом: первым здоровается, отвечает, помнит каждого (обычно включён)
   kanal idei                  — последние идеи «3xxx» (Плюс 2.0: раз в 15 минут эфира, только прошедшие критика)
   kanal idei + НОМЕР ОТЗЫВ    — Саше понравилась идея (- — примитивно / не то); kanal idei zriteley — идеи «!idea»
+  kanal schet [N]             — счёт последних эфиров: пришло, новых, вернулись, писали, подписались, пик
+  kanal tihiy vkl|vykl        — тихий режим эфира: меньше голосов в ухо (Плюс 2.0, первые эфиры)
   kanal strana ИМЯ, strany    — страны сезона «Around the world in VR» (и из памяти Splus)
   kanal urok                  — урок дня от зрителей: кандидаты, урок сегодня, сработал ли (зрители: «!lesson …»)
   kanal uchitelya             — «Teachers of the week» для описания канала
@@ -75,6 +77,11 @@ DIALOG = E('KANAL_DIALOG', '/root/.vedushchiy/dialog.jsonl')
 OBZOR = E('KANAL_OBZOR', '/tmp/obzor.log')
 DONATY = E('KANAL_DONATY', '/tmp/donaty.jsonl')
 SPLUS = E('KANAL_SPLUS', '/root/.splus')
+ZRITELI_SOB = E('KANAL_ZRITELI', '/tmp/zriteli.jsonl')            # JOIN/PART Twitch от ушей
+TIHIY = E('KANAL_TIHIY', '/root/.tihiy-rezhim')                   # 05.11: тихий режим эфира — меньше голосов в ухо
+SCHET_MIN = 300          # эфир короче 5 минут — не считаем
+SCHET_KONEC = 600        # эфира нет 10 минут — кончился (обрыв на минуту — не конец)
+BOT_IMYA = re.compile(r'(?:bot$|^bot_|_bot_)')
 UA = 'Mozilla/5.0 (Linux; Quest) PlusAssistant'
 OBYAVLENIE_SVOE = ('Enjoying the stream? Follow so you don\'t miss the next one! Support: {ssylka} · '
                    'Channel points: click the gift icon under chat — spend them on rewards for Plus!')
@@ -612,6 +619,145 @@ def idei_vse(n=40):
     return out
 
 
+def tihiy():
+    return os.path.exists(TIHIY)
+
+
+class SchetEfira:
+    """Счёт эфира (05.11, план карьеры): после каждого эфира — сколько пришло, новых, вернувшихся, писали в чат,
+    подписались, пик зрителей. Видны: кто писал в чат (все площадки) и кто зашёл в Twitch со входом (JOIN);
+    молчащие зрители Kick и YouTube — только в пике. Реестр «кого видели» — /root/.kanal/videli.json."""
+    def __init__(self):
+        self.t0 = None
+        self.net_s = None
+        self.prishli, self.pisali, self.follow, self.pik = set(), set(), 0, 0
+        try:
+            self.poz = os.path.getsize(ZRITELI_SOB)
+        except OSError:
+            self.poz = 0
+        self.posl_pik = 0.0
+
+    @staticmethod
+    def kto(pl, nik):
+        nik = re.sub(r'[^\w-]', '', (nik or '').lower())[:30]
+        return '%s__%s' % (pl, nik) if nik else None
+
+    def chuzhoy(self, nik):
+        n = (nik or '').lower()
+        return not n or n in svoi() or BOT_IMYA.search(n) is not None
+
+    def zhoiny(self):
+        try:
+            razmer = os.path.getsize(ZRITELI_SOB)
+        except OSError:
+            return []
+        if razmer < self.poz:
+            self.poz = 0
+        if razmer == self.poz:
+            return []
+        with open(ZRITELI_SOB, errors='replace') as f:
+            f.seek(self.poz)
+            stroki = f.readlines()
+            self.poz = f.tell()
+        out = []
+        for l in stroki:
+            try:
+                e = json.loads(l)
+            except ValueError:
+                continue
+            if e.get('chto') == 'join':
+                out.append(str(e.get('kto', '')))
+        return out
+
+    def shag(self, efir, novye, now=None):
+        now = now or time.time()
+        zh = self.zhoiny()
+        if efir:
+            self.net_s = None
+            if self.t0 is None:
+                self.t0 = now
+                self.prishli, self.pisali, self.follow, self.pik = set(), set(), 0, 0
+                self.dnt = now
+            for m in novye:
+                if not self.chuzhoy(m.get('kto')):
+                    k = self.kto(m.get('pl', 'tw'), m['kto'])
+                    if k:
+                        self.prishli.add(k)
+                        self.pisali.add(k)
+            for n in zh:
+                if not self.chuzhoy(n):
+                    k = self.kto('tw', n)
+                    if k:
+                        self.prishli.add(k)
+            if now - self.posl_pik >= 60 * SEK:
+                self.posl_pik = now
+                try:
+                    d = most('/schet')
+                    self.pik = max(self.pik, int(d.get('zriteli_vsego') or 0))
+                except (TypeError, ValueError):
+                    pass
+            return None
+        if self.t0 is None:
+            return None
+        if self.net_s is None:
+            self.net_s = now
+        if now - self.net_s < SCHET_KONEC * SEK:
+            return None
+        return self.zakryt(self.net_s)
+
+    def follovery(self, ot, do):
+        n = 0
+        try:
+            for l in open(E('KANAL_DONATY', '/tmp/donaty.jsonl'), errors='replace'):
+                try:
+                    d = json.loads(l)
+                except ValueError:
+                    continue
+                if d.get('istochnik') == 'follow' and ot <= d.get('t', 0) <= do:
+                    n += 1
+        except OSError:
+            pass
+        return n
+
+    def zakryt(self, konec):
+        t0, self.t0, self.net_s = self.t0, None, None
+        dlit = konec - t0
+        if dlit < SCHET_MIN * SEK:
+            return None
+        put = os.path.join(PAPKA, 'videli.json')
+        videli = chitat(put)
+        den = time.strftime('%Y-%m-%d', time.localtime(t0))
+        novye = sorted(k for k in self.prishli if k not in videli)
+        vernulis = sorted(k for k in self.prishli if k in videli and videli[k].get('posl') != den)
+        for k in self.prishli:
+            v = videli.setdefault(k, {'pervyy': den, 'efirov': 0})
+            if v.get('posl') != den:
+                v['efirov'] = v.get('efirov', 0) + 1
+            v['posl'] = den
+        zapisat(put, videli)
+        z = {'t0': round(t0), 'den': den, 'minut': int(dlit // 60), 'prishli': len(self.prishli), 'novye': len(novye),
+             'vernulis': len(vernulis), 'pisali': len(self.pisali), 'podpisalis': self.follovery(t0, konec),
+             'pik': self.pik, 'vernulis_kto': vernulis[:20]}
+        with open(os.path.join(PAPKA, 'schet-efirov.jsonl'), 'a') as f:
+            f.write(json.dumps(z, ensure_ascii=False) + '\n')
+        v_uho('Итог эфира: %d минут; пришло %d, новых %d, вернулись %d, писали %d, подписались %d, пик зрителей %d.' % (
+            z['minut'], z['prishli'], z['novye'], z['vernulis'], z['pisali'], z['podpisalis'], z['pik']))
+        log('счёт эфира:', z)
+        return z
+
+
+def schet_tekst(n=10):
+    out = []
+    for l in _hvost(os.path.join(PAPKA, 'schet-efirov.jsonl'), n):
+        try:
+            z = json.loads(l)
+        except ValueError:
+            continue
+        out.append('%s · %3d мин · пришло %3d · новых %3d · вернулись %3d · писали %3d · подписались %2d · пик %3d' % (
+            z['den'], z['minut'], z['prishli'], z['novye'], z['vernulis'], z['pisali'], z['podpisalis'], z['pik']))
+    return out
+
+
 class Kanal:
     def __init__(self, now=None):
         now = now or time.time()
@@ -622,6 +768,7 @@ class Kanal:
         self.follow_videl = None          # логины фолловеров Twitch, уже виденные (первый опрос — не новость)
         self.ochered = []                 # сообщения чата для агента
         self.idei = []
+        self.schet = SchetEfira()
 
     def shag(self, now=None):
         now = now or time.time()
@@ -630,6 +777,10 @@ class Kanal:
         self.sobrat_uroki(novye)
         self.ochered += novye
         self.ochered = self.ochered[-40:]
+        try:
+            self.schet.shag(efir, novye, now)
+        except Exception as e:
+            log('счёт эфира сбой:', type(e).__name__, str(e)[:100])
         if not efir:
             self.ochered = []
             return
@@ -782,8 +933,8 @@ class Kanal:
         n = o.get('nagrada')
         if isinstance(n, dict) and n.get('imya'):
             zapisat(os.path.join(PAPKA, 'nagrada-predlozhenie.json'), n)
-        if proshli and kr.get('v_uho'):
-            v_uho(str(kr['v_uho'])[:240])
+        if proshli and kr.get('v_uho') and (not tihiy() or max(z['ball'] for z in proshli) >= 9):
+            v_uho(str(kr['v_uho'])[:240])      # тихий режим: в ухо только 9+ из 10
         if o.get('sezon') and sezon().get('vopros'):
             with open(os.path.join(PAPKA, 'sezon-zhurnal.md'), 'a') as f:
                 f.write('- %s (3xxx): %s\n' % (time.strftime('%Y-%m-%d %H:%M'), str(o['sezon'])[:300]))
@@ -997,6 +1148,19 @@ def main(a):
     if a and a[0] == 'idei':
         t = prochest(os.path.join(PAPKA, 'idei.md'))
         print(t[-2500:] if t else 'Идей пока нет — «3xxx» раз в 15 минут эфира.')
+        return 0
+    if a and a[0] == 'schet':
+        n = int(a[1]) if len(a) > 1 and a[1].isdigit() else 10
+        print('\n'.join(schet_tekst(n)) or 'Счёта эфиров пока нет — появится после первого эфира длиннее 5 минут.')
+        print('(молчащие зрители Kick и YouTube видны только в пике)')
+        return 0
+    if a and a[0] == 'tihiy' and a[1:2] in (['vkl'], ['vykl']):
+        if a[1] == 'vkl':
+            open(TIHIY, 'w').close()
+        elif os.path.exists(TIHIY):
+            os.remove(TIHIY)
+        print('Тихий режим эфира:', 'включён — в ухо только важное: идеи 9+, без «Клип?», Splus — только срочное' if a[1] == 'vkl'
+              else 'выключен — всё как обычно')
         return 0
     if a and a[0] == 'strana' and len(a) > 1:
         d = chitat(os.path.join(PAPKA, 'strany.json'))

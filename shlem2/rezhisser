@@ -41,6 +41,7 @@ DONATY = E('REZH_DONATY', '/tmp/donaty.jsonl')
 GALEREYA = E('REZH_GALEREYA', '/sdcard/Movies/Plus')
 G_Q = E('REZH_G_Q', '/tmp/golos/q')
 LOCK = E('REZH_LOCK', '/tmp/rezhisser.lock')
+TIHIY = E('REZH_TIHIY', '/root/.tihiy-rezhim')
 CLAUDE = E('REZH_CLAUDE', 'claude')
 MODEL = E('REZH_MODEL', 'sonnet')
 SEK = float(E('REZH_SEK', 1))
@@ -232,7 +233,7 @@ class Rezhisser:
             log('эфир идёт')
         n = nastroyki()
         posl = max(posledniy_klip(), self.posl_avto)
-        if n.get('napominanie', True) is not False:
+        if n.get('napominanie', True) is not False and not os.path.exists(TIHIY):   # тихий режим — без «Клип?»
             raz = float(n.get('napominanie_sek') or NAPOMINANIE) * SEK
             if now - self.posl_napominanie >= raz:
                 self.posl_napominanie = now
