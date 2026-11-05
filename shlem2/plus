@@ -115,13 +115,15 @@ while :; do
   # «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
   D=/root/plus
   mkdir -p "$D"
-  # Модель из settings.json на низком усилии — быстрый голос; трудное Плюс отдаёт
-  # помощнику dumat (высокое усилие, /root/.claude/agents/dumat.md).
+  # Модель из settings.json на среднем усилии (06.11, Александр: «стартует в medium, low мне не нравится»;
+  # своё — в /root/.plus-effort: low|medium|high); трудное Плюс отдаёт помощнику dumat (высокое усилие).
   # Мышь в tmux: джойстик шлема листает вывод, а не историю отправленного
   # (без неё Termux превращает прокрутку в стрелки).
   T0=$(date +%s)
   if ! tmux has-session -t plus 2> /dev/null; then
-    tmux -u new-session -d -s plus -c "$D" claude $CONT --effort low \; set -g mouse on
+    EFFORT=$(cat /root/.plus-effort 2> /dev/null)
+    case "$EFFORT" in low|medium|high) ;; *) EFFORT=medium ;; esac
+    tmux -u new-session -d -s plus -c "$D" claude $CONT --effort "$EFFORT" \; set -g mouse on
     lenta
   fi
   tmux -u attach -t plus

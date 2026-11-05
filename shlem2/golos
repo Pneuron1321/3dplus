@@ -382,6 +382,23 @@ KODY = [(re.compile(r'\bплюс[\s,.!-]+тихо\b', re.I), 'команда т�
         (re.compile(r'\bzoom[\s,.!-]+zoom\b', re.I), 'double zoom')]
 
 
+# 06.11 (Александр: «хочу, чтобы она (они) не называла меня по имени»): обращения по имени из речи — прочь
+# (Плюс, соведущая, суфлёр, итоги; чат вслух — как написал зритель).
+IMENA = (r'(?:Саш(?:а|енька|ка|ок|ь|е|у)?|Санёк|Санек|Сань|Саня|Санечка|Санчес|Шурик|Александр(?:у|а|ом)?|Alexander|Alex|'
+         r'Sasha|Sanya)')
+IMYA_NACHALO = re.compile(r'(^|[.!?…]\s+)(?:(?:hey|эй|ну|oh|слушай)[\s,]+)?' + IMENA + r'(?![\w-])\s*[,!—–-]+\s*', re.I)
+IMYA_KONEC = re.compile(r'\s*,\s*' + IMENA + r'(?![\w-])(?=\s*(?:[.!?…,;:]|$))', re.I)
+IMYA_POSLE = re.compile(r'\b(hey|hi|thanks|thank you|go|come on|эй|спасибо|давай|молодец)\s+' + IMENA + r'(?![\w-])', re.I)
+
+
+def bez_imeni(t):
+    """«Санёк, захват оборвался» → «Захват оборвался»; «Nice shot, Alex!» → «Nice shot!»; «Thanks Alex» → «Thanks»."""
+    t = IMYA_NACHALO.sub(lambda m: m.group(1) + '\x00', t)
+    t = re.sub('\x00(.)', lambda m: m.group(1).upper(), t).replace('\x00', '')
+    t = IMYA_KONEC.sub('', t)
+    return IMYA_POSLE.sub(lambda m: m.group(1), t)
+
+
 def dlya_uha(t, predel=1500):
     """Из ответа — то, что можно сказать: без кода, ссылок, путей и разметки.
     Строка без точки в конце (пункт списка, заголовок) получает точку — иначе
@@ -1075,7 +1092,7 @@ class Golos:
             _, tekst = iz_transkripta(raw)
         else:
             tekst = iz_huka(raw) if vid == 'hook' else raw
-        tekst = dlya_uha(tekst)
+        tekst = bez_imeni(dlya_uha(tekst))   # 06.11: без обращений по имени
         klyuch = re.sub(r'\W+', '', tekst.lower())
         if vid == 'pre' and (not klyuch or klyuch in self.skazano):
             if popytka < 3:                # журнал мог ещё не дописаться — заглянем позже
