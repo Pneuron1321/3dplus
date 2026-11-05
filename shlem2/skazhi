@@ -78,7 +78,7 @@ def stary(text):
                 break
             src, mp3 = os.path.join(tmp, '%d.txt' % i), os.path.join(tmp, '%d.mp3' % i)
             open(src, 'w').write(k)
-            golos = VOICE_VED if os.environ.get('SKAZHI_VID') == 'ved' else golos_plusa()   # соведущая — Серафина
+            golos = VOICE_VED if os.environ.get('SKAZHI_VID') in ('ved', 'vedu') else golos_plusa()   # соведущая — Серафина
             p = subprocess.Popen(['edge-tts', '--voice', golos, '-f', src, '--write-media', mp3],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             synth[:] = [p]

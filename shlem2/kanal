@@ -323,6 +323,33 @@ def v_uho(tekst):
         pass
 
 
+VED_OFF = E('KANAL_VED_OFF', '/root/.vedushchiy-off')
+VED_DIALOG = E('KANAL_VED_DIALOG', '/root/.vedushchiy/dialog.jsonl')
+
+
+def ved_ideya(tekst, nomer):
+    """06.11 (Александр: «идеи не привязаны ни к Плюсу, ни к соведущей — с ними тяжело взаимодействовать»): идею говорит
+    соведущая — её голосом, только ему в ухо («.vedu»); после — секунда «дослуха» ей: ответил — она обсуждает и пишет
+    отзыв (`vedushchiy sprosi`). Запись в общем журнале — чтобы она знала, о какой идее речь. Соведущая выключена — как
+    раньше, голосом Плюса в ухо."""
+    if os.path.exists(VED_OFF):
+        v_uho(tekst)
+        return
+    fraza = 'Саш, идея %d: %s' % (nomer, tekst.strip())
+    try:
+        os.makedirs(G_Q, exist_ok=True)
+        put = '%s/%d.vedu' % (G_Q, time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(fraza)
+        os.replace(put + '.tmp', put)
+        os.makedirs(os.path.dirname(VED_DIALOG), exist_ok=True)
+        with open(VED_DIALOG, 'a') as f:
+            f.write(json.dumps({'t': round(time.time(), 1), 'rol': 'ved', 'komu': 'alex', 'tekst': fraza, 'ru': fraza,
+                                'vid': 'ideya', 'ideya': nomer}, ensure_ascii=False) + '\n')
+    except OSError:
+        v_uho(tekst)
+
+
 def vsluh(tekst):
     """Голосом Плюса — в эфир и в шлем."""
     try:
@@ -934,7 +961,8 @@ class Kanal:
         if isinstance(n, dict) and n.get('imya'):
             zapisat(os.path.join(PAPKA, 'nagrada-predlozhenie.json'), n)
         if proshli and kr.get('v_uho') and (not tihiy() or max(z['ball'] for z in proshli) >= 9):
-            v_uho(str(kr['v_uho'])[:240])      # тихий режим: в ухо только 9+ из 10
+            luchshaya = max(proshli, key=lambda z: z['ball'])
+            ved_ideya(str(kr['v_uho'])[:240], luchshaya['id'])   # 06.11: говорит соведущая; тихий режим — только 9+
         if o.get('sezon') and sezon().get('vopros'):
             with open(os.path.join(PAPKA, 'sezon-zhurnal.md'), 'a') as f:
                 f.write('- %s (3xxx): %s\n' % (time.strftime('%Y-%m-%d %H:%M'), str(o['sezon'])[:300]))

@@ -20,7 +20,7 @@ import os, sys
 moy, n = int(sys.argv[1]), min(19, int(sys.argv[2]))
 os.setpriority(os.PRIO_PROCESS, moy, n)
 # уже запущенные (до обновления) Claude, tmux и помощники — тоже, каждым потоком
-SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'kanal', b'splus', b'rezhisser', b'raciya', b'nagruzka', b'plus-mcp',
+SVOI = {b'claude', b'tmux', b'ushi', b'golos', b'obzor', b'vedushchiy', b'donaty', b'zriteli', b'kanal', b'splus', b'rezhisser', b'sufler', b'raciya', b'nagruzka', b'plus-mcp',
         b'sinhron', b'gosti', b'cloudflared'}
 for d in os.listdir('/proc'):
     if not d.isdigit():
@@ -102,6 +102,8 @@ while :; do
   [ -x /usr/local/bin/splus ] && setsid nohup /usr/local/bin/splus demon >> /tmp/splus.log 2>&1 < /dev/null &
   # Режиссёр (05.11): сам сохраняет до 3 клипов по 5 минут в час, «Клип?» в ухо раз в 4,5 мин
   [ -x /usr/local/bin/rezhisser ] && setsid nohup /usr/local/bin/rezhisser demon >> /tmp/rezhisser.log 2>&1 < /dev/null &
+  # Английский суфлёр (06.11): раз в 2 мин подсказка в ухо, перевод соведущей и ответ ей, учёт его английского
+  [ -x /usr/local/bin/sufler ] && setsid nohup /usr/local/bin/sufler demon >> /tmp/sufler.log 2>&1 < /dev/null &
   # Синхронист (2.5.0): субтитры по каждому голосу — Александр, игра, гости (Whisper и перевод в Groq);
   # пока нет эфира или фраз, только ждёт приложение. Гости и туннель — по команде: gosti start.
   [ -x /usr/local/bin/sinhron ] && setsid nohup /usr/local/bin/sinhron demon >> /tmp/sinhron-demon.log 2>&1 < /dev/null &

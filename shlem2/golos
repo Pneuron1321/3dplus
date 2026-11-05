@@ -230,7 +230,13 @@ EFIR_SEK = 15             # с: как часто спрашивать мост,
 EFIR_IDYOT = ('efir', 'podklyuchayus', 'obryv')
 SREZ_ZAPAS = 0.12         # с: чат ждёт — порцию обрываем за столько до следующей фразы (в паузе между ними)
 BAJT_SEK = 6000.0         # edge-tts: 48 кбит/с — 6000 байт на секунду звука
-DOSLUH = ('hook', 'potok0', 'potok', 'ved')   # после чего уши слушают секунду без «плюс плюс»
+DOSLUH = ('hook', 'potok0', 'potok', 'ved', 'vedu')   # после чего уши слушают секунду без «плюс плюс»
+# 06.11 английский суфлёр (sufler): «.sufler» — подсказка Александру в ухо, медленнее (диктует), старше SUFLER_ZHIZN с —
+# не к месту, выбрасываем; «.vedu» — соведущая (её голос) только Александру в ухо (идеи канала), после — секунда «дослуха».
+SUFLER_TEMP = os.environ.get('GOLOS_SUFLER_TEMP', '-5%')
+SUFLER_ZHIZN = float(os.environ.get('GOLOS_SUFLER_ZHIZN', 45))
+UHO_VIDY = ('uho', 'sufler', 'vedu')                     # только Александру, при любом режиме, без субтитров
+VED_KONEC = os.environ.get('GOLOS_VED_KONEC', '/tmp/golos.ved-konec')   # соведущая договорила реплику: «время uid»
 # Чей голос открыл секунду «дослуха» — Плюса или соведущей (19.10): фраза в эту секунду — тому, кто говорил.
 DOSLUH_KTO = os.environ.get('GOLOS_DOSLUH_KTO', '/tmp/golos.dosluh-kto')
 # Соведущая не перебивает (19.10, Александр: «она начинает говорить, даже когда я говорю»): её реплика ждёт,
@@ -916,6 +922,8 @@ class Kusok:
 
     @property
     def temp(self):
+        if self.vid == 'sufler':
+            return SUFLER_TEMP         # подсказка суфлёра — чуть медленнее: её повторяют
         return BYSTREE if self.bystro else TEMP
 
 
@@ -1096,14 +1104,14 @@ class Golos:
         # договорила — уши ещё секунду слушают без «плюс плюс» (Александр 09.10). Вступление перед
         # инструментом, приветствие зрителям, «не расслышала» — нет.
         dosluh = vid in DOSLUH
-        if self.chitat_rezhim() != 'uho' and vid != 'uho':  # субтитры — только вслух: перевод всего ответа сразу
+        if self.chitat_rezhim() != 'uho' and vid not in UHO_VIDY:  # субтитры — только вслух: перевод всего ответа сразу
             self.titry.perevesti(ns, [f for p in ps for f in p], ved=vid == 'ved')
         with self.cv:
             for i, p in enumerate(ps):
                 k = Kusok(p, ns, t, i == 0 and not dalshe, dosluh and i == len(ps) - 1)
-                if vid == 'ved':
+                if vid in ('ved', 'vedu'):
                     k.golos = VOICE_VED    # соведущая — голосом Серафины (12.10), остальное как у Авы
-                k.uho = vid == 'uho'
+                k.uho = vid in UHO_VIDY
                 k.vid = vid
                 self.q.append(k)
             self.cv.notify_all()
@@ -1550,6 +1558,11 @@ class Golos:
             if put is False:
                 self.bez_seti()
             return
+        if k.vid == 'sufler' and time.time() - k.t > SUFLER_ZHIZN:
+            uid = k.uid
+            self.vybrosit(lambda x: x.uid == uid)   # подсказка опоздала — к месту уже не будет
+            log('подсказка суфлёра устарела — не говорю')
+            return
         if k.golos == VOICE_VED and not self.ved_mozhno(k):
             self.plus_vperyod()            # ждёт тишины — ответ Плюса (если есть) не держит
             return
@@ -1578,6 +1591,12 @@ class Golos:
                                k.dlit.get(temp) or 0.0)
 
     def zhdat_dosluh(self, k):
+        if k.dosluh and k.golos == VOICE_VED and k.vid == 'ved':
+            try:                           # суфлёр: соведущая договорила вслух — через 8 с перевод и ответ в ухо
+                open(VED_KONEC + '.tmp', 'w').write('%f %s\n' % (time.time(), k.uid))
+                os.replace(VED_KONEC + '.tmp', VED_KONEC)
+            except OSError:
+                pass
         if k.dosluh:
             self.zhdu_dosluh = True
             self.dosluh_kto = 'ved' if k.golos == VOICE_VED else 'plus'
@@ -1685,7 +1704,7 @@ class Golos:
     def plus_vperyod(self):
         """Первая не-соведущая порция очереди — вперёд (соведущая ждёт паузы, Плюс отвечает сразу)."""
         with self.cv:
-            i = next((i for i, x in enumerate(self.q) if x.golos != VOICE_VED), None)
+            i = next((i for i, x in enumerate(self.q) if x.golos != VOICE_VED and x.vid != 'sufler'), None)
             if i:
                 self.q.insert(0, self.q.pop(i))
                 self.cv.notify_all()
