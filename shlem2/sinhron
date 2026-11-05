@@ -94,6 +94,18 @@ OSKORB = re.compile(r'\b(?:nigg\w*|n[i1]gga\w*|fagg?ot\w*|retard\w*|kike\w*|chin
                     r'чурк\w*|хач(?:и|ей|ам|ик\w*)?\b|даун(?:ы|ов|ам)?\b)', re.I)
 GALLYU_IGRA = re.compile(r"i'?m going to go|i'?m sorry|thank you|i don'?t have it|ご視聴|おやすみ|ありがとう", re.I)
 IGRA_YAZYKI = ('ru', 'uk', 'en')
+# 06.11 (сессия 05.11): в речи Александра Whisper на дыхании боя и тишине писал «Thank you» (157 раз за вечер), «Okay»,
+# «Puh», «Mm-hmm» — и это шло в кадр. Его фраза из одних междометий по-английски — в кадр не идёт (смысла в ней нет).
+# «Okay», «Yeah», «Yes» — его настоящие слова (19.10), их оставляем; мимо — выдумки и дыхание.
+MEZHDOMETIYA = set('thank thanks you hmm hm mm mhm mh huh uh um ah eh oh puh pah pff pfff pfft ugh tchank puck phew '
+                   'bye'.split())
+
+
+def mezhdometiya(t):
+    w = re.findall(r"[a-z]+", t.lower())
+    return bool(w) and not re.search(r'[а-яёіїєґ]', t.lower()) and all(x in MEZHDOMETIYA for x in w)
+
+
 KOROTKIE = re.compile(r'^\W*(?:спасибо|thank you|thanks|you|ага|угу|да|bye|пока)\W*$', re.I)
 # Подсказка Whisper — имена письмом того языка, на котором голос говорил в прошлый раз. Игре — никакой:
 # 16.10 русская подсказка заставила Whisper писать английскую игру по-русски («Мы близко к победе» —
@@ -573,6 +585,7 @@ class Sinhron:
                 if len(slova(t)) < 1:
                     continue
             if (GALLYU.search(t) or (KOROTKIE.match(t) and nsp > 0.3) or cr > 2.4 or ekho(t, podskazka)
+                    or ya and mezhdometiya(t)
                     or podpis_zvuka(t) or igra and (len(set(slova(t))) <= 1 or GALLYU_IGRA.search(t))):
                 self.schet['vydumki'] += 1
                 log('выдумка', t[:60])

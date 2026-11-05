@@ -61,6 +61,7 @@ KOZYRI = [E('KANAL_KOZYR_' + k, p) for k, p in (('T', '/root/.vedushchiy/deep-tr
                                                  ('F', '/root/.vedushchiy/farvater.md'),
                                                  ('O', '/root/.claude/skills/otmychka/SKILL.md'))]
 SEK = float(E('KANAL_SEK', 1))                # в проверке — доли секунды
+SEK_SOST = E('KANAL_SEK_SOST', '/tmp/sekundant.json')   # уши: идёт ли раунд — идеи ждут угла
 RAZ_TABLO = 600       # название-табло — не чаще раза в 10 минут
 RAZ_FOLLOW = 30       # фолловеры Twitch
 RAZ_NAGRADY = 20      # награды за баллы
@@ -327,11 +328,34 @@ VED_OFF = E('KANAL_VED_OFF', '/root/.vedushchiy-off')
 VED_DIALOG = E('KANAL_VED_DIALOG', '/root/.vedushchiy/dialog.jsonl')
 
 
+def v_raunde():
+    """06.11: идёт раунд боя (уши, «плюс план на бой / перерыв») — в ухо ничего."""
+    st = chitat(SEK_SOST, {}) or {}
+    return bool(st.get('boy')) and time.time() - st.get('t', 0) < 3600 and time.time() >= st.get('raund_t', 0)
+
+
+def ideya_dostavit():
+    """Идея, отложенная на время раунда, — после него (не старше 15 минут)."""
+    put = os.path.join(PAPKA, 'ideya-zhdet.json')
+    z = chitat(put)
+    if not z or v_raunde():
+        return
+    try:
+        os.remove(put)
+    except OSError:
+        pass
+    if time.time() - z.get('t', 0) < 900:
+        ved_ideya(z.get('tekst', ''), z.get('nomer', 0))
+
+
 def ved_ideya(tekst, nomer):
     """06.11 (Александр: «идеи не привязаны ни к Плюсу, ни к соведущей — с ними тяжело взаимодействовать»): идею говорит
     соведущая — её голосом, только ему в ухо («.vedu»); после — секунда «дослуха» ей: ответил — она обсуждает и пишет
     отзыв (`vedushchiy sprosi`). Запись в общем журнале — чтобы она знала, о какой идее речь. Соведущая выключена — как
     раньше, голосом Плюса в ухо."""
+    if v_raunde():                                     # раунд — подождёт угла или конца боя
+        zapisat(os.path.join(PAPKA, 'ideya-zhdet.json'), {'tekst': tekst, 'nomer': nomer, 't': time.time()})
+        return
     if os.path.exists(VED_OFF):
         v_uho(tekst)
         return
@@ -430,7 +454,9 @@ ZADANIE_IDEI = (
     '"nagrada": {"imya": "…", "cena": 500, "chto": "…"} или null, "sezon": "наблюдение к сезону" или null}')
 
 ZADANIE_KRITIK = (
-    'Ты — строгий критик идей для Саши (VR-стример с ИИ-соведущим Плюсом). Саше скучны примитивные идеи и нравятся '
+    'Ты — строгий критик идей для Саши (VR-стример с ИИ-соведущим Плюсом). Идея, которая обманывает зрителей (задержка '
+    'или монтаж, выданные за предсказание ИИ, фальшивые события, накрутка), — балл 0: Саша за честность (сессия 05.11, '
+    'идея 41). Саше скучны примитивные идеи и нравятся '
     'элегантные, гениальные, масштабные, ультраглубокие, широкие, хакерские, поражающие. Оцени каждого кандидата '
     '1–10: 1–5 — банально или общий совет; 6–7 — неплохо, но предсказуемо; 8 — элегантно или неожиданно и выполнимо; '
     '9–10 — поражает. Невыполнимое в ближайшие дни на шлеме — минус 2. Будь скуп на 8+. Ответ — только JSON: '
@@ -811,6 +837,7 @@ class Kanal:
         if not efir:
             self.ochered = []
             return
+        ideya_dostavit()
         for imya, raz, f in (('follow', RAZ_FOLLOW, self.follovery), ('nagrady', RAZ_NAGRADY, self.zakazy),
                              ('tablo', RAZ_TABLO, self.tablo), ('obyavlenie', RAZ_OBYAVLENIE, self.obyavlenie),
                              ('chat', RAZ_CHAT, self.agent), ('3xxx', RAZ_3XXX, self.tri_x),

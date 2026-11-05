@@ -261,6 +261,10 @@ KONEC_PREDL = 0.4                  # с: до конца предложения 
 VED_ZHDAT = 30.0
 VED_DOGOVOR = 2.0                  # с тишины, после которой соведущая договаривает оборванное (21.10); ждёт не дольше VED_ZHDAT
 VED_PEREBIT = 2                    # замеров подряд (по 0,15 с) громче порога, пока она говорит, — он перебил
+# 06.11 (сессия 05.11, Александр: «мешает, что тебя перебивают, даже если я хмыкну»): уступать — только речи не короче
+# PEREBIT_SEK (по умолчанию 0,6 с: «хм», вдох, «ага» — короче); своё — /root/.golos-perebit (секунды, 0,1–2).
+PEREBIT_F = os.environ.get('GOLOS_PEREBIT', '/root/.golos-perebit')
+PEREBIT_SEK = 0.6
 # 29.10 (Александр: «он разговаривает в то же время, что и я»): Плюс замолкает так же, как соведущая, — Александр
 # громче порога 0,3 с (два замера), даже если говорит не ему. Прерванное не теряется: «плюс плюс» — и Плюс продолжит
 # с прерванной фразы; не позвали за PAUZA_MAKS — не договаривает. Порог — /root/.golos-porog (дБ), нет — как у соведущей.
@@ -874,6 +878,15 @@ def mik_db():
         return v if isinstance(v, int) and v >= 0 else None
     except Exception:
         return None
+
+
+def perebit_zamerov(shag=0.15):
+    """Сколько замеров подряд громче порога — «он заговорил» (а не хмыкнул)."""
+    try:
+        sek = max(0.1, min(2.0, float(open(PEREBIT_F).read().strip().replace(',', '.'))))
+    except (OSError, ValueError):
+        sek = PEREBIT_SEK
+    return max(VED_PEREBIT, int(round(sek / shag)))
 
 
 def golos_porog():
@@ -1663,14 +1676,14 @@ class Golos:
                     # 19.10 эфир: пока говорит соведущая, микрофон — 90 (её эха в нём нет), а громче порога — только
                     # голос Александра. Две подряд (0,3 с) — он заговорил: соведущая замолкает (upravlenie)
                     self.mik_podryad = self.mik_podryad + 1 if db <= ved_porog() else 0
-                    if self.mik_podryad >= VED_PEREBIT:
+                    if self.mik_podryad >= perebit_zamerov(shag):
                         self.perebil, self.mik_podryad = now, 0
                         self.mik_gromko = now
                 else:
                     self.mik_podryad = 0
                 if zvuchit_plus and perebivat_rezhim() != 'net':   # 29.10: два замера громче порога — уступает
                     self.mik_plus = self.mik_plus + 1 if db <= golos_porog() else 0
-                    if self.mik_plus >= VED_PEREBIT:
+                    if self.mik_plus >= perebit_zamerov(shag):
                         self.perebil_plus, self.mik_plus = now, 0
                 else:
                     self.mik_plus = 0
@@ -1923,8 +1936,8 @@ def demon():
     except OSError:
         pass
     g = Golos()
-    log('голос готов:', 'edge-tts в памяти' if g.sintez.mod else 'программа edge-tts',
-        '· режим', g.rezhim)
+    log('голос готов:', ('edge-tts %s в памяти' % getattr(g.sintez.mod, '__version__', '?')) if g.sintez.mod
+        else 'программа edge-tts', '· режим', g.rezhim)   # 06.11: версия — старый edge-tts получает 403 от сервиса
     for _ in range(POTOKOV_SINTEZA):
         threading.Thread(target=g.gotovit, daemon=True).start()
     threading.Thread(target=g.progret, daemon=True).start()

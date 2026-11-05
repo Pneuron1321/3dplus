@@ -1592,6 +1592,50 @@ def _otkaz_pravil(rech):
     return ''
 
 
+SUDYA = os.path.join(PAPKA, 'sudya.jsonl')
+SUDYA_VYKL = os.path.join(PAPKA, 'sudya-vykl')                # `touch` — судью не звать
+SUDYA_ZADANIE = (
+    'You are a strict judge of an AI co-host line for a live VR stream (the streamer plays; the co-host speaks to the '
+    'viewers in English). You get the LINE and the INPUT the co-host had (what the camera/game summary showed, chat, '
+    'topic). Reject the line if ANY is true: (1) it asks the streamer a question or asks him to do/answer something '
+    'during play; (2) it states things not supported by the INPUT (his room, his body, his feelings, events, numbers, '
+    'facts about viewers) — the co-host only sees game frames, not the room; (3) it is generic or obvious: it would fit '
+    'any stream, or only restates what viewers already see, or is a cliche ("everyone has the same face", "nice '
+    'shot", "you got this"); (4) it has no single specific, true, interesting thought. Be strict: silence is better '
+    'than a weak line. Answer ONLY JSON: {"ok": true|false, "pochemu": "по-русски, до 12 слов"}.')
+
+
+def sudya(rech, o, tema=''):
+    """06.11 (сессия 05.11: вопросы в бою, банальности, выдумки «линия в твоей комнате»; идея №46 «детектор банальности»):
+    строгий судья реплики — Groq (лимит Claude не тратит). (True, '') — пусть звучит; (False, почему) — молчит.
+    Судья не ответил — пусть звучит (как раньше)."""
+    vhod = {'line': rech, 'topic': tema, 'co_host_analysis': str(o.get('analiz', ''))[:600],
+            'game_summary': [l[-200:] for l in obzor_stroki(2)], 'chat': hvost(CHAT, 5)}
+    try:
+        if _TITR[0] is None:                                  # модуль titr (Groq, ключ читает он) — как у перевода
+            import importlib.machinery
+            import importlib.util
+            ld = importlib.machinery.SourceFileLoader('titr_mod', TITR)
+            m_ = importlib.util.module_from_spec(importlib.util.spec_from_loader('titr_mod', ld))
+            ld.exec_module(m_)
+            _TITR[0] = m_
+        t = _TITR[0].sprosit(SUDYA_ZADANIE, json.dumps(vhod, ensure_ascii=False), max_tokens=200)
+        m = re.search(r'\{.*\}', t or '', re.S)
+        v = json.loads(m.group(0)) if m else None
+    except Exception as e:
+        log('судья:', type(e).__name__, str(e)[:60])
+        v = None
+    if not isinstance(v, dict) or 'ok' not in v:
+        return True, ''
+    try:
+        with open(SUDYA, 'a') as f:
+            f.write(json.dumps({'t': round(time.time()), 'ok': bool(v['ok']), 'pochemu': str(v.get('pochemu', ''))[:120],
+                                'rech': rech[:300]}, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+    return bool(v['ok']), str(v.get('pochemu', ''))[:120]
+
+
 def podgotovit(o, d, rech, pam, pusto, final, tranzitor=False):
     """Проверить реплику. Возвращает (текст или '', причина отказа, поменять ли действие на kozyr).
     Не последняя попытка — отказ за повтор, язык и т. п.; последняя — говорит всё равно, кроме опасного.
@@ -1991,6 +2035,12 @@ def cikl(nemoy=False, seychas=False, tranzitor=None):
             d = 'molchu'
         else:
             rech, d = rech2, d2
+    if d != 'molchu' and rech and not nemoy and d == 'kozyr' and not os.path.exists(SUDYA_VYKL):
+        ok, pochemu = sudya(rech, o, tema)                    # 06.11: строгий судья — слабое не звучит
+        if not ok:
+            sdelano.append('судья: %s — промолчала: %s' % (pochemu, rech[:50]))
+            OTKAZ[0] = 'судья отверг прошлую: %s. Нужна одна конкретная верная мысль из данных, без вопросов ему' % pochemu
+            d = 'molchu'
     if d != 'molchu' and rech and not nemoy and not dozhdatsya_tishiny(sek(60)):
         # 19.10: пока думала, Александр заговорил (или Плюс говорит / его зовут) — реплику не говорим и в книгу не пишем
         sdelano.append('отложила — Александр говорит: ' + rech[:50])
