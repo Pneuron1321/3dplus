@@ -38,7 +38,7 @@
   vedushchiy                 — что с соведущим: включён ли, счёт, открытая ставка и вызов
   vedushchiy chto            — что соведущий сказал за вечер (последние реплики)
   vedushchiy vkl | vykl      — включить / выключить («плюс плюс, без соведущего»)
-  vedushchiy kazhdye N       — говорить раз в N минут (1–60, обычно 5)
+  vedushchiy kazhdye N       — говорить раз в N минут (8–60, обычно 10; в раунде боя — молчит)
   vedushchiy zachet da|net   — ставку засчитать / нет (Александр голосом)
   vedushchiy vyzov da|net    — вызов выполнен / провален
   vedushchiy sbros           — новый вечер: счёт с нуля
@@ -88,7 +88,10 @@ CLAUDE = os.environ.get('VED_CLAUDE', 'claude')
 SKAZHI = os.environ.get('VED_SKAZHI', '/usr/local/bin/skazhi')
 MINUTA = float(os.environ.get('VED_MINUTA', 60))            # в проверке — секунды
 ZRITELI = os.environ.get('VED_ZRITELI', '/tmp/zriteli.json')
-PO_UMOLCHANIYU = 5      # Александр 11.10: раз в 5 минут, по ленте (кусков 3×0,5 с, 6 в минуту); было 4, 15, 3
+PO_UMOLCHANIYU = 10     # 06.11 (сессия 05.11: «по таймеру — банальности, вопросы в бою»): раз в 10 минут; было 5
+MIN_PERIOD = 8          # 06.11: чаще 8 минут — не говорит, даже если `vedushchiy kazhdye 2`
+SEK_SOST = os.environ.get('VED_SEK_SOST', '/tmp/sekundant.json')   # уши: идёт ли раунд («плюс план на бой / перерыв»)
+BOI = os.environ.get('VED_BOI', '/root/.boi.jsonl')                # журнал боёв секунданта — материал «разбери бой»
 PUSTOY_ZAL = 6          # минут тишины в чате — «пустой зал» (Александр 08.10)
 STAVKA_CHEREZ = 100     # Александр 11.10: ставка — раз в 100 реплик/вызовов соведущей (счётчик реплик, не время)
 MIN_KUSKOV_STAVKA = 28  # ставка — только когда в ленте накоплено 5 минут (4 собирает, на пятой думает; 30 кусков по 10 с)
@@ -321,9 +324,37 @@ def jget(path):
         return {}
 
 
+def v_raunde():
+    """Идёт раунд боя (уши: «плюс план на бой», угол «плюс перерыв» кончился) — соведущая не говорит."""
+    try:
+        st = json.load(open(SEK_SOST))
+    except (OSError, ValueError):
+        return False
+    return bool(st.get('boy')) and time.time() - st.get('t', 0) < 3600 and time.time() >= st.get('raund_t', 0)
+
+
+def boi_tekst(n=12):
+    """Последний бой из журнала секунданта: план, перерывы с его словами — для «разбери бой»."""
+    try:
+        zz = [json.loads(l) for l in open(BOI, errors='replace').read().splitlines()[-40:] if l.strip()]
+    except (OSError, ValueError):
+        return ''
+    nach = max([i for i, z in enumerate(zz) if z.get('sobytie') == 'nachalo'] or [0])
+    res = []
+    for z in zz[nach:][-n:]:
+        kogda = time.strftime('%H:%M', time.localtime(z.get('t', 0)))
+        if z.get('sobytie') == 'nachalo':
+            res.append('%s начало боя%s' % (kogda, ', план-слова: «%s»' % z['plan'] if z.get('plan') else ''))
+        elif z.get('sobytie') == 'pereryv':
+            res.append('%s перерыв после раунда %s%s' % (kogda, z.get('raund'), ', его слова: «%s»' % z['slova'] if z.get('slova') else ''))
+        elif z.get('sobytie') in ('itog', 'konec_sam'):
+            res.append('%s конец боя' % kogda)
+    return '; '.join(res)
+
+
 def kazhdye():
     try:
-        return max(1, min(60, int(open(CONF).read().strip())))
+        return max(MIN_PERIOD, min(60, int(open(CONF).read().strip())))
     except (OSError, ValueError):
         return PO_UMOLCHANIYU
 
@@ -1828,6 +1859,8 @@ def cikl(nemoy=False, seychas=False, tranzitor=None):
             return 'рано (звали)'
         if not alex_tihij():                                  # 19.10: Александр говорит (не только «плюс плюс») — не перебиваем
             return 'рано (Александр говорит)'
+        if v_raunde():                                        # 06.11: раунд — молчит (в углу говорит Плюс-секундант)
+            return 'рано (раунд)'
     ls, nk = listy()
     if nk < MIN_KUSKOV or not ls:
         return 'копится лента (%d кус.)' % nk
@@ -2118,6 +2151,7 @@ def sprosi(vopros, prodolzhenie=False):
         'Разговор Александра с Плюсом: ' + (' / '.join(hvost(ISTORIYA, 6)) or '—'),
         'Общий журнал разговора:\n' + ('\n'.join('  ' + l for l in dialog_stroki(12, False)) or '  —'),
         'Последняя идея: ' + (('№%d «%s» (сказала %d мин назад)' % (ideya[0], ideya[1], ideya[2])) if ideya else 'нет'),
+        'Последний бой (журнал секунданта; советы Плюса в перерывах — в общем журнале): ' + (boi_tekst() or 'нет'),
         'Фраза Александра тебе: «%s»' % (vopros or 'Соведущая! (позвал по имени, вопроса пока нет — коротко скажи, что слушаешь)')])
     o = legkaya_model(SPROSI_ZADANIE, zapros, timeout=90)
     if o is None:

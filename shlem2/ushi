@@ -159,6 +159,7 @@ SEK_RAZ = float(os.environ.get('USHI_SEK_RAZ', 15))          # кадр раун
 SEK_PERERYV = float(os.environ.get('USHI_SEK_PERERYV', 25))  # после перерыва кадры не берём (угол)
 SEK_KONEC = float(os.environ.get('USHI_SEK_KONEC', 1200))    # бой без событий столько с — закончен
 SEK_KADROV = 3                                               # кадров раунда Плюсу
+SEK_SOST = os.environ.get('USHI_SEK_SOST', '/tmp/sekundant.json')   # идёт ли бой — суфлёру и соведущей (в раунде молчат)
 SEK_PLAN = re.compile(r'^(?:план на (?:бой|боя|раунд)|план боя)\b[\s,.:—-]*', re.I)
 SEK_PERERYV_R = re.compile(r'^перерыв\b[\s,.:—-]*', re.I)
 SEK_ITOG = re.compile(r'^(?:итог(?:и)? боя|бой (?:окончен|закончен)|конец боя)\b[\s,.:—-]*', re.I)
@@ -181,6 +182,18 @@ class Sekundant:
             pass
 
     @classmethod
+    def sost(cls):
+        """/tmp/sekundant.json: {boy, raund_t — когда (после угла) идёт раунд, t}. Без боя — boy false."""
+        b = cls.boy
+        try:
+            with open(SEK_SOST + '.tmp', 'w') as f:
+                json.dump({'boy': b is not None, 'raund_t': b['raund_t'] if b else 0, 'raund': b['raund'] if b else 0,
+                           't': time.time()}, f)
+            os.replace(SEK_SOST + '.tmp', SEK_SOST)
+        except OSError:
+            pass
+
+    @classmethod
     def nachat(cls, plan=''):
         now = time.time()
         try:
@@ -192,6 +205,7 @@ class Sekundant:
         cls.boy = {'t0': now, 'plan': plan, 'raund': 1, 'raund_t': now, 'kadry': [], 'sled': now + 5,
                    'posl': now, 'snimayu': False, 'n': 0}
         cls.zhurnal({'sobytie': 'nachalo', 'plan': plan})
+        cls.sost()
         print(time.strftime('%H:%M:%S'), 'секундант: бой начат', flush=True)
 
     @classmethod
@@ -205,6 +219,7 @@ class Sekundant:
             cls.zhurnal({'sobytie': 'konec_sam', 'raundov': b['raund']})
             print(time.strftime('%H:%M:%S'), 'секундант: бой закончен сам (тихо)', flush=True)
             cls.boy = None
+            cls.sost()
             return
         if now < b['sled'] or b['snimayu'] or now < b['raund_t']:
             return
@@ -273,6 +288,7 @@ def sekundant(t):
         b['raund'] = n + 1                        # следующий раунд — после угла
         b['raund_t'] = time.time() + SEK_PERERYV
         b['sled'] = b['raund_t']
+        Sekundant.sost()
         print(time.strftime('%H:%M:%S'), 'секундант: перерыв после раунда %d, кадров %d' % (n, len(puti)),
               flush=True)
         kadry = ('Кадры раунда (открой их, kadr не нужен): %s. ' % ', '.join(puti)) if puti else \
@@ -290,6 +306,7 @@ def sekundant(t):
         plan = b['plan'] if b else ''
         Sekundant.zhurnal({'sobytie': 'itog', 'raundov': raundov})
         Sekundant.boy = None
+        Sekundant.sost()
         print(time.strftime('%H:%M:%S'), 'секундант: итог боя', flush=True)
         return golosom(
             'Два угла: бой окончен (%s). ' % ('перерывов было %d' % raundov if raundov else 'перерывов не было') +
