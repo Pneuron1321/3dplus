@@ -966,6 +966,7 @@ class Golos:
         self.plus_ostatok = None   # 1.11: (uid, когда) ответа Плюса, оборванного Александром: остаток договорит после тишины
         self.perebil_nachalo = 0.0 # когда Александр заговорил поверх Плюса (сколько он говорил — mik_gromko минус это)
         self.perebil = 0.0         # когда Александр заговорил поверх соведущей (её обрываем)
+        self.srez_ved = 0.0        # 05.11: режим «фраза» и для соведущей — договорит предложение, остаток после тишины
         self.perebil_uchten = 0.0
         self.ved_ostatok = None    # uid реплики соведущей, оборванной Александром: остаток договорит после тишины
 
@@ -1186,7 +1187,11 @@ class Golos:
         if self.perebil > self.perebil_uchten:
             self.perebil_uchten = self.perebil
             k = getattr(self.igrok, 'kusok', None)
-            if k is not None and k.golos == VOICE_VED:
+            if k is not None and k.golos == VOICE_VED and perebivat_rezhim() == 'fraza':
+                if not self.srez_ved:              # 05.11, Александр: соведущая начинала заново — теперь как Плюс
+                    self.srez_ved = time.time()
+                    log('Александр заговорил — соведущая договорит фразу и замолчит')
+            elif k is not None and k.golos == VOICE_VED:
                 uid, igrok = k.uid, self.igrok
                 proshlo = time.time() - getattr(igrok, 't0', time.time())
                 self.stop_igrok()
@@ -1438,12 +1443,44 @@ class Golos:
             self.cv.notify_all()
             log('продолжу с места обрыва (%s): осталось %d из %d' % (kak, len(ost), len(k.predl)))
 
+    def srez_ved_perebil(self):
+        """Режим «фраза» для соведущей (05.11): Александр заговорил — она договаривает начатое предложение и молчит;
+        остаток — со следующего предложения, после его тишины (VED_DOGOVOR). Сказанное не повторяет."""
+        igrok = self.igrok
+        k = getattr(igrok, 'kusok', None)
+        with self.cv:
+            if not self.q or k is not self.q[0] or k.golos != VOICE_VED:
+                self.srez_ved = 0.0
+                return
+            temp = getattr(igrok, 'temp', None)
+            nachala = k.nachala.get(temp) or []
+            if not nachala and k.dlit.get(temp):
+                nachala = razmetka(k.predl, None, k.dlit[temp])
+            proshlo = time.time() - getattr(igrok, 't0', time.time())
+            j = next((i for i, n in enumerate(nachala) if i > 0 and n > proshlo), None)
+            if j is None or j >= len(k.predl) or proshlo < nachala[j] - SREZ_ZAPAS:
+                return                               # последнее предложение — доиграет; пауза — после (igra)
+        self.stop_igrok()
+        with self.cv:
+            if self.q and self.q[0] is k:
+                self.q.pop(0)
+                self.ubrat_mp3(k)
+                nov = Kusok(k.predl[j:], k.uid, k.t, False, k.dosluh)
+                nov.bystro, nov.golos, nov.vid, nov.uho, nov.chat = k.bystro, k.golos, k.vid, k.uho, k.chat
+                self.q.insert(0, nov)
+                self.cv.notify_all()
+        self.ved_ostatok, self.ved_zhdu, self.srez_ved = k.uid, None, 0.0
+        self.zhdu_dosluh = False
+        log('соведущая договорила фразу — остаток после тишины')
+
     # --- игра ---
     def igra(self):
         if self.igrok:
             self.srez_dlya_chata()
         if self.igrok and self.srez_plus:
             self.srez_perebil()
+        if self.igrok and self.srez_ved:
+            self.srez_ved_perebil()
         if self.igrok:
             end = self.igrok.konec()
             if end is None:
@@ -1457,6 +1494,11 @@ class Golos:
                 if k is not None:
                     self.vybrosit(lambda x: x is k)
                     self.zhdat_dosluh(k)
+                if self.srez_ved:                  # соведущая договорила порцию при Александре — следующие ждут тишины
+                    self.srez_ved = 0.0
+                    with self.cv:
+                        if k is not None and any(x.uid == k.uid for x in self.q):
+                            self.ved_ostatok, self.ved_zhdu = k.uid, None
                 if self.srez_plus:                 # «фраза»: договорил порцию при Александре — дальше после тишины
                     with self.cv:
                         est = bool(self.q)
@@ -1921,7 +1963,7 @@ if __name__ == '__main__':
                 pass
         else:
             open(PEREBIVAT_F, 'w').write(a[1] + '\n')
-        print({'fraza': 'Заговоришь поверх — Плюс договорит фразу и подождёт, пока ты замолчишь (%g с).' % PLUS_TISHINA,
+        print({'fraza': 'Заговоришь поверх — Плюс и соведущая договорят фразу и подождут, пока ты замолчишь (%g с), потом — со следующей.' % PLUS_TISHINA,
                'srazu': 'Заговоришь поверх — Плюс замолкает сразу.',
                'net': 'Плюс не уступает: договаривает всё; остановить — «тихо» или «стоп».'}[a[1]])
         sys.exit(0)
