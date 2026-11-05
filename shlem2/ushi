@@ -148,6 +148,157 @@ def propustit():
         os.replace(G_PROPUSK + '.tmp', G_PROPUSK)
     except OSError:
         pass
+# ---------- «Два угла»: Плюс — секундант в VR-боксе (06.11, план карьеры, неделя 2) ----------
+# «плюс план на бой [слова]» — короткий план до боя; дальше уши раз в SEK_RAZ с кладут кадр в /root/boy/;
+# «плюс перерыв [слова]» — Плюсу кадры этого раунда: одно наблюдение + один план на следующий раунд, ≤ 35 слов
+# (≈ 20 с голосом), без вердикта «кто сильнее» и без разбора «почему проиграл»;
+# «плюс итог боя» — сверка плана с тем, что вышло. Без перерывов SEK_KONEC с — бой закончен сам.
+SEK_PAPKA = os.environ.get('USHI_SEK_PAPKA', '/root/boy')
+SEK_ZHURNAL = os.environ.get('USHI_SEK_ZHURNAL', '/root/.boi.jsonl')
+SEK_RAZ = float(os.environ.get('USHI_SEK_RAZ', 15))          # кадр раунда раз в N с
+SEK_PERERYV = float(os.environ.get('USHI_SEK_PERERYV', 25))  # после перерыва кадры не берём (угол)
+SEK_KONEC = float(os.environ.get('USHI_SEK_KONEC', 1200))    # бой без событий столько с — закончен
+SEK_KADROV = 3                                               # кадров раунда Плюсу
+SEK_PLAN = re.compile(r'^(?:план на (?:бой|боя|раунд)|план боя)\b[\s,.:—-]*', re.I)
+SEK_PERERYV_R = re.compile(r'^перерыв\b[\s,.:—-]*', re.I)
+SEK_ITOG = re.compile(r'^(?:итог(?:и)? боя|бой (?:окончен|закончен)|конец боя)\b[\s,.:—-]*', re.I)
+SEK_PRAVILO = ('Без вердикта «кто сильнее», без оценок и баллов, без разбора «почему проиграл / что меня убило» — '
+               'только вперёд. Не изображай, что видел весь раунд: ты видишь только эти кадры.')
+
+
+class Sekundant:
+    """Состояние боя: начало, план, раунды, кадры (время, файл)."""
+    boy = None
+    lock = threading.Lock()
+
+    @classmethod
+    def zhurnal(cls, d):
+        try:
+            d['t'] = round(time.time(), 1)
+            with open(SEK_ZHURNAL, 'a') as f:
+                f.write(json.dumps(d, ensure_ascii=False) + '\n')
+        except OSError:
+            pass
+
+    @classmethod
+    def nachat(cls, plan=''):
+        now = time.time()
+        try:
+            for f in glob.glob(os.path.join(SEK_PAPKA, '*.jpg')):
+                os.remove(f)
+            os.makedirs(SEK_PAPKA, exist_ok=True)
+        except OSError:
+            pass
+        cls.boy = {'t0': now, 'plan': plan, 'raund': 1, 'raund_t': now, 'kadry': [], 'sled': now + 5,
+                   'posl': now, 'snimayu': False, 'n': 0}
+        cls.zhurnal({'sobytie': 'nachalo', 'plan': plan})
+        print(time.strftime('%H:%M:%S'), 'секундант: бой начат', flush=True)
+
+    @classmethod
+    def tik(cls, now=None):
+        """Из главного цикла: пора — кадр раунда (в фоне); долго тихо — бой закончен."""
+        b = cls.boy
+        if b is None:
+            return
+        now = now or time.time()
+        if now - b['posl'] > SEK_KONEC:
+            cls.zhurnal({'sobytie': 'konec_sam', 'raundov': b['raund']})
+            print(time.strftime('%H:%M:%S'), 'секундант: бой закончен сам (тихо)', flush=True)
+            cls.boy = None
+            return
+        if now < b['sled'] or b['snimayu'] or now < b['raund_t']:
+            return
+        b['sled'] = now + SEK_RAZ
+        b['snimayu'] = True
+        b['n'] += 1
+        put = os.path.join(SEK_PAPKA, 'k%04d.jpg' % b['n'])
+
+        def snyat():
+            try:
+                if kadr(out=put)[0] == 0 and os.path.exists(put):
+                    with cls.lock:
+                        b['kadry'].append((time.time(), put, b['raund']))
+                        del b['kadry'][:-40]
+            except Exception:
+                pass
+            b['snimayu'] = False
+        threading.Thread(target=snyat, daemon=True).start()
+
+    @classmethod
+    def kadry_raunda(cls):
+        """До SEK_KADROV кадров этого раунда, ровно по времени, — в /root/boy/rN-i.jpg."""
+        b = cls.boy
+        with cls.lock:
+            k = [x for x in b['kadry'] if x[2] == b['raund']]
+        if len(k) > SEK_KADROV:
+            k = [k[round(i * (len(k) - 1) / (SEK_KADROV - 1))] for i in range(SEK_KADROV)]
+        puti = []
+        for i, (_, f, _) in enumerate(k, 1):
+            dst = os.path.join(SEK_PAPKA, 'r%d-%d.jpg' % (b['raund'], i))
+            try:
+                shutil.copyfile(f, dst)
+                puti.append(dst)
+            except OSError:
+                pass
+        if not puti:                              # кадров не набралось — кадр сейчас
+            dst = os.path.join(SEK_PAPKA, 'r%d-1.jpg' % b['raund'])
+            if kadr(out=dst)[0] == 0:
+                puti.append(dst)
+        return puti
+
+
+def sekundant(t):
+    """«Плюс план на бой / перерыв / итог боя». True — фраза секунданту (ушла или ждёт), None — не его."""
+    low = t.lower().strip(' .!?,…')
+    m = SEK_PLAN.match(low)
+    if m:
+        slova = t.strip()[m.end():].strip(' .!?,…')
+        Sekundant.nachat(slova)
+        return golosom(
+            'Два угла: ты — мой секундант в VR-боксе. Бой начинается. ' +
+            ('Мои слова о сопернике: «%s». ' % slova if slova else '') +
+            'Дай план на бой: 2–3 коротких указания, всего не больше 35 слов. Запомни план — в перерывах сверяйся '
+            'с ним. ' + SEK_PRAVILO, '(голосом; секундант, план на бой) ')
+    m = SEK_PERERYV_R.match(low)
+    if m:
+        slova = t.strip()[m.end():].strip(' .!?,…')
+        if Sekundant.boy is None:
+            Sekundant.nachat()
+        b = Sekundant.boy
+        b['posl'] = time.time()
+        puti = Sekundant.kadry_raunda()
+        n = b['raund']
+        Sekundant.zhurnal({'sobytie': 'pereryv', 'raund': n, 'kadrov': len(puti), 'slova': slova,
+                           'ms': VYZOV_MS[0]})
+        b['raund'] = n + 1                        # следующий раунд — после угла
+        b['raund_t'] = time.time() + SEK_PERERYV
+        b['sled'] = b['raund_t']
+        print(time.strftime('%H:%M:%S'), 'секундант: перерыв после раунда %d, кадров %d' % (n, len(puti)),
+              flush=True)
+        kadry = ('Кадры раунда (открой их, kadr не нужен): %s. ' % ', '.join(puti)) if puti else \
+            'Кадров раунда нет — говори по плану на бой. '
+        return golosom(
+            'Два угла: перерыв после раунда %d, ты в углу, у тебя 20 секунд. ' % n + kadry +
+            ('План на бой: «%s». ' % b['plan'] if b['plan'] else 'План на бой — тот, что ты дал (если давал). ') +
+            ('Мои слова: «%s». ' % slova if slova else '') +
+            'Скажи одно наблюдение по кадрам, один план на следующий раунд и, если к месту, одно ободрение — '
+            'всего не больше 35 слов. ' + SEK_PRAVILO, '(голосом; секундант, перерыв — коротко) ')
+    m = SEK_ITOG.match(low)
+    if m:
+        b = Sekundant.boy
+        raundov = b['raund'] - 1 if b else 0
+        plan = b['plan'] if b else ''
+        Sekundant.zhurnal({'sobytie': 'itog', 'raundov': raundov})
+        Sekundant.boy = None
+        print(time.strftime('%H:%M:%S'), 'секундант: итог боя', flush=True)
+        return golosom(
+            'Два угла: бой окончен (%s). ' % ('перерывов было %d' % raundov if raundov else 'перерывов не было') +
+            ('План на бой: «%s». ' % plan if plan else '') +
+            'Сверь план с тем, что ты говорил в перерывах и что видел: что получилось, что взять в следующий бой — '
+            'не больше 50 слов. ' + SEK_PRAVILO, '(голосом; секундант, итог боя) ')
+    return None
+
+
 COMPACT = (
     '/compact Сохрани: что делаем сейчас, '
     'принятые решения, открытые задачи, '
@@ -1190,6 +1341,10 @@ def handle(e, sluh):
         subprocess.run(['tiho'])
     elif kind == 'text' and low in TEMP:
         propustit()
+    elif kind == 'text' and (SEK_PLAN.match(low) or SEK_PERERYV_R.match(low) or SEK_ITOG.match(low)):
+        ved_dialog(t, 'plus')
+        if sekundant(t):
+            metka('vpisal', e['id'])
     elif kind == 'text' and low in PAUZA_G:
         pauza_golosa()
     elif kind == 'text' and re.sub(r'[^\w ]', '', low) in POVTORI:
@@ -2609,6 +2764,10 @@ def main():
         if now > sled['golos']:
             golos_zhiv()
             sled['golos'] = now + 30
+        try:
+            Sekundant.tik(now)          # «Два угла»: кадр раунда раз в SEK_RAZ с, пока идёт бой
+        except Exception:
+            pass
         if now > sled['kompakt'] and alive:
             sled['kompakt'] = now + 10
             try:
