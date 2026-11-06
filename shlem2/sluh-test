@@ -1,0 +1,56 @@
+#!/opt/sluh/bin/python
+"""sluh-test — сравнить модели Whisper на живых
+фразах Александра: /tmp/frazy/*.wav (их пишут уши,
+последние 10). Запуск:
+  sluh-test                    # small и large-v3-turbo
+  sluh-test small medium       # свои модели
+Для каждой модели: время загрузки, время на фразу,
+текст. Новая модель при первом запуске скачивается
+(large-v3-turbo ~1,6 ГБ). Ставит модель Плюсу:
+  echo large-v3-turbo > /root/.sluh-model
+и перезапуск ушей.
+"""
+import glob
+import os
+import sys
+import time
+import wave
+
+import numpy as np
+from faster_whisper import WhisperModel
+
+
+def load(path):
+    with wave.open(path, 'rb') as w:
+        pcm = w.readframes(w.getnframes())
+    a = np.frombuffer(pcm, dtype=np.int16)
+    return a.astype(np.float32) / 32768.0
+
+
+files = sorted(glob.glob('/tmp/frazy/*.wav'),
+               key=os.path.getmtime)
+if not files:
+    sys.exit('Фраз нет: скажи «плюс плюс» и фразу.')
+threads = int(os.environ.get('SLUH_THREADS', '4'))
+for name in sys.argv[1:] or ['small', 'large-v3-turbo']:
+    t = time.time()
+    m = WhisperModel(name, device='cpu',
+                     compute_type='int8',
+                     cpu_threads=threads)
+    print('== %s: загрузка %.0f с'
+          % (name, time.time() - t), flush=True)
+    total = 0.0
+    for f in files:
+        a = load(f)
+        t = time.time()
+        segs, info = m.transcribe(
+            a, beam_size=2, vad_filter=True,
+            condition_on_previous_text=False)
+        text = ' '.join(s.text.strip() for s in segs)
+        dt = time.time() - t
+        total += dt
+        print('%5.1f с  (звук %.1f с) %s: %s'
+              % (dt, len(a) / 16000, info.language,
+                 text), flush=True)
+    print('   в среднем %.1f с на фразу'
+          % (total / len(files)), flush=True)

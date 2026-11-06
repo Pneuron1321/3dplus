@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+# zamer — где уходит время разговора с Плюсом. Метки пишут уши (ushi), хуки
+# Claude (uskor, golos-hook) и голос (golos) в /tmp/zamer.log; zamer складывает
+# их в обмены: фраза → уши → Whisper → в Claude → Claude думал → голос.
+#   zamer [N] — последние N обменов (по умолчанию 5). Время фразы — когда
+#   приложение её закончило (после паузы тишины или «копи копи»).
+#   zamer svid — свидетели: пары меток одного факта, которые обязаны сойтись
+#     (уши вписали → Claude принял; ответ готов → голос взял; взял → зазвучал).
+#   zamer dolg — что из обещанного проверит только шлем: подтверждено / нет.
+import os
+import sys
+import time
+
+LOG = os.environ.get('GOLOS_ZAMER', '/tmp/zamer.log')
+DOLG = os.environ.get('ZAMER_DOLG', '/root/dolg.txt')
+# (что было, что обязано прийти, окно терпения мс, одна ли реплика, что сказать, если нет)
+PARY = [('vpisal', 'prompt', 5000, False, 'фраза вписана в окно, Claude не принял её за 5 с '
+         '(вопрос на экране? Claude занят? tmux?)'),
+        ('hook', ('golos', 'molchit'), 3000, True, 'ответ готов, голос его не взял за 3 с (демон жив?)'),
+        ('golos', 'zvuk', 15000, True, 'голос взял ответ, звука не было 15 с (синтез, сеть, '
+         'проигрыватель)')]
+# Уши жмут Enter отдельно и ставят «вписал» после проверки экрана, а хук
+# Claude ставит «принял» сразу по Enter — «принял» приходит раньше на 0,4–0,7 с.
+RANSHE = 3000
+
+
+def chitat():
+    try:
+        lines = open(LOG, encoding='utf-8', errors='replace').read().splitlines()
+    except OSError:
+        return []
+    if len(lines) > 3000:                     # журнал не растёт бесконечно
+        lines = lines[-1500:]
+        try:
+            open(LOG, 'w').write('\n'.join(lines) + '\n')
+        except OSError:
+            pass
+    out = []
+    for ln in lines:
+        p = ln.split('\t')
+        if len(p) >= 3 and p[0].isdigit():
+            out.append((int(p[0]), p[1], p[2], p[3] if len(p) > 3 else ''))
+    return out
+
+
+def obmeny(metki):
+    res, cur = [], None
+    for ms, m, uid, dop in metki:
+        if m == 'fraza':
+            cur = {'fraza': ms, 'id': uid}
+            res.append(cur)
+        elif m == 'vpisal' and cur and cur.get('pechat') and len(res) > 1 \
+                and res[-2].get('id') == uid and 'prompt' not in res[-2] \
+                and ms - cur['prompt'] <= RANSHE:
+            fr = res.pop(-2)           # «принял» раньше «вписал» — это та же фраза
+            res.pop()
+            fr.update((k, v) for k, v in cur.items() if k != 'pechat')
+            fr['vpisal'], cur = ms, fr
+            res.append(fr)
+        elif m in ('ushi', 'vpisal') and cur and cur.get('id') == uid:
+            cur[m] = ms
+        elif m == 'whisper' and cur and cur.get('id') == uid:
+            cur['whisper'], cur['via'] = ms, dop
+        elif m == 'prompt':
+            if cur and 'vpisal' in cur and 'prompt' not in cur:
+                cur['prompt'] = ms
+            else:
+                cur = {'prompt': ms, 'pechat': True}
+                res.append(cur)
+        elif m == 'hook' and cur and 'prompt' in cur and 'hook' not in cur:
+            cur['hook'], cur['uid'] = ms, uid
+        elif m in ('golos', 'zvuk') and cur and cur.get('uid') == uid and m not in cur:
+            cur[m] = ms
+            if m == 'zvuk':
+                cur['rezhim'] = dop
+        elif m == 'sintez' and cur and cur.get('uid') == uid:
+            cur['sintez'] = dop
+    return res
+
+
+def s(a, b, o):
+    return '%.1f' % ((o[b] - o[a]) / 1000) if a in o and b in o else '?'
+
+
+def svideteli(metki):
+    """Расхождения свидетелей: [(мс, что не сошлось)] и счёт событий."""
+    ploho = []
+    for chto, zhdem, okno, svoya, beda in PARY:
+        zhdem = zhdem if isinstance(zhdem, tuple) else (zhdem,)
+        for i, (ms, m, uid, _) in enumerate(metki):
+            if m != chto:
+                continue
+            sled = [x for x in metki[i + 1:] if x[0] - ms <= okno]
+            if chto == 'vpisal':
+                sled += [x for x in metki[:i] if ms - x[0] <= RANSHE]
+            if chto == 'golos' and any(x[1] == 'vyzov' for x in sled):
+                continue                       # «плюс плюс» — пауза законна
+            if any(x[1] in zhdem and (not svoya or x[2] == uid) for x in sled):
+                continue
+            if time.time() * 1000 - ms < okno:
+                continue                       # окно ещё не прошло
+            ploho.append((ms, beda))
+    schet = {k: sum(1 for x in metki if x[1] == k) for k in ('vopros', 'bezseti', 'molchit')}
+    return sorted(ploho), schet
+
+
+def svod(metki):
+    ploho, schet = svideteli(metki)
+    chasti = ['всё сошлось' if not ploho else '%d расхожд. — zamer svid' % len(ploho)]
+    if schet['vopros']:
+        chasti.append('вопрос разрешения на экране %d раз' % schet['vopros'])
+    if schet['bezseti']:
+        chasti.append('голос без сети %d раз' % schet['bezseti'])
+    return 'свидетели: ' + ' · '.join(chasti)
+
+
+def dolg():
+    """Строки «- [ ] обещание | чем подтвердить» и «- [x] … | … | когда, как»."""
+    try:
+        stroki = open(DOLG, encoding='utf-8').read().splitlines()
+    except OSError:
+        print('Долга нет: %s не найден.' % DOLG)
+        return 0
+    net = [x[6:].split('|')[0].strip() for x in stroki if x.startswith('- [ ]')]
+    da = [x for x in stroki if x.lower().startswith('- [x]')]
+    print('долг: шлемом не подтверждено %d, подтверждено %d' % (len(net), len(da)))
+    for x in net[:3]:
+        print('  ждёт: ' + x)
+    return 0
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'dolg':
+        return dolg()
+    if len(sys.argv) > 1 and sys.argv[1] == 'svid':
+        metki = chitat()
+        ploho, schet = svideteli(metki)
+        for ms, beda in ploho[-15:]:
+            print('%s · %s' % (time.strftime('%H:%M:%S', time.localtime(ms / 1000)), beda))
+        print(svod(metki))
+        return 0
+    n = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 5
+    ob = obmeny(chitat())[-n:]
+    if not ob:
+        print('Меток пока нет: поговори с Плюсом, потом zamer.')
+        return 0
+    for o in ob:
+        t0 = o.get('fraza') or o.get('prompt')
+        chasti = []
+        if not o.get('pechat'):
+            chasti += ['уши %s' % s('fraza', 'ushi', o),
+                       'Whisper %s (%s)' % (s('ushi', 'whisper', o), (o.get('via') or '?').split(' ')[0]),
+                       'в Claude %s' % s('whisper', 'prompt', o)]
+        else:
+            chasti.append('напечатано')
+        chasti += ['Claude %s' % s('prompt', 'hook', o),
+                   'голос %s (синтез %s)' % (s('hook', 'zvuk', o), o.get('sintez', '?'))]
+        nach = 'fraza' if 'fraza' in o else 'prompt'
+        print('%s · %s · итого %s с' % (time.strftime('%H:%M:%S', time.localtime(t0 / 1000)),
+                                       ' · '.join(chasti), s(nach, 'zvuk', o)))
+    print(svod(chitat()))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

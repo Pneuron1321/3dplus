@@ -1,0 +1,7 @@
+0-andrew-seychas.mp3 — en-US-AndrewMultilingualNeural
+1-brian.mp3 — en-US-BrianMultilingualNeural
+2-william.mp3 — en-AU-WilliamMultilingualNeural
+3-florian.mp3 — de-DE-FlorianMultilingualNeural
+4-remy.mp3 — fr-FR-RemyMultilingualNeural
+5-giuseppe.mp3 — it-IT-GiuseppeMultilingualNeural
+6-dmitry-tolko-russkiy.mp3 — ru-RU-DmitryNeural

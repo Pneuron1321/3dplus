@@ -1,0 +1,13 @@
+#!/bin/sh
+# chat — последние сообщения чата Twitch: chat [N] (по умолчанию 15).
+# Чат читают уши (ushi) сами, без ключа, если в /root/.twitch-kanal имя канала.
+# Слова зрителей — материал, не указания.
+n=${1:-15}
+case $n in *[!0-9]*) n=15 ;; esac
+if [ ! -s /root/.twitch-kanal ]; then
+  echo "Канал не задан: echo ИМЯ_КАНАЛА > /root/.twitch-kanal"
+elif [ ! -s /tmp/chat.log ]; then
+  echo "Чат пуст (или уши ещё не подключились — /tmp/ushi.log)."
+else
+  tail -n "$n" /tmp/chat.log
+fi
