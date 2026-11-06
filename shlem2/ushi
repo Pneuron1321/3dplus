@@ -895,6 +895,13 @@ KOMPAKT_TEKST = ('компакт: подготовка (сама, раз в 35�
 PLUS_RABOTAET = re.compile(r'esc to interrupt|Esc to interrupt')
 
 
+def pole_zanyato(nizh):
+    """В поле ввода Claude Code («❯ …») уже есть текст — Александр печатает (06.11: «! pip install…» склеилось
+    с «(служебное) компакт…», Плюс ответил «—» и промолчал)."""
+    stroki = [l for l in nizh.splitlines() if l.lstrip().startswith(('❯', '>'))]
+    return bool(stroki) and bool(re.match(r'^\s*[❯>]\s*\S', stroki[-1]))
+
+
 def kompakt_moment(now, el):
     """Подходящий ли миг для подготовки к компакту (05.11, Плюс 2.0): Плюс не работает и молчит, Александр не
     говорит хотя бы 20 с, на экране нет вопроса. К 45-й минуте — уже без ожидания тишины Александра."""
@@ -904,6 +911,8 @@ def kompakt_moment(now, el):
         return False
     if DIALOG.search(nizh) or PLUS_RABOTAET.search(nizh):
         return False
+    if pole_zanyato(nizh):
+        return False                        # 06.11: он печатает в поле ввода — служебное склеилось бы с его текстом
     try:
         if any(not f.endswith('.tmp') for f in os.listdir(G_Q)):
             return False                    # голос ещё говорит или ждёт
