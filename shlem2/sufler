@@ -89,6 +89,10 @@ MYSL_SVEZHAYA = 120       # с: его русская мысль свежая �
 CHAT_OKNO = 600           # с: «люди в чате» — писали за это время
 IGRA_SVEZHAYA = 900       # с: описание кадра (obzor) старше — игры не знаем
 POVTOR_RECHI = 600        # с: та же его фраза ещё раз за это время — не считаем (Whisper повторяет «Thank you»)
+UHO_POSL = E('SUFLER_UHO_POSL', '/tmp/uho.posl')    # голос: когда в ухо звучало в последний раз (дирижёр уха)
+G_POSL = E('SUFLER_G_POSL', '/tmp/golos.posl')     # последний ответ Плюса — его совет в углу
+UHO_PROMEZHUTOK = 45      # с: фоновое в ухо (подсказка, поправка) — не ближе к прошлой фразе в ухо
+KLYUCH_CHEREZ = 40        # с от начала раунда: ключ угла — одной командой в ухо
 ZAPROS = E('SUFLER_ZAPROS', '/tmp/sufler.zapros')   # уши: «плюс, по-английски [фраза]», «плюс, разминка»
 ZAPROS_ZHDAT = 10         # с: просьба без его свежей русской фразы — ждём субтитр столько
 RECAST_RAZ = 150          # с: поправка его английской фразы — не чаще
@@ -126,6 +130,11 @@ ZADANIE_PODSKAZKA = (
     'the moment naturally, build the line around it — that is how he learns. Answer ONLY JSON: {"en": "the line", '
     '"ru": "смысл по-русски, 1–4 слова"} or {"skip": true, '
     '"pochemu": "почему молчим, до 8 слов"}.')
+ZADANIE_KLYUCH = (
+    'Это совет секунданта бойцу в углу между раундами VR-бокса. Сожми его в ОДНУ команду на 2–4 слова по-русски, '
+    'повелительно, то, что важнее всего держать в голове в раунде (например: «Левую выше», «Уходи вправо», «Джеб и '
+    'назад»). Без вопросов, без оценок, без имени. Ответ — только JSON: {"klyuch": "..."} или {"net": true}, если '
+    'конкретного совета нет.')
 ZADANIE_PEREVOD = (
     'Alexander, a Russian-speaking VR streamer (male, learning English), asks: "how do I say this in English?". Turn '
     'HIS Russian words into what HE would naturally say out loud on stream in English: same meaning, same feeling and '
@@ -277,6 +286,14 @@ def chat_lyudi(okno):
     return res[-5:]
 
 
+def uho_svobodno(promezhutok=UHO_PROMEZHUTOK):
+    """Дирижёр уха (06.11: «куча, которая мешает сама себе»): прошлое «только в ухо» звучало давно — можно."""
+    try:
+        return time.time() - os.path.getmtime(UHO_POSL) >= promezhutok * SEK
+    except OSError:
+        return True
+
+
 def v_boyu():
     """Идёт раунд (бой начат и угол-перерыв кончился) — суфлёр молчит, как секундант."""
     st = chitat(SEK_SOST, {}) or {}
@@ -379,6 +396,8 @@ class Sufler:
         self.zapros = None        # просьба «по-английски»: {'t', 'vid', 'tekst', 'do'}
         self.recast_ochered = []  # его английские фразы на поправку: [(t, текст)]
         self.posl_recast = 0.0
+        self.raund_vidno = None   # какой перерыв (номер раунда) уже видели
+        self.klyuch = None        # ключ угла на раунд: {'raund_t', 'pereryv_t', 'tekst', 'skazan'}
         self.chist_est = False    # sinhron даёт чистовики — поправляем только их (меньше ошибок распознавания)
         self.mysl_vzyata = 0.0    # время последней мысли, уже отданной подсказкой
         self.slyshal = {}         # его английская фраза → когда (Whisper повторяет «Thank you»)
@@ -642,6 +661,39 @@ class Sufler:
             return None
         return {'sut': sut, 'en': en, 'ru': chistaya_ru((o or {}).get('ru'), 40)}
 
+    # ---------- 1.1: раунд — не тишина, а ключ угла ----------
+    def klyuch_proverka(self, now):
+        """06.11 (Александр: «в раундах не нужно молчание, нужна помощь, только без вопросов»): совет Плюса в углу
+        сжимается в команду из 2–4 слов («Левую выше») и звучит в ухо один раз на ~40-й секунде раунда."""
+        st = chitat(SEK_SOST, {}) or {}
+        if not st.get('boy'):
+            self.klyuch, self.raund_vidno = None, None
+            return
+        if st.get('raund') != self.raund_vidno and now < st.get('raund_t', 0):    # новый перерыв (угол)
+            self.raund_vidno = st.get('raund')
+            self.klyuch = {'raund_t': st.get('raund_t', 0), 'pereryv_t': now, 'tekst': None, 'skazan': False}
+        k = self.klyuch
+        if not k or k['skazan']:
+            return
+        if k['tekst'] is None:
+            try:
+                mt = os.path.getmtime(G_POSL)
+                sovet = open(G_POSL, errors='replace').read().strip() if mt >= k['pereryv_t'] - 2 * SEK else ''
+            except OSError:
+                sovet = ''
+            if sovet:
+                o = self.groq(ZADANIE_KLYUCH, sovet[:600], 0.2, 80) or {}
+                k['tekst'] = chistaya_ru(o.get('klyuch'), 40) if not o.get('net') else ''
+                log('ключ угла:', k['tekst'] or '—')
+            elif now > k['raund_t'] + 60 * SEK:
+                k['tekst'] = ''                         # совета не было — не выдумываем
+        if k['tekst'] and v_boyu() and now >= k['raund_t'] + KLYUCH_CHEREZ * SEK:
+            k['skazan'] = True
+            if now < k['raund_t'] + (KLYUCH_CHEREZ + 40) * SEK and self.golos(k['tekst'].rstrip('.') + '.', 'uho'):
+                self.zhurnal({'vid': 'klyuch', 'tekst': k['tekst']})
+        elif k['tekst'] == '':
+            k['skazan'] = True
+
     # ---------- подсказка ----------
     def obstanovka(self):
         """Что есть в этот момент — только из этого подсказка и строится (и решается, говорить ли)."""
@@ -686,7 +738,7 @@ class Sufler:
         n = nastroyki()
         if not self.efir or not n['vkl'] or now < self.sled:
             return
-        if self.ved_zhdu or (self.okno_ved and now < self.okno_ved['do']) or v_boyu():
+        if self.ved_zhdu or (self.okno_ved and now < self.okno_ved['do']) or v_boyu() or not uho_svobodno():
             self.sled = now + 20 * SEK                  # разговор с соведущей или раунд — подсказка подождёт
             return
         if self.zhdu_otveta is not None:                # прошлая осталась без ответа — следующая реже
@@ -789,7 +841,7 @@ class Sufler:
         if not self.recast_ochered or now - self.posl_recast < RECAST_RAZ * SEK or self.rech is not None:
             return
         t, tekst = self.recast_ochered[-1]
-        if now - t < RECAST_TISHINA * SEK or v_boyu() or self.ved_zhdu or self.zapros:
+        if now - t < RECAST_TISHINA * SEK or v_boyu() or self.ved_zhdu or self.zapros or not uho_svobodno(20):
             return
         self.recast_ochered = []
         self.posl_recast = now
@@ -932,6 +984,7 @@ class Sufler:
         if not self.efir:
             return
         self.recast_proverka(now)
+        self.klyuch_proverka(now)
         self.ved_proverka(now)
         self.podskazka_proverka(now)
 

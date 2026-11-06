@@ -236,7 +236,10 @@ DOSLUH = ('hook', 'potok0', 'potok', 'ved', 'vedu')   # после чего уш
 SUFLER_TEMP = os.environ.get('GOLOS_SUFLER_TEMP', '-5%')
 SUFLER_ZHIZN = float(os.environ.get('GOLOS_SUFLER_ZHIZN', 45))
 UHO_VIDY = ('uho', 'sufler', 'vedu')                     # только Александру, при любом режиме, без субтитров
-VED_KONEC = os.environ.get('GOLOS_VED_KONEC', '/tmp/golos.ved-konec')   # соведущая договорила реплику: «время uid»
+VED_KONEC = os.environ.get('GOLOS_VED_KONEC', '/tmp/golos.ved-konec')
+# 06.11 «дирижёр уха»: время последней фразы только в ухо (суфлёр, идеи, «Клип?», итоги) — фоновые помощники ждут
+# промежутка, а не говорят друг поверх друга (sufler, kanal, rezhisser читают mtime).
+UHO_POSL = os.environ.get('GOLOS_UHO_POSL', '/tmp/uho.posl')   # соведущая договорила реплику: «время uid»
 # Чей голос открыл секунду «дослуха» — Плюса или соведущей (19.10): фраза в эту секунду — тому, кто говорил.
 DOSLUH_KTO = os.environ.get('GOLOS_DOSLUH_KTO', '/tmp/golos.dosluh-kto')
 # Соведущая не перебивает (19.10, Александр: «она начинает говорить, даже когда я говорю»): её реплика ждёт,
@@ -1623,6 +1626,12 @@ class Golos:
             k.pervyy = False
         temp = k.temp
         uho = self.rezhim == 'uho' or k.uho
+        if k.uho:
+            try:
+                with open(UHO_POSL, 'w') as f:
+                    f.write('%f %s\n' % (time.time(), k.vid))
+            except OSError:
+                pass
         m = None if uho else self.cherez_most()
         if uho:
             self.igrok = self.Most(put, 'uho')

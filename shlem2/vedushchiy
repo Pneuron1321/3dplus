@@ -1601,15 +1601,19 @@ SUDYA_ZADANIE = (
     'during play; (2) it states things not supported by the INPUT (his room, his body, his feelings, events, numbers, '
     'facts about viewers) — the co-host only sees game frames, not the room; (3) it is generic or obvious: it would fit '
     'any stream, or only restates what viewers already see, or is a cliche ("everyone has the same face", "nice '
-    'shot", "you got this"); (4) it has no single specific, true, interesting thought. Be strict: silence is better '
+    'shot", "you got this"); (4) it has no single specific, true, interesting thought; (5) if "in_round" is true (he is '
+    'fighting right now): anything but one short energetic line for the viewers — no advice to him, no question. Be '
+    'strict: silence is better '
     'than a weak line. Answer ONLY JSON: {"ok": true|false, "pochemu": "по-русски, до 12 слов"}.')
 
 
-def sudya(rech, o, tema=''):
+def sudya(rech, o, tema='', raund=False):
     """06.11 (сессия 05.11: вопросы в бою, банальности, выдумки «линия в твоей комнате»; идея №46 «детектор банальности»):
     строгий судья реплики — Groq (лимит Claude не тратит). (True, '') — пусть звучит; (False, почему) — молчит.
     Судья не ответил — пусть звучит (как раньше)."""
-    vhod = {'line': rech, 'topic': tema, 'co_host_analysis': str(o.get('analiz', ''))[:600],
+    if raund and len(rech.split()) > MAX_SLOV_BOY + 2:
+        return False, 'в раунде — длинно'                    # идёт бой: только короткая реплика
+    vhod = {'line': rech, 'topic': tema, 'in_round': raund, 'co_host_analysis': str(o.get('analiz', ''))[:600],
             'game_summary': [l[-200:] for l in obzor_stroki(2)], 'chat': hvost(CHAT, 5)}
     try:
         if _TITR[0] is None:                                  # модуль titr (Groq, ключ читает он) — как у перевода
@@ -1903,8 +1907,8 @@ def cikl(nemoy=False, seychas=False, tranzitor=None):
             return 'рано (звали)'
         if not alex_tihij():                                  # 19.10: Александр говорит (не только «плюс плюс») — не перебиваем
             return 'рано (Александр говорит)'
-        if v_raunde():                                        # 06.11: раунд — молчит (в углу говорит Плюс-секундант)
-            return 'рано (раунд)'
+        # 06.11 вечер (Александр: «в раундах мне не нужно их молчание — нужна помощь, только без вопросов»): в раунде
+        # говорит, но коротко и для зрителей — судья режет вопросы и всё длиннее 22 слов (см. sudya).
     ls, nk = listy()
     if nk < MIN_KUSKOV or not ls:
         return 'копится лента (%d кус.)' % nk
@@ -2036,7 +2040,7 @@ def cikl(nemoy=False, seychas=False, tranzitor=None):
         else:
             rech, d = rech2, d2
     if d != 'molchu' and rech and not nemoy and d == 'kozyr' and not os.path.exists(SUDYA_VYKL):
-        ok, pochemu = sudya(rech, o, tema)                    # 06.11: строгий судья — слабое не звучит
+        ok, pochemu = sudya(rech, o, tema, v_raunde())        # 06.11: строгий судья — слабое не звучит
         if not ok:
             sdelano.append('судья: %s — промолчала: %s' % (pochemu, rech[:50]))
             OTKAZ[0] = 'судья отверг прошлую: %s. Нужна одна конкретная верная мысль из данных, без вопросов ему' % pochemu

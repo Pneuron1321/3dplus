@@ -62,6 +62,7 @@ KOZYRI = [E('KANAL_KOZYR_' + k, p) for k, p in (('T', '/root/.vedushchiy/deep-tr
                                                  ('O', '/root/.claude/skills/otmychka/SKILL.md'))]
 SEK = float(E('KANAL_SEK', 1))                # в проверке — доли секунды
 SEK_SOST = E('KANAL_SEK_SOST', '/tmp/sekundant.json')   # уши: идёт ли раунд — идеи ждут угла
+UHO_POSL = E('KANAL_UHO_POSL', '/tmp/uho.posl')         # голос: когда в ухо звучало в последний раз (дирижёр уха)
 RAZ_TABLO = 600       # название-табло — не чаще раза в 10 минут
 RAZ_FOLLOW = 30       # фолловеры Twitch
 RAZ_NAGRADY = 20      # награды за баллы
@@ -334,11 +335,18 @@ def v_raunde():
     return bool(st.get('boy')) and time.time() - st.get('t', 0) < 3600 and time.time() >= st.get('raund_t', 0)
 
 
+def uho_svobodno(promezhutok=60):
+    try:
+        return time.time() - os.path.getmtime(UHO_POSL) >= promezhutok * SEK
+    except OSError:
+        return True
+
+
 def ideya_dostavit():
     """Идея, отложенная на время раунда, — после него (не старше 15 минут)."""
     put = os.path.join(PAPKA, 'ideya-zhdet.json')
     z = chitat(put)
-    if not z or v_raunde():
+    if not z or v_raunde() or not uho_svobodno():
         return
     try:
         os.remove(put)
@@ -353,7 +361,7 @@ def ved_ideya(tekst, nomer):
     соведущая — её голосом, только ему в ухо («.vedu»); после — секунда «дослуха» ей: ответил — она обсуждает и пишет
     отзыв (`vedushchiy sprosi`). Запись в общем журнале — чтобы она знала, о какой идее речь. Соведущая выключена — как
     раньше, голосом Плюса в ухо."""
-    if v_raunde():                                     # раунд — подождёт угла или конца боя
+    if v_raunde() or not uho_svobodno():               # раунд или ухо только что занято — подождёт
         zapisat(os.path.join(PAPKA, 'ideya-zhdet.json'), {'tekst': tekst, 'nomer': nomer, 't': time.time()})
         return
     if os.path.exists(VED_OFF):
