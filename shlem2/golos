@@ -880,6 +880,26 @@ def mik_db():
         return None
 
 
+DERZHAT_MAKS = float(os.environ.get('GOLOS_DERZHAT_MAKS', 300))   # с: «плюс пауза» дольше — снимаем сами
+
+
+def derzhit():
+    """«Плюс пауза» действует (/tmp/golos.derzhat). 06.11: голос молчал весь вечер без единой строки в журнале — пауза,
+    которую никто не снял (ложное «плюс пауза» в разговоре), держит не дольше DERZHAT_MAKS, потом снимаем и пишем."""
+    try:
+        vozrast = time.time() - os.path.getmtime(DERZHAT)
+    except OSError:
+        return False
+    if vozrast < DERZHAT_MAKS:
+        return True
+    try:
+        os.remove(DERZHAT)
+        log('«плюс пауза» висела %d мин — снял, говорю дальше' % (vozrast // 60))
+    except OSError:
+        pass
+    return False
+
+
 def perebit_zamerov(shag=0.15):
     """Сколько замеров подряд громче порога — «он заговорил» (а не хмыкнул)."""
     try:
@@ -1272,7 +1292,7 @@ class Golos:
                     log('Александр говорил дольше %d с — остаток не договариваю' % PLUS_DOLGO)
                 else:
                     log('Александр замолчал — Плюс продолжает')
-        if os.path.exists(DERZHAT):
+        if derzhit():
             if self.igrok and not getattr(self.igrok, 'vne_ocheredi', False):
                 ig = self.igrok
                 proshlo = time.time() - getattr(ig, 't0', time.time())
@@ -1564,7 +1584,7 @@ class Golos:
                 log('не сыграл:', getattr(igrok, 'err', '') or end)
                 uid = k.uid
                 self.vybrosit(lambda x: x.uid == uid)   # реплику не мучаем кусками
-        if os.path.exists(DERZHAT):
+        if derzhit():
             return                         # «плюс пауза» — ждём, пока снимут
         if self.pauza() or os.path.exists(OFF):
             self.zhdu_dosluh = False       # Александр позвал сам — его фразу слушают уши
