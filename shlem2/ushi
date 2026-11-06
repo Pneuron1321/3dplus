@@ -262,6 +262,33 @@ class Sekundant:
         return puti
 
 
+# ---------- английский суфлёр 1.1: по просьбе (06.11) ----------
+SUF_ZAPROS = os.environ.get('USHI_SUF_ZAPROS', '/tmp/sufler.zapros')
+SUF_EN = re.compile(r'^(?:а\s+|ну\s+|скажи\s+)?(?:как\s+(?:это\s+)?(?:будет\s+|сказать\s+)?)?(?:по[- ]?английски|на английском)'
+                    r'\b[\s,.:?!—-]*(.*)$|^переведи(?:\s+на\s+английский)?\b[\s,.:—-]*(.*)$', re.I)
+SUF_RAZMINKA = re.compile(r'^(?:английская\s+)?разминк\w*\b', re.I)
+
+
+def sufler_zapros(t):
+    """«Плюс, по-английски [фраза]» / «плюс, разминка» — суфлёру (он ответит в ухо; Плюсу не идёт). True — забрали."""
+    low = t.lower().strip(' .!?,…')
+    if SUF_RAZMINKA.match(low):
+        z = {'t': time.time(), 'vid': 'razminka'}
+    else:
+        m = SUF_EN.match(t.strip())
+        if not m:
+            return False
+        z = {'t': time.time(), 'vid': 'en', 'tekst': ((m.group(1) or m.group(2) or '').strip(' .!?,…«»"'))}
+    try:
+        with open(SUF_ZAPROS + '.tmp', 'w') as f:
+            json.dump(z, f, ensure_ascii=False)
+        os.replace(SUF_ZAPROS + '.tmp', SUF_ZAPROS)
+    except OSError:
+        return False
+    print(time.strftime('%H:%M:%S'), 'суфлёру:', z['vid'], z.get('tekst', '')[:60], flush=True)
+    return True
+
+
 def sekundant(t):
     """«Плюс план на бой / перерыв / итог боя». True — фраза секунданту (ушла или ждёт), None — не его."""
     low = t.lower().strip(' .!?,…')
@@ -1358,6 +1385,9 @@ def handle(e, sluh):
         subprocess.run(['tiho'])
     elif kind == 'text' and low in TEMP:
         propustit()
+    elif kind == 'text' and (SUF_RAZMINKA.match(low) or SUF_EN.match(t.strip())) and sufler_zapros(t):
+        ved_dialog(t, 'plus')
+        metka('vpisal', e['id'])
     elif kind == 'text' and (SEK_PLAN.match(low) or SEK_PERERYV_R.match(low) or SEK_ITOG.match(low)):
         ved_dialog(t, 'plus')
         if sekundant(t):

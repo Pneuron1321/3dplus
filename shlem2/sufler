@@ -1,6 +1,11 @@
 #!/data/data/com.termux/files/usr/bin/python3
-"""Английский суфлёр Плюса (06.11): подсказки в ухо, что сказать по-английски; перевод соведущей и ответ ей;
-учёт английской речи и рост.
+"""Английский суфлёр Плюса, версия 1.1 (06.11). 1.0 сочинял чужие фразы по таймеру из пустого материала — выходили
+шаблоны. 1.1 учит на ЕГО словах:
+  • «плюс, по-английски» — его последняя русская фраза по-английски, как сказал бы он сам; «плюс, по-английски
+    <фраза>» — эта фраза. Мгновенно, без модели Claude.
+  • ПОПРАВКА: его английская фраза с ошибкой (например, вопрос без do/did) → в паузе «Поправка, …: <как надо>».
+  • «плюс, разминка» (до эфира, в паузе) — три его фразы: поправка прошлого эфира и типичные мысли из разговорника.
+  • Разговорник растёт сам: после эфира его типичные русские фразы → английские в его стиле.
 
 Пока идёт эфир (все голоса суфлёра — только Александру в ухо, зрители их не слышат):
   • ПОДСКАЗКА раз в 2 минуты (без ответа — реже): смысл по-русски, потом английская фраза (4–12 слов) — только из того,
@@ -19,7 +24,7 @@
 
 sufler                     — что сейчас: включён ли, настройки, этот эфир
 sufler vkl | vykl          — включить / выключить всё
-sufler kazhdye N           — подсказка раз в N минут (0,5–30; обычно 2)
+sufler kazhdye N           — сам — не чаще раза в N минут (0,5–30; в 1.1 обычно 5)
 sufler perevod vkl|vykl    — смысл по-русски перед фразой
 sufler ved vkl|vykl        — перевод соведущей и ответ ей
 sufler razgovor vkl|vykl   — его английский ответ — соведущей (она отвечает)
@@ -28,6 +33,9 @@ sufler fokus ТЕКСТ|sbros   — фокус недели (например, �
 sufler itog [N]            — итоги последних эфиров и рост
 sufler slovar              — фразы: давали, сказал сам, освоенные
 sufler proba               — одна подсказка сейчас (и без эфира)
+sufler perevod ФРАЗА       — эта русская фраза по-английски в ухо (как «плюс, по-английски ФРАЗА»)
+sufler razminka            — разминка: три его фразы в ухо
+sufler razgovornik         — его разговорник (типичные фразы и как их сказать по-английски)
 sufler demon               — фоном (запускает plus)
 """
 import fcntl
@@ -63,7 +71,8 @@ SEK = float(E('SUFLER_SEK', 1))            # в проверке — доли с
 SEK_SOST = E('SUFLER_SEK_SOST', '/tmp/sekundant.json')   # уши: идёт ли бой («плюс план на бой / перерыв / итог»)
 SVOI = set(E('SUFLER_SVOI', '3xsks_fu_gun,splus,nightbot,streamelements,streamlabs,moobot,fossabot').lower().split(','))
 
-NASTROYKI = {'vkl': True, 'kazhdye': 120, 'perevod': True, 'ved': True, 'razgovor': True, 'pauza': 8, 'cepochka': 2,
+VERSIYA = '1.1'           # 06.11: 1.0 — шаблоны по таймеру; 1.1 — учит на ЕГО словах
+NASTROYKI = {'vkl': True, 'kazhdye': 300, 'perevod': True, 'ved': True, 'razgovor': True, 'pauza': 8, 'cepochka': 2,
              'fokus': ''}
 PERVAYA = 60              # с от начала эфира до первой подсказки
 OKNO_PODSKAZKI = 75       # с: его английская фраза в это время — ответ на подсказку
@@ -80,6 +89,11 @@ MYSL_SVEZHAYA = 120       # с: его русская мысль свежая �
 CHAT_OKNO = 600           # с: «люди в чате» — писали за это время
 IGRA_SVEZHAYA = 900       # с: описание кадра (obzor) старше — игры не знаем
 POVTOR_RECHI = 600        # с: та же его фраза ещё раз за это время — не считаем (Whisper повторяет «Thank you»)
+ZAPROS = E('SUFLER_ZAPROS', '/tmp/sufler.zapros')   # уши: «плюс, по-английски [фраза]», «плюс, разминка»
+ZAPROS_ZHDAT = 10         # с: просьба без его свежей русской фразы — ждём субтитр столько
+RECAST_RAZ = 150          # с: поправка его английской фразы — не чаще
+RECAST_SVEZHAYA = 120     # с: его фраза старше — поправка уже не к месту
+RECAST_TISHINA = 4        # с после его фразы — тогда поправка (не поверх речи)
 
 # Суфлёр 2.0 (сессия 05.11, жалоба: «слепые шаблоны по рубрикам, вопросы пустому чату, бред на главном экране»): вид
 # подсказки — только тот, для которого в моменте ЕСТЬ материал (обстановка ниже); ничего — молчим. Главный вид — «мысль»:
@@ -92,7 +106,9 @@ TIPY = {
     'igra': ('про игру', 'say what he is doing or noticing in the game, from "game_now"'),
     'plus': ('Плюсу', 'answer or react to the co-host line in "co_host_recent"'),
 }
-PRIORITET = ('mysl', 'plus', 'chat', 'emociya', 'igra')
+# 1.1: «чувство» и «про игру» убраны — именно они рождали «This ring is wild!»: у модели не было материала, только
+# 9-минутное описание кадра. Сам — только из его слов и живых людей; остальное — по его просьбе.
+PRIORITET = ('mysl', 'plus', 'chat')
 # Whisper в тишине и дыхании боя пишет «Thank you», «Okay», «Puh» (сессия 05.11: 157 «Thank you», 97 «Puh») — не речь
 MUSOR = set("thank thanks you okay ok yeah yes yep no nope hmm hm mm mhm mh huh uh um ah eh oh wow puh pah pff pfff ugh "
             "yo bye what copy tchank hey hi hello so well right sure".split())
@@ -110,6 +126,26 @@ ZADANIE_PODSKAZKA = (
     'the moment naturally, build the line around it — that is how he learns. Answer ONLY JSON: {"en": "the line", '
     '"ru": "смысл по-русски, 1–4 слова"} or {"skip": true, '
     '"pochemu": "почему молчим, до 8 слов"}.')
+ZADANIE_PEREVOD = (
+    'Alexander, a Russian-speaking VR streamer (male, learning English), asks: "how do I say this in English?". Turn '
+    'HIS Russian words into what HE would naturally say out loud on stream in English: same meaning, same feeling and '
+    'humor, spoken style, contractions, simple words a learner can repeat (max 14 words). If he swears, use a '
+    'stream-safe English equivalent with the same punch. "subtitle" is an automatic translation — use it only as a '
+    'hint. Never add his name. Answer ONLY JSON: {"en": "..."}.')
+ZADANIE_RECAST = (
+    'You are a kind English coach. Alexander (Russian native, learning English, VR streamer, male) just said this '
+    'English line live on stream (speech-to-text). If it has a real grammar mistake or sounds unnatural, give the '
+    'natural version he should say next time — keep HIS meaning and words as much as possible, change only what is '
+    'wrong (common learner mistakes: questions without do/does/did, word order — "Why he stole your money?" -> '
+    '"Why did he steal your money?"). If the line is fine, or looks like a speech-recognition error, or is too broken to know '
+    'what he meant — answer {"ok": true}. Otherwise ONLY JSON: {"nado": "the natural version", "pochemu": "что '
+    'исправлено, по-русски, до 6 слов"}.')
+ZADANIE_RAZGOVORNIK = (
+    'These are Russian lines Alexander (VR streamer, male, learning English) said on stream tonight. Find up to 6 '
+    'things he says OFTEN or that are typical for HIM (reactions, questions to chat or guests, jokes, swearing, '
+    'comments on the game) and give the natural spoken English he could say instead — his voice and humor, '
+    'stream-safe, max 10 words, simple. Skip commands to the assistant and one-off technical talk. Skip anything '
+    'already in "uzhe_est". Answer ONLY JSON: {"frazy": [{"ru": "его типичная фраза", "en": "..."}]}.')
 ZADANIE_OTVET = (
     'You are an English speaking coach whispering into the ear of Alexander, a Russian-speaking VR streamer (male, '
     'learning English). His AI co-host Plus (female) just said a line out loud on stream in English. Write what '
@@ -338,6 +374,12 @@ class Sufler:
         self.okno_ved = None      # {'do', 'en', 'ved_t'} — его английский в это время — ей
         self.cep = 0              # обменов подряд, переданных соведущей
         self.mysli = []           # его свежие русские фразы: [(t, текст)] — материал вида «мысль»
+        self.ru_vse = []          # его русские фразы (2+ слова, не команды): [(t, текст, перевод субтитров)]
+        self.ru_efir = []         # русские фразы этого эфира — разговорник в итоге
+        self.zapros = None        # просьба «по-английски»: {'t', 'vid', 'tekst', 'do'}
+        self.recast_ochered = []  # его английские фразы на поправку: [(t, текст)]
+        self.posl_recast = 0.0
+        self.chist_est = False    # sinhron даёт чистовики — поправляем только их (меньше ошибок распознавания)
         self.mysl_vzyata = 0.0    # время последней мысли, уже отданной подсказкой
         self.slyshal = {}         # его английская фраза → когда (Whisper повторяет «Thank you»)
         self.ignor = 0            # подсказок подряд без его английского — реже
@@ -434,10 +476,14 @@ class Sufler:
             r = self.rech
             # черновик растёт в одной строке (все куски до этого), чистовик — замена: та же реплика
             if r and now - r['obnovl'] <= SOBRAT * SEK and (m.group(3) or tekst.startswith(r['tekst'][:max(8, len(r['tekst']) - 6)])):
-                r.update(tekst=tekst, yaz=m.group(2), obnovl=now)
+                r.update(tekst=tekst, yaz=m.group(2), obnovl=now, perevod=m.group(5).strip(),
+                         chist=bool(m.group(3)) or r.get('chist', False))
             else:
                 self.rech_gotova()
-                self.rech = {'t': now, 'tekst': tekst, 'yaz': m.group(2), 'obnovl': now}
+                self.rech = {'t': now, 'tekst': tekst, 'yaz': m.group(2), 'obnovl': now, 'perevod': m.group(5).strip(),
+                             'chist': bool(m.group(3))}
+            if m.group(3):
+                self.chist_est = True
 
     def rech_proverka(self, now):
         if self.rech and now - self.rech['obnovl'] > SOBRAT * SEK:
@@ -451,8 +497,11 @@ class Sufler:
         tekst = r['tekst'].strip()
         if r['yaz'] == 'ru' or KIRILL.search(tekst):
             # русская мысль — материал подсказки «скажи это по-английски» (не команды Плюсу, не обрывки)
-            if len(slova_ru(tekst)) >= 4 and not KOMANDA_RU.match(tekst):
-                self.mysli = (self.mysli + [(now, tekst[:300])])[-5:]
+            if not KOMANDA_RU.match(tekst) and len(slova_ru(tekst)) >= 2:
+                self.ru_vse = (self.ru_vse + [(now, tekst[:300], r.get('perevod', '')[:300])])[-10:]
+                if len(slova_ru(tekst)) >= 4:
+                    self.mysli = (self.mysli + [(now, tekst[:300])])[-5:]
+                    self.ru_efir = (self.ru_efir + [tekst[:200]])[-150:]
             return
         if r['yaz'] != 'en' or not nastoyashchaya(tekst):
             return                                      # «Thank you», «Puh», «Okay» — Whisper, не речь
@@ -475,6 +524,8 @@ class Sufler:
         self.ignor = 0
         self.zhurnal(z)
         log('сказал по-английски:', tekst[:80], '|', z.get('itog', 'сам'))
+        if len(slova(tekst)) >= 4 and z.get('itog') != 'povtoril' and (r.get('chist') or not self.chist_est):
+            self.recast_ochered = (self.recast_ochered + [(now, tekst[:300])])[-5:]   # 1.1: поправка — на ЕГО фразе
         o = self.okno_ved
         if o and now <= o['do']:
             self.okno_ved = None
@@ -659,6 +710,7 @@ class Sufler:
             if isinstance(v.get('popravka'), dict) and v['popravka'].get('nado'):
                 praktika.append(v['popravka']['nado'])
             praktika += [x for x in (v.get('novye') or [])[:2]]
+        praktika += [z['nado'] for z in self.zhurnal_chitat(time.time() - 7 * 86400) if z.get('vid') == 'recast'][-3:]
         kontekst = dict(ob, type=TIPY[tip][1], recent_lines=nedavnie, practice=praktika[-6:],
                         mastered_do_not_suggest=[z['en'] for z in s.values() if z.get('skazal', 0) >= OSVOENO][-20:],
                         focus_of_the_week=n.get('fokus') or '')
@@ -682,6 +734,124 @@ class Sufler:
         log('подсказка (%s): %s' % (TIPY[tip][0], en))
         return en
 
+    # ---------- 1.1: по его просьбе ----------
+    def zapros_chitat(self, now):
+        """Уши положили просьбу (/tmp/sufler.zapros): «плюс, по-английски [фраза]» или «плюс, разминка»."""
+        try:
+            z = json.load(open(ZAPROS))
+            os.remove(ZAPROS)
+        except (OSError, ValueError):
+            return
+        if isinstance(z, dict):
+            z['do'] = now + ZAPROS_ZHDAT * SEK
+            self.zapros = z
+
+    def zapros_proverka(self, now):
+        z = self.zapros
+        if not z:
+            return
+        if z.get('vid') == 'razminka':
+            self.zapros = None
+            self.razminka()
+            return
+        ru, podskazka = (z.get('tekst') or '').strip(), ''
+        if not ru:
+            if self.rech and self.rech.get('yaz') == 'ru':
+                self.rech_gotova()                      # его фраза ещё собирается — забрать сейчас
+            svezh = [x for x in self.ru_vse if x[0] >= z.get('t', now) - 90 * SEK]
+            if not svezh:
+                if now < z['do']:
+                    return                              # субтитр его фразы ещё в пути — ждём
+                self.zapros = None
+                self.golos('Скажи по-русски, что хочешь сказать, — переведу.', 'sufler')
+                return
+            _, ru, podskazka = svezh[-1]
+        self.zapros = None
+        self.perevesti(ru, podskazka)
+
+    def perevesti(self, ru, podskazka=''):
+        o = self.groq(ZADANIE_PEREVOD, json.dumps({'his_words': ru, 'subtitle': podskazka}, ensure_ascii=False), 0.4) or {}
+        en = chistaya_en(o.get('en'), 120) or chistaya_en(podskazka, 120)
+        if not en:
+            log('перевод не вышел:', ru[:60])
+            return None
+        self.golos('По-английски: %s' % en, 'sufler')
+        self.zhdu_otveta = time.time()
+        self.zhurnal({'vid': 'zapros', 'ru': ru[:300], 'en': en})
+        self.slovar_zapisat(en, ru[:80], 'zapros', dano=1)
+        log('по просьбе: %s → %s' % (ru[:50], en))
+        return en
+
+    # ---------- 1.1: поправка его английского ----------
+    def recast_proverka(self, now):
+        """Его английская фраза с ошибкой → «Лучше так: …» — в паузе, не в раунде, не поверх речи, не чаще RECAST_RAZ."""
+        self.recast_ochered = [x for x in self.recast_ochered if now - x[0] < RECAST_SVEZHAYA * SEK]
+        if not self.recast_ochered or now - self.posl_recast < RECAST_RAZ * SEK or self.rech is not None:
+            return
+        t, tekst = self.recast_ochered[-1]
+        if now - t < RECAST_TISHINA * SEK or v_boyu() or self.ved_zhdu or self.zapros:
+            return
+        self.recast_ochered = []
+        self.posl_recast = now
+        o = self.groq(ZADANIE_RECAST, json.dumps({'his_line': tekst}, ensure_ascii=False), 0.2, 150) or {}
+        nado = chistaya_en(o.get('nado'), 140)
+        if o.get('ok') or not nado or shodstvo(nado, tekst) >= 0.95 and shodstvo(tekst, nado) >= 0.95:
+            return
+        pochemu = chistaya_ru(o.get('pochemu'), 60)
+        self.golos(('Поправка, %s: %s' % (pochemu.rstrip('. '), nado)) if pochemu else 'Лучше так: %s' % nado, 'sufler')
+        self.zhurnal({'vid': 'recast', 'bylo': tekst, 'nado': nado, 'pochemu': pochemu})
+        self.slovar_zapisat(nado, pochemu, 'recast', dano=1)
+        log('поправка: %s → %s' % (tekst[:50], nado))
+
+    # ---------- 1.1: разминка и разговорник ----------
+    def razgovornik(self):
+        return chitat(os.path.join(PAPKA, 'razgovornik.json'), []) or []
+
+    def razminka(self):
+        """«Плюс, разминка» (до эфира или в паузе): три фразы — поправка прошлого эфира и его типичные мысли
+        из разговорника, которые он ещё не говорит сам: смысл по-русски, потом английская."""
+        s = self.slovar()
+        nabor = []
+        for v in reversed(self.vechera(3)):
+            p = v.get('popravka')
+            if isinstance(p, dict) and p.get('nado'):
+                nabor.append(('поправка: не «%s»' % p.get('bylo', ''), p['nado']))
+                break
+        for z in sorted(self.razgovornik(), key=lambda z: (s.get(klyuch(z.get('en', '')), {}).get('skazal', 0),
+                                                          s.get(klyuch(z.get('en', '')), {}).get('dano', 0))):
+            if len(nabor) >= 3:
+                break
+            nabor.append((z.get('ru', ''), z.get('en', '')))
+        for z in [x for x in self.zhurnal_chitat(time.time() - 7 * 86400) if x.get('vid') == 'recast'][::-1]:
+            if len(nabor) >= 3:
+                break
+            if z.get('nado') and z['nado'] not in [n[1] for n in nabor]:
+                nabor.append(('поправка: %s' % z.get('pochemu', ''), z['nado']))
+        if not nabor:
+            self.golos('Для разминки пока нет твоих фраз: появятся после первого эфира с суфлёром.', 'sufler')
+            return []
+        self.golos('Разминка, %d %s. Повторяй за мной.' % (len(nabor), forma(len(nabor), 'фраза', 'фразы', 'фраз')), 'sufler')
+        for ru, en in nabor:
+            self.golos('%s. %s' % (ru.rstrip('. '), en), 'sufler')
+            self.slovar_zapisat(en, ru[:80], 'razminka', dano=1)
+        self.zhurnal({'vid': 'razminka', 'frazy': [en for _, en in nabor]})
+        return nabor
+
+    def razgovornik_popolnit(self):
+        """После эфира: его типичные русские фразы → английские в его стиле (разговорник растёт от эфира к эфиру)."""
+        if len(self.ru_efir) < 5:
+            return 0
+        est = self.razgovornik()
+        o = self.groq(ZADANIE_RAZGOVORNIK, json.dumps({'lines': self.ru_efir[-120:], 'uzhe_est': [z.get('ru') for z in est][-60:]},
+                                                      ensure_ascii=False), 0.4, 600) or {}
+        novye = []
+        for z in (o.get('frazy') or [])[:6]:
+            if isinstance(z, dict) and chistaya_en(z.get('en'), 100) and chistaya_ru(z.get('ru'), 120):
+                novye.append({'ru': chistaya_ru(z['ru'], 120), 'en': chistaya_en(z['en'], 100), 't': round(time.time())})
+        if novye:
+            zapisat(os.path.join(PAPKA, 'razgovornik.json'), (est + novye)[-100:])
+        return len(novye)
+
     # ---------- итог эфира ----------
     def schet(self, ot, do=None):
         do = do or time.time() + 1
@@ -696,11 +866,15 @@ class Sufler:
             'sam': sum(1 for z in skazal if not z.get('itog')),
             'ved_perevodov': sum(1 for z in zz if z.get('vid') == 'otvet_ved'),
             'ved_otvetil': sum(1 for z in skazal if z.get('na') == 'otvet_ved'),
+            'prosil': sum(1 for z in zz if z.get('vid') == 'zapros'),
+            'popravok': sum(1 for z in zz if z.get('vid') == 'recast'),
         }, [z.get('en', '') for z in skazal]
 
     def itog(self, ot, do):
         sc, frazy = self.schet(ot, do)
-        if not sc['fraz'] and not sc['podskazok']:
+        popolnil = self.razgovornik_popolnit()          # его русские мысли за эфир → разговорник (даже без английского)
+        self.ru_efir = []
+        if not sc['fraz'] and not sc['podskazok'] and not sc['prosil']:
             return None
         analiz = {}
         if frazy:
@@ -714,6 +888,7 @@ class Sufler:
         if isinstance(p, dict) and chistaya_en(p.get('bylo'), 160) and chistaya_en(p.get('nado'), 160):
             z['popravka'] = {'bylo': chistaya_en(p['bylo'], 160), 'nado': chistaya_en(p['nado'], 160),
                              'pochemu': chistaya_ru(p.get('pochemu'), 100)}
+        z['popolnil_razgovornik'] = popolnil
         dopisat(os.path.join(PAPKA, 'vechera.jsonl'), z)
         rech = 'Английский за эфир: %d %s по-английски' % (sc['fraz'], forma(sc['fraz'], 'фраза', 'фразы', 'фраз'))
         if proshlye:
@@ -721,6 +896,8 @@ class Sufler:
         rech += '. Подсказок %d: повторил %d, своими словами %d.' % (sc['podskazok'], sc['povtoril'], sc['svoimi'])
         if sc['ved_perevodov']:
             rech += ' Соведущей ответил %d из %d.' % (sc['ved_otvetil'], sc['ved_perevodov'])
+        if sc['prosil'] or sc['popravok']:
+            rech += ' Просил перевод %d, поправок %d.' % (sc['prosil'], sc['popravok'])
         if z.get('luchshaya'):
             rech += ' Лучшая фраза: %s.' % z['luchshaya'].rstrip('.!?')
         if z.get('popravka'):
@@ -750,8 +927,11 @@ class Sufler:
         self.sinhron_chitat(now)
         self.rech_proverka(now)
         self.ved_chitat(now)
+        self.zapros_chitat(now)
+        self.zapros_proverka(now)                       # по его просьбе — и вне эфира (разминка до него)
         if not self.efir:
             return
+        self.recast_proverka(now)
         self.ved_proverka(now)
         self.podskazka_proverka(now)
 
@@ -857,6 +1037,16 @@ def main(a):
             len(s), len(osv), len(uch), len(s) - len(osv) - len(uch)))
         for z in sorted(s.values(), key=lambda z: (-z.get('skazal', 0), -z.get('posl', 0)))[:25]:
             print('  %d/%d  %s — %s' % (z.get('skazal', 0), z.get('dano', 0), z.get('en'), z.get('ru', '')))
+    elif c == 'razminka':
+        n = Sufler().razminka()
+        print('Разминка в ухо:', '; '.join(en for _, en in n) if n else 'фраз пока нет')
+    elif c == 'razgovornik':
+        r = Sufler().razgovornik()
+        print('Разговорник: %d фраз (растёт после каждого эфира).' % len(r))
+        for z in r[-30:]:
+            print('  %s — %s' % (z.get('ru'), z.get('en')))
+    elif c == 'perevod' and len(a) > 1 and vkl_vykl(a[1]) is None:
+        Sufler().perevesti(' '.join(a[1:]))
     elif c == 'proba':
         en = Sufler().podskazka()
         print('Подсказка в ухо:', en or 'не вышло (голос?)')
