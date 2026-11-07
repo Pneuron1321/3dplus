@@ -33,22 +33,6 @@ def E(k, d):
     return os.environ.get(k, d)
 
 
-def uho_svobodno(promezhutok=60):
-    try:
-        return time.time() - os.path.getmtime(UHO_POSL) >= promezhutok * SEK
-    except (OSError, NameError):
-        return True
-
-
-def v_raunde():
-    """06.11: идёт раунд боя (уши, «плюс план на бой / перерыв») — в ухо ничего."""
-    try:
-        st = json.load(open(SEK_SOST))
-    except (OSError, ValueError):
-        return False
-    return bool(st.get('boy')) and time.time() - st.get('t', 0) < 3600 and time.time() >= st.get('raund_t', 0)
-
-
 PAPKA = E('REZH_PAPKA', '/root/.rezhisser')
 DIALOG = E('REZH_DIALOG', '/root/.vedushchiy/dialog.jsonl')
 OBZOR = E('REZH_OBZOR', '/tmp/obzor.log')
@@ -61,8 +45,6 @@ TIHIY = E('REZH_TIHIY', '/root/.tihiy-rezhim')
 CLAUDE = E('REZH_CLAUDE', 'claude')
 MODEL = E('REZH_MODEL', 'sonnet')
 SEK = float(E('REZH_SEK', 1))
-SEK_SOST = E('REZH_SEK_SOST', '/tmp/sekundant.json')   # уши: идёт ли раунд — тогда «Клип?» молчит
-UHO_POSL = E('REZH_UHO_POSL', '/tmp/uho.posl')         # голос: когда в ухо звучало в последний раз (дирижёр уха)
 
 KLIP_SEK = 300            # клип — 5 минут (Александр 05.11)
 AVTO_MAKS = 3             # сам — не больше 3 в час (Александр 05.11)
@@ -251,8 +233,7 @@ class Rezhisser:
             log('эфир идёт')
         n = nastroyki()
         posl = max(posledniy_klip(), self.posl_avto)
-        if n.get('napominanie', True) is not False and not os.path.exists(TIHIY) and not v_raunde() \
-                and uho_svobodno():                     # тихо / раунд / ухо только что занято — без «Клип?»
+        if n.get('napominanie', True) is not False and not os.path.exists(TIHIY):   # 07.11: по своему таймингу, вне очередей
             raz = float(n.get('napominanie_sek') or NAPOMINANIE) * SEK
             if now - self.posl_napominanie >= raz:
                 self.posl_napominanie = now
