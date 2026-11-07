@@ -93,6 +93,11 @@ UHO_POSL = E('SUFLER_UHO_POSL', '/tmp/uho.posl')    # голос: когда в 
 G_POSL = E('SUFLER_G_POSL', '/tmp/golos.posl')     # последний ответ Плюса — его совет в углу
 UHO_PROMEZHUTOK = 45      # с: фоновое в ухо (подсказка, поправка) — не ближе к прошлой фразе в ухо
 KLYUCH_CHEREZ = 40        # с от начала раунда: ключ угла — одной командой в ухо
+ZHIVOY_S = 22             # с от начала раунда: живой взгляд — свежие кадры раунда модели (07.11, его «да»)
+BOY_PAPKA = E('SUFLER_BOY_PAPKA', '/root/boy')       # кадры раунда (уши, раз в 15 с)
+CLAUDE = E('SUFLER_CLAUDE', 'claude')
+ZHIVOY_MODEL = E('SUFLER_ZHIVOY_MODEL', 'haiku')     # быстрая: ключ должен успеть к 40-й секунде
+ZHIVOY_VYKL = E('SUFLER_ZHIVOY_VYKL', '/root/.sufler/zhivoy-vykl')   # `touch` — без живого взгляда (только ключ угла)
 ZAPROS = E('SUFLER_ZAPROS', '/tmp/sufler.zapros')   # уши: «плюс, по-английски [фраза]», «плюс, разминка»
 ZAPROS_ZHDAT = 10         # с: просьба без его свежей русской фразы — ждём субтитр столько
 RECAST_RAZ = 150          # с: поправка его английской фразы — не чаще
@@ -135,6 +140,12 @@ ZADANIE_KLYUCH = (
     'повелительно, то, что важнее всего держать в голове в раунде (например: «Левую выше», «Уходи вправо», «Джеб и '
     'назад»). Без вопросов, без оценок, без имени. Ответ — только JSON: {"klyuch": "..."} или {"net": true}, если '
     'конкретного совета нет.')
+ZADANIE_ZHIVOY = (
+    'Ты секундант Александра в VR-боксе. Идёт раунд. Перед тобой кадры этого раунда (последние — свежие) и твой совет из '
+    'угла. Посмотри, что происходит сейчас, и дай ОДНУ команду на 2–4 слова по-русски, повелительно, — то, что ему важнее '
+    'всего прямо сейчас: держится ли план или надо другое (например: «Левую выше», «Уходи вправо», «Дыши, джеб»). '
+    'Без вопросов, без оценок, без имени. По кадрам не понять — верни ключ совета из угла. Ответ — только JSON: '
+    '{"klyuch": "..."}.')
 ZADANIE_PEREVOD = (
     'Alexander, a Russian-speaking VR streamer (male, learning English), asks: "how do I say this in English?". Turn '
     'HIS Russian words into what HE would naturally say out loud on stream in English: same meaning, same feeling and '
@@ -687,12 +698,53 @@ class Sufler:
                 log('ключ угла:', k['tekst'] or '—')
             elif now > k['raund_t'] + 60 * SEK:
                 k['tekst'] = ''                         # совета не было — не выдумываем
+        if not k.get('zhivoy_poshyol') and now >= k['raund_t'] + ZHIVOY_S * SEK \
+                and v_boyu() and not os.path.exists(ZHIVOY_VYKL):
+            k['zhivoy_poshyol'] = True                  # живой взгляд: свежие кадры раунда — в фоне, ключ угла — запасной
+            import threading
+            threading.Thread(target=self.zhivoy_vzglyad, args=(k,), daemon=True).start()
+        if k.get('zhivoy_poshyol') and k.get('zhivoy') is None and now < k['raund_t'] + (KLYUCH_CHEREZ + 15) * SEK:
+            return                                      # ждём живой взгляд (до 55-й секунды), потом — ключ угла
+        if k.get('zhivoy'):
+            k['tekst'] = k['zhivoy']
         if k['tekst'] and v_boyu() and now >= k['raund_t'] + KLYUCH_CHEREZ * SEK:
             k['skazan'] = True
             if now < k['raund_t'] + (KLYUCH_CHEREZ + 40) * SEK and self.golos(k['tekst'].rstrip('.') + '.', 'uho'):
                 self.zhurnal({'vid': 'klyuch', 'tekst': k['tekst']})
         elif k['tekst'] == '':
             k['skazan'] = True
+
+    def zhivoy_vzglyad(self, k):
+        """Модель смотрит 3 свежих кадра раунда + совет угла → команда 2–4 слова. Не вышло — '' (останется ключ угла)."""
+        try:
+            kadry = sorted((os.path.join(BOY_PAPKA, f) for f in os.listdir(BOY_PAPKA) if f.startswith('k') and f.endswith('.jpg')),
+                           key=os.path.getmtime)
+            kadry = [f for f in kadry if os.path.getmtime(f) >= k['raund_t'] - 2 * SEK][-3:]
+        except OSError:
+            kadry = []
+        if not kadry:
+            k['zhivoy'] = ''
+            log('живой ключ: кадров раунда нет — останется ключ угла')
+            return
+        try:
+            sovet = open(G_POSL, errors='replace').read().strip()[:500]
+        except OSError:
+            sovet = ''
+        zapros = 'Кадры раунда (читай Read-ом по порядку): %s\nСовет из угла: %s\nКлюч угла: %s' % (
+            ' ; '.join(kadry), sovet or '—', k.get('tekst') or '—')
+        env = dict(os.environ, CLAUDE_CODE_DISABLE_CLAUDE_MDS='1', CLAUDE_CODE_DISABLE_AUTO_MEMORY='1', GOLOS_RACIYA='1')
+        cmd = [CLAUDE, '-p', '--model', ZHIVOY_MODEL, '--effort', 'low', '--tools', 'Read', '--allowedTools', 'Read',
+               '--no-session-persistence', '--settings', '{"disableAllHooks":true}', '--output-format', 'json',
+               '--system-prompt', ZADANIE_ZHIVOY, zapros]
+        try:
+            r = subprocess.run(cmd, cwd=BOY_PAPKA, env=env, capture_output=True, text=True, timeout=40,
+                               stdin=subprocess.DEVNULL)
+            t = json.loads(r.stdout).get('result', '') if r.stdout.strip() else ''
+            k['zhivoy'] = chistaya_ru((json_iz(t) or {}).get('klyuch'), 40)
+        except Exception as e:
+            log('живой взгляд:', type(e).__name__)
+            k['zhivoy'] = ''
+        log('живой ключ:', k['zhivoy'] or '— (останется ключ угла)')
 
     # ---------- подсказка ----------
     def obstanovka(self):

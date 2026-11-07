@@ -1595,7 +1595,8 @@ def _otkaz_pravil(rech):
 SUDYA = os.path.join(PAPKA, 'sudya.jsonl')
 SUDYA_VYKL = os.path.join(PAPKA, 'sudya-vykl')                # `touch` — судью не звать
 SUDYA_ZADANIE = (
-    'You are a strict judge of an AI co-host line for a live VR stream (the streamer plays; the co-host speaks to the '
+    'You are the brainstorm partner and strict judge of an AI co-host line for a live VR stream (the streamer plays; '
+    'the co-host speaks to the '
     'viewers in English). You get the LINE and the INPUT the co-host had (what the camera/game summary showed, chat, '
     'topic). Reject the line if ANY is true: (1) it asks the streamer a question or asks him to do/answer something '
     'during play; (2) it states things not supported by the INPUT (his room, his body, his feelings, events, numbers, '
@@ -1604,15 +1605,18 @@ SUDYA_ZADANIE = (
     'shot", "you got this"); (4) it has no single specific, true, interesting thought; (5) if "in_round" is true (he is '
     'fighting right now): anything but one short energetic line for the viewers — no advice to him, no question. Be '
     'strict: silence is better '
-    'than a weak line. Answer ONLY JSON: {"ok": true|false, "pochemu": "по-русски, до 12 слов"}.')
+    'than a weak line. As a partner: if the idea has a true, specific core, rewrite it sharper — same fact, fewer words, '
+    'stronger image, obeying every rule above (English, for the viewers). Answer ONLY JSON: {"ok": true|false, "pochemu": "по-русски, до 12 '
+    'слов", "luchshe": "the sharper line, or empty if the core is weak"}.')
 
 
 def sudya(rech, o, tema='', raund=False):
     """06.11 (сессия 05.11: вопросы в бою, банальности, выдумки «линия в твоей комнате»; идея №46 «детектор банальности»):
-    строгий судья реплики — Groq (лимит Claude не тратит). (True, '') — пусть звучит; (False, почему) — молчит.
-    Судья не ответил — пусть звучит (как раньше)."""
+    судья-напарник (07.11, Александр: «не страховка, а анализирует её ответ, как брейншторм-компаньон») — Groq (лимит
+    Claude не тратит): (ok, почему, сильнее) — сильнее непусто: та же мысль острее, звучит она; иначе ok — своя, нет —
+    молчит. Судья не ответил — пусть звучит (как раньше)."""
     if raund and len(rech.split()) > MAX_SLOV_BOY + 2:
-        return False, 'в раунде — длинно'                    # идёт бой: только короткая реплика
+        return False, 'в раунде — длинно', ''                # идёт бой: только короткая реплика
     vhod = {'line': rech, 'topic': tema, 'in_round': raund, 'co_host_analysis': str(o.get('analiz', ''))[:600],
             'game_summary': [l[-200:] for l in obzor_stroki(2)], 'chat': hvost(CHAT, 5)}
     try:
@@ -1630,14 +1634,17 @@ def sudya(rech, o, tema='', raund=False):
         log('судья:', type(e).__name__, str(e)[:60])
         v = None
     if not isinstance(v, dict) or 'ok' not in v:
-        return True, ''
+        return True, '', ''
     try:
         with open(SUDYA, 'a') as f:
             f.write(json.dumps({'t': round(time.time()), 'ok': bool(v['ok']), 'pochemu': str(v.get('pochemu', ''))[:120],
-                                'rech': rech[:300]}, ensure_ascii=False) + '\n')
+                                'rech': rech[:300], 'luchshe': str(v.get('luchshe') or '')[:300]}, ensure_ascii=False) + '\n')
     except OSError:
         pass
-    return bool(v['ok']), str(v.get('pochemu', ''))[:120]
+    luchshe = _chistaya_stroka(v.get('luchshe'), 300, 12)
+    if luchshe and (KIRILL.search(luchshe) or '?' in luchshe or (raund and len(luchshe.split()) > MAX_SLOV_BOY + 2)):
+        luchshe = ''                                          # предложение напарника — по тем же правилам
+    return bool(v['ok']), str(v.get('pochemu', ''))[:120], luchshe
 
 
 def podgotovit(o, d, rech, pam, pusto, final, tranzitor=False):
@@ -2043,8 +2050,11 @@ def cikl(nemoy=False, seychas=False, tranzitor=None):
         else:
             rech, d = rech2, d2
     if d != 'molchu' and rech and not nemoy and d == 'kozyr' and not os.path.exists(SUDYA_VYKL):
-        ok, pochemu = sudya(rech, o, tema, v_raunde())        # 06.11: строгий судья — слабое не звучит
-        if not ok:
+        ok, pochemu, luchshe = sudya(rech, o, tema, v_raunde())   # 07.11: судья-напарник — разбирает и предлагает сильнее
+        if luchshe:
+            sdelano.append('напарник: %s → %s' % (rech[:40], luchshe[:40]))
+            rech = luchshe                                    # та же мысль, сказанная сильнее
+        elif not ok:
             sdelano.append('судья: %s — промолчала: %s' % (pochemu, rech[:50]))
             OTKAZ[0] = 'судья отверг прошлую: %s. Нужна одна конкретная верная мысль из данных, без вопросов ему' % pochemu
             d = 'molchu'
