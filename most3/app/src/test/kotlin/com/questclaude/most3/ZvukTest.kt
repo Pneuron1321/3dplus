@@ -45,3 +45,67 @@ class ZvukTest {
         assertEquals("\"а\\\"б\\n\\u0001\"", Json.str("а\"б\n\u0001"))
     }
 }
+
+/** 3.2.1: «шаги» и «ровно» — что именно они делают со звуком и что направление (разница ушей) не трогают. */
+class ObrabotkaTest {
+    private fun sinus(hz: Int, f: Double, ampL: Double, ampR: Double, sek: Double = 0.5): ByteArray {
+        val n = (hz * sek).toInt(); val b = ByteArray(n * 4)
+        for (i in 0 until n) {
+            val s = Math.sin(2 * Math.PI * f * i / hz)
+            val l = Math.round(s * ampL * 32767).toInt(); val r = Math.round(s * ampR * 32767).toInt()
+            b[4 * i] = l.toByte(); b[4 * i + 1] = (l shr 8).toByte(); b[4 * i + 2] = r.toByte(); b[4 * i + 3] = (r shr 8).toByte()
+        }
+        return b
+    }
+    /** Среднеквадратичный уровень канала во второй половине (фильтры и огибающая уже установились), дБ. */
+    private fun db(b: ByteArray, kanal: Int): Double {
+        var s = 0.0; var n = 0; var i = b.size / 8 * 4
+        while (i + 3 < b.size) {
+            val v = ((b[i + 2 * kanal].toInt() and 0xff) or (b[i + 2 * kanal + 1].toInt() shl 8)).toShort() / 32768.0
+            s += v * v; n++; i += 4
+        }
+        return 10 * Math.log10(s / n)
+    }
+    private fun raznica(f: Double, amp: Double, nastroit: (Obrabotka) -> Unit): Double {
+        val b = sinus(48000, f, amp, amp); val do_ = db(b, 0)
+        Obrabotka(48000, 2).also(nastroit).obrabotat(b, b.size)
+        return db(b, 0) - do_
+    }
+
+    @Test fun vyklyuchenoNeTrogaet() {
+        val b = sinus(48000, 1000.0, 0.3, 0.1); val kopiya = b.copyOf()
+        Obrabotka(48000, 2).obrabotat(b, b.size)
+        org.junit.Assert.assertArrayEquals(kopiya, b)
+    }
+
+    @Test fun shagiGromcheGulTishe() {
+        val shagi = raznica(3000.0, 0.05) { it.shagi = true }
+        val gul = raznica(50.0, 0.05) { it.shagi = true }
+        org.junit.Assert.assertTrue("полоса шагов $shagi дБ", shagi > 3.0 && shagi < 5.0)      // +7 дБ полосы −3 дБ запаса
+        org.junit.Assert.assertTrue("гул $gul дБ", gul < -8.0 && gul > -10.0)                    // −6 дБ полки −3 дБ запаса
+    }
+
+    @Test fun rovnoTihoeGromcheGromkoeSzhato() {
+        val tiho = raznica(1000.0, 0.003) { it.rovno = true }                                    // −50 дБ: только подъём
+        val gromko = raznica(1000.0, 0.9) { it.rovno = true }                                    // −1 дБ: сжато
+        org.junit.Assert.assertTrue("тихое $tiho дБ", tiho > 8.0 && tiho < 10.0)
+        org.junit.Assert.assertTrue("громкое $gromko дБ", gromko < -8.0)
+        assertEquals(9.0, Obrabotka(48000, 2).usilenieDb(-60.0), 0.001)
+        assertEquals(-30.0 + 30.0 / 3 + 9.0, Obrabotka(48000, 2).usilenieDb(0.0), 0.001)         // 0 дБ → −11 дБ
+    }
+
+    @Test fun napravlenieSohranyaetsya() {
+        // звук справа тише на 12 дБ, чем слева: после любой обработки разница ушей та же
+        for (nastroit in listOf<(Obrabotka) -> Unit>({ it.shagi = true }, { it.rovno = true }, { it.shagi = true; it.rovno = true })) {
+            val b = sinus(48000, 2500.0, 0.4, 0.1); val do_ = db(b, 0) - db(b, 1)
+            Obrabotka(48000, 2).also(nastroit).obrabotat(b, b.size)
+            assertEquals(do_, db(b, 0) - db(b, 1), 0.1)
+        }
+    }
+
+    @Test fun neRezhetPiki() {
+        val b = sinus(48000, 3000.0, 0.95, 0.95)
+        Obrabotka(48000, 2).also { it.shagi = true; it.rovno = true }.obrabotat(b, b.size)
+        org.junit.Assert.assertTrue(Pcm.pik(b.copyOfRange(b.size / 2, b.size), b.size / 2) < 32767)
+    }
+}

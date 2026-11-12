@@ -173,7 +173,7 @@ def iz_openverse(gruppy, temp, n):
          'page': str(random.randint(1, 3) if gruppy else random.randint(1, 10))}
     try:
         d = poluchit_json(OV_URL + '?' + urllib.parse.urlencode(q), 40)
-    except Exception as e:
+    except Exception:
         if q['page'] != '1':                                          # страниц меньше, чем взяли наугад
             try:
                 q['page'] = '1'

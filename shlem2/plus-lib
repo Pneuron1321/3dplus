@@ -914,6 +914,39 @@ def most3(a):
     if c == 'zvuk':
         a2 = a[1] if len(a) > 1 else ''
         potolok = False
+        if a2 in ('shagi', 'rovno', 'bystro'):
+            # 3.2.1 (Александр 12.11): режимы звука для ушей одним словом; запись и эфир получают звук как есть
+            a3 = a[2] if len(a) > 2 else ''
+            if a3 not in ('vkl', 'vykl'):
+                return 1, ['most3 zvuk %s vkl|vykl.' % a2], None
+            r = zapros(U, '/zvuk?%s=%s' % (a2, '1' if a3 == 'vkl' else '0'), 8)
+            if r is None:
+                return 1, [MOST3_MOLCHIT], None
+            d = razobrat(r[1]) or {}
+            if a2 not in d:
+                return 1, ['Мост 3 не знает этот режим: нужен Мост 3 версии 3.2.1 или новее.'], None
+            chto = {'shagi': 'режим «шаги» (шаги и перезарядка громче, гул тише)',
+                    'rovno': 'выравнивание громкости (тихое громче, громкое сжато)',
+                    'bystro': 'быстрый звук (запас 40 мс вместо 120)'}[a2]
+            hvost = ''
+            if a2 == 'bystro':
+                hvost = ' Сейчас в очереди шлема %s мс, буфер %s мс.' % (d.get('ochered_ms', '?'), d.get('bufer_ms', '?'))
+            return 0, ['Мост 3: %s — %s.%s' % (chto, 'включено' if d.get(a2) else 'выключено', hvost)], None
+        if a2 == 'prostranstvo':
+            # 3.2.1 (Александр 11.11): звук игры от окна (как было) или прямо в уши — объём PS5 без привязки к окну
+            a3 = a[2] if len(a) > 2 else ''
+            if a3 not in ('okno', 'pryamo'):
+                return 1, ['most3 zvuk prostranstvo pryamo — звук игры прямо в уши; okno — от окна, как было.'], None
+            r = zapros(U, '/zvuk?prostranstvo=' + a3, 8)
+            if r is None:
+                return 1, [MOST3_MOLCHIT], None
+            d = razobrat(r[1]) or {}
+            if d.get('prostranstvo') != a3:
+                return 1, ['Мост 3 не переключил звук: нужен Мост 3 версии 3.2.1 или новее.'], None
+            if a3 == 'okno':
+                return 0, ['Мост 3: звук игры — от окна, как было.'], None
+            return 0, ['Мост 3: звук игры — прямо в уши (система: %s). Проверь на слух: передвинь окно — звук '
+                       'не должен уходить за ним.' % (d.get('pryamo_otvet') or 'ответа нет')], None
         if a2 in ('vkl', 'vykl'):
             put = '/zvuk?vkl=' + ('1' if a2 == 'vkl' else '0')
         elif a2.rstrip('%').isdigit():
@@ -921,7 +954,7 @@ def most3(a):
             if int(a2.rstrip('%')) > 150:
                 potolok = True
         else:
-            return 1, ['most3 zvuk 80 — громкость игры в %; most3 zvuk vkl|vykl.'], None
+            return 1, ['most3 zvuk 80 — громкость игры в %; most3 zvuk vkl|vykl; most3 zvuk shagi|rovno|bystro vkl|vykl; most3 zvuk prostranstvo pryamo|okno.'], None
         r = zapros(U, put, 5)
         if r is None:
             return 1, [MOST3_MOLCHIT], None

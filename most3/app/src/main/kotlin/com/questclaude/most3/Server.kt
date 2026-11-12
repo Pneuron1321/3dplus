@@ -55,6 +55,10 @@ class Server(private val port: Int) {
         "/zvuk" -> {
             q["vkl"]?.let { Most.zvuk(it == "1" || it == "vkl") }
             q["g"]?.trimEnd('%')?.toFloatOrNull()?.let { Most.gromkost = it / 100f }
+            q["shagi"]?.let { Most.zvukShagi = it == "1" || it == "vkl" }
+            q["rovno"]?.let { Most.zvukRovno = it == "1" || it == "vkl" }
+            q["bystro"]?.let { Most.bystro(it == "1" || it == "vkl") }
+            q["prostranstvo"]?.let { if (it == "pryamo" || it == "okno") Most.prostranstvo(it == "pryamo") }
             200 to (Most.zvuk?.status() ?: "{\"idyot\":false,\"vkl\":${Most.zvukVkl}}")
         }
         "/karta/ruchki" -> 200 to ruchki(q)

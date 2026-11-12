@@ -24,7 +24,25 @@ import java.nio.ByteOrder
  * воровал бы передачи видео у UsbRequest, а видео — у звука.
  */
 class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
-           private val alt0: UsbInterface, private val alt1: UsbInterface) {
+           private val alt0: UsbInterface, private val alt1: UsbInterface,
+           /** 3.2.1 (Александр 11.11: «звук идёт от окна, а нужен изнутри игры»): true — просим систему не ставить
+            *  звук в точку окна (стерео прямо в уши: в нём уже лежит объём PS5). false — как было. */
+           private val pryamo: Boolean = false,
+           /** 3.2.1 «быстрый звук»: буфер и запас очереди меньше (40 мс вместо 120) — звук ближе к картинке,
+            *  но при заминке шлема возможны щелчки. */
+           private val bystro: Boolean = false) {
+    /** Режимы «шаги» и «ровно» — только для ушей (запись и эфир получают звук как есть). */
+    @Volatile var shagi = false
+        set(v) { field = v; obrabotka?.shagi = v }
+    @Volatile var rovno = false
+        set(v) { field = v; obrabotka?.rovno = v }
+    private var obrabotka: Obrabotka? = null
+    /** Сколько звука ждёт в очереди шлема (мс, среднее за ~0,5 с) и размер буфера дорожки (мс) — замер задержки. */
+    @Volatile var ocheredMs = 0; private set
+    @Volatile var buferMs = 0; private set
+    private val zapasMs get() = if (bystro) 40 else 120
+    /** Что ответила система на просьбу «без пространственной обработки»: null — не просили. */
+    @Volatile var pryamoOtvet: String? = null; private set
     @Volatile var rabotaet = false; private set
     @Volatile var oshibka: String? = null; private set
     @Volatile var paketov = 0L; private set
@@ -54,12 +72,16 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
 
         val kanaly = if (op.kanaly == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
         val min = AudioTrack.getMinBufferSize(hz, kanaly, AudioFormat.ENCODING_PCM_16BIT)
+        val atr = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+        if (pryamo) pryamoOtvet = if (android.os.Build.VERSION.SDK_INT >= 32) try {
+            atr.setSpatializationBehavior(AudioAttributes.SPATIALIZATION_BEHAVIOR_NEVER); "просьба принята"
+        } catch (e: Throwable) { "система отказала: ${e.javaClass.simpleName}" } else "Android старше 12L — не умеет"
         val t = try { AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+            .setAudioAttributes(atr.build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(hz).setChannelMask(kanaly)
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-            .setBufferSizeInBytes(maxOf(min * 2, hz * op.kanaly * 2 / 10))       // ≥ 100 мс
+            .setBufferSizeInBytes(if (bystro) min else maxOf(min * 2, hz * op.kanaly * 2 / 10))   // обычно ≥ 100 мс
             .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             .build() } catch (e: Exception) {
             oshibka = "AudioTrack не создался ($hz Гц): ${e.message ?: e.javaClass.simpleName}"
@@ -67,6 +89,8 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
             c.releaseInterface(alt0); return false
         }
         t.setVolume(gromkost.coerceAtMost(1f)); t.play(); trek = t
+        buferMs = t.bufferSizeInFrames * 1000 / hz
+        obrabotka = Obrabotka(hz, op.kanaly).also { it.shagi = shagi; it.rovno = rovno }
 
         val fd = c.fileDescriptor
         repeat(URBOV) {
@@ -93,7 +117,7 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
         val vyhod = ByteArray(op.paket * pakety)
         val ref = PointerByReference()
         var napisano = 0L                                  // кадров отдано в AudioTrack
-        var pikOkno = 0; var pikSchet = 0
+        var pikOkno = 0; var pikSchet = 0; var ochSumma = 0L
         while (rabotaet) {
             if (LibC.I.ioctl(fd, NativeLong(Urb.REAPURB), ref.pointer) != 0) {
                 if (rabotaet) oshibka = "usbfs: карта отключилась (errno ${Native.getLastError()})"
@@ -120,10 +144,12 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
             if (n == 0) continue
             naPcm?.invoke(vyhod, n, System.nanoTime() / 1000)
             pikOkno = maxOf(pikOkno, Pcm.pik(vyhod, n))
-            if (++pikSchet >= 50) { pik = pikOkno; pikOkno = 0; pikSchet = 0 }
-            // Часы карты и шлема расходятся: если в AudioTrack накопилось больше 120 мс — этот кусок выбросить.
+            // Часы карты и шлема расходятся: если в AudioTrack накопилось больше запаса — этот кусок выбросить.
             val vOcheredi = napisano - (t.playbackHeadPosition.toLong() and 0xffffffffL)
-            if (vOcheredi > hz * 120 / 1000) { sbrosheno += n; continue }
+            ochSumma += vOcheredi
+            if (++pikSchet >= 50) { pik = pikOkno; pikOkno = 0; ocheredMs = (ochSumma * 1000 / hz / pikSchet).toInt(); ochSumma = 0; pikSchet = 0 }
+            if (vOcheredi > hz * zapasMs / 1000) { sbrosheno += n; continue }
+            obrabotka?.obrabotat(vyhod, n)                 // после записи игры: клип и эфир — без обработки
             val w = t.write(vyhod, 0, n, AudioTrack.WRITE_NON_BLOCKING)
             if (w > 0) napisano += w / kadrBajt
             if (w < n) sbrosheno += (n - maxOf(w, 0))
@@ -155,6 +181,8 @@ class Zvuk(private val c: UsbDeviceConnection, private val op: UacOpisanie,
     fun status(): String =
         "{\"idyot\":$rabotaet,\"hz\":${op.chastoty.firstOrNull() ?: 0},\"kanaly\":${op.kanaly},\"paketov\":$paketov," +
         "\"plohih\":$plohih,\"sbrosheno\":$sbrosheno,\"pik_db\":${Pcm.db(pik)},\"gromkost\":$gromkost," +
+        "\"shagi\":$shagi,\"rovno\":$rovno,\"bystro\":$bystro,\"ochered_ms\":$ocheredMs,\"bufer_ms\":$buferMs," +
+        "\"prostranstvo\":\"${if (pryamo) "pryamo" else "okno"}\",\"pryamo_otvet\":${pryamoOtvet?.let { Json.str(it) } ?: "null"}," +
         "\"oshibka\":${oshibka?.let { Json.str(it) } ?: "null"}}"
 
     private object LibC { val I get() = Usbfs.c }

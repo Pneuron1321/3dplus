@@ -143,7 +143,7 @@ object Most {
         val um = app?.getSystemService(UsbManager::class.java) ?: return
         val c2 = um.openDevice(k.ustr) ?: run { zvukOshibka = "второе соединение с картой не открылось"; return }
         if (z.bajt != 2 || z.kanaly !in 1..2) { c2.close(); zvukOshibka = "звук карты ${z.bajt * 8} бит, ${z.kanaly} к. — пока не умею"; return }
-        val zz = Zvuk(c2, z, a0, a1).also { it.gromkost = gromkost; it.naPcm = { b, n, t -> klip?.pcm(b, n, t) } }
+        val zz = Zvuk(c2, z, a0, a1, zvukPryamo, zvukBystro).also { it.shagi = zvukShagi; it.rovno = zvukRovno; it.gromkost = gromkost; it.naPcm = { b, n, t -> klip?.pcm(b, n, t) } }
         if (zz.start()) { zvuk = zz; zvukOshibka = null } else { zvukOshibka = zz.oshibka; zz.stop() }   // stop закроет своё соединение
     }
 
@@ -175,6 +175,36 @@ object Most {
         return KlipMp4.sohranit(c, k.zapis, sek)
     }
 
+    /** 3.2.1: звук игры прямо в уши (true) или как было — от окна (false). Меняем — звук встаёт заново. */
+    @Volatile var zvukPryamo = false; private set
+    @Synchronized fun prostranstvo(pryamo: Boolean) {
+        if (zvukPryamo == pryamo) return
+        zvukPryamo = pryamo; sohranit()
+        if (zvuk != null) { zvuk?.stop(); zvuk = null; if (zvukVkl && video?.rabotaet == true) vklZvuk() }
+    }
+
+    /** 3.2.1: режимы звука для ушей. «Шаги» и «ровно» включаются на ходу; «быстрый» — звук встаёт заново. */
+    @Volatile var zvukShagi = false
+        set(v) { field = v; zvuk?.shagi = v; sohranit() }
+    @Volatile var zvukRovno = false
+        set(v) { field = v; zvuk?.rovno = v; sohranit() }
+    @Volatile var zvukBystro = false; private set
+    @Synchronized fun bystro(v: Boolean) {
+        if (zvukBystro == v) return
+        zvukBystro = v; sohranit()
+        if (zvuk != null) { zvuk?.stop(); zvuk = null; if (zvukVkl && video?.rabotaet == true) vklZvuk() }
+    }
+
+    /** Есть ли в шлеме системная пространственная обработка Android и включена ли — для самоотчёта. */
+    private fun spatializer(): String = try {
+        if (android.os.Build.VERSION.SDK_INT < 32) "нет (Android старше 12L)" else {
+            val s = app!!.getSystemService(android.media.AudioManager::class.java).spatializer
+            "уровень ${s.immersiveAudioLevel}, доступна ${if (s.isAvailable) "да" else "нет"}, включена ${if (s.isEnabled) "да" else "нет"}"
+        }
+    } catch (e: Throwable) { "не узнать (${e.javaClass.simpleName})" }
+
+    private fun da(v: Boolean) = if (v) "вкл" else "выкл"
+
     @Synchronized fun zvuk(vkl: Boolean) {
         zvukVkl = vkl; sohranit()
         if (!vkl) { zvuk?.stop(); zvuk = null } else if (zvuk == null && video?.rabotaet == true) vklZvuk()
@@ -200,6 +230,8 @@ object Most {
         k.op.zvuk?.let { append("Звук: интерфейс ${it.interfejs} alt ${it.alt}, точка 0x${it.tochka.toString(16)}, ${it.kanaly} к., ${it.bajt * 8} бит, ${it.chastoty} Гц, пакет ${it.paket}\n") }
         append("Режимы:\n"); k.op.rezhimy.forEachIndexed { i, r -> append("  ${i + 1}. ${r.opisanie()} (формат ${r.formatIndex}, кадр ${r.frameIndex})\n") }
         append("Профиль: ${profil.nadpis}\n")
+        append("Звук в ушах: ${if (zvukPryamo) "прямо (${zvuk?.pryamoOtvet ?: "звук не идёт"})" else "от окна (как было)"}; пространственная обработка Android: ${spatializer()}\n")
+        append("Режимы звука: шаги ${da(zvukShagi)}, ровно ${da(zvukRovno)}, быстрый ${da(zvukBystro)}; в очереди шлема ${zvuk?.ocheredMs ?: 0} мс, буфер ${zvuk?.buferMs ?: 0} мс\n")
         // шлем 22.10: «Выбран» показывал выбор по умолчанию, а не то, что идёт, — путало
         append("Сейчас идёт: ${video?.takeIf { it.rabotaet }?.rezhim?.opisanie() ?: "ничего"}" +
             (ruchnoj?.let { " (вручную, до смены профиля)" } ?: "") + "\n")
@@ -298,6 +330,10 @@ object Most {
             zvukVkl = z.getOrNull(0) != "0"
             klipVkl = z.getOrNull(2) != "0"                       // до громкости: её сеттер сохраняет файл
             Profil.po(z.getOrNull(3))?.let { profil = it }
+            zvukPryamo = z.getOrNull(4) == "pryamo"
+            zvukBystro = z.getOrNull(7) == "1"                    // до «шагов»: их сеттеры сохраняют файл
+            val sh = z.getOrNull(5) == "1"; val rv = z.getOrNull(6) == "1"
+            zvukShagi = sh; zvukRovno = rv
             z.getOrNull(1)?.toFloatOrNull()?.let { gromkost = it }
         } catch (e: Exception) { }
     }
@@ -305,12 +341,12 @@ object Most {
     private fun sohranit() {
         val d = dir ?: return
         try { File(d, "kartinka").writeText(nastrojki.vStroku()) } catch (e: Exception) { }
-        try { File(d, "zvuk").writeText("${if (zvukVkl) 1 else 0} $gromkost ${if (klipVkl) 1 else 0} ${profil.imya}") } catch (e: Exception) { }
+        try { File(d, "zvuk").writeText("${if (zvukVkl) 1 else 0} $gromkost ${if (klipVkl) 1 else 0} ${profil.imya} ${if (zvukPryamo) "pryamo" else "okno"} ${if (zvukShagi) 1 else 0} ${if (zvukRovno) 1 else 0} ${if (zvukBystro) 1 else 0}") } catch (e: Exception) { }
     }
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.2.0"
+    const val VERSIYA = "3.2.1"
 }
 
 /**

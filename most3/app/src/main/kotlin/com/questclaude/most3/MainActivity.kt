@@ -149,6 +149,16 @@ class MainActivity : Activity() {
         addView(knopka("Звук −") { Most.gromkost = Most.gromkost - 0.1f })
         addView(knopka("Звук +") { Most.gromkost = Most.gromkost + 0.1f })
         addView(knopka("Звук вкл/выкл") { val v = !Most.zvukVkl; Most.vFone { Most.zvuk(v) } })
+        // 3.2.1: режимы звука одним нажатием; на кнопке — что сейчас
+        fun perekl(imya: String, vkl: () -> Boolean, f: (Boolean) -> Unit) {
+            lateinit var k: Button
+            k = knopka("$imya: ${if (vkl()) "вкл" else "выкл"}") { val v = !vkl(); k.text = "$imya: ${if (v) "вкл" else "выкл"}"; f(v) }
+            addView(k)
+        }
+        perekl("Шаги", { Most.zvukShagi }) { Most.zvukShagi = it }
+        perekl("Ровно", { Most.zvukRovno }) { Most.zvukRovno = it }
+        perekl("Быстрый звук", { Most.zvukBystro }) { v -> Most.vFone { Most.bystro(v) } }
+        perekl("Звук в уши", { Most.zvukPryamo }) { v -> Most.vFone { Most.prostranstvo(v) } }
         addView(knopka("Клип 2,5 мин") { stroka.text = "Сохраняю клип игры…"; Most.vFone { val o = Most.sohranitKlip(150); ui.post { stroka.text = o } } })
         addView(knopka("Режим ▸") {
             val vse = Profil.values(); val sl = vse[(Most.profil.ordinal + 1) % vse.size]
