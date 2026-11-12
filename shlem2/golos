@@ -1340,8 +1340,20 @@ class Golos:
             log('темп: пропускать нечего')
             return
         uid = k.uid
+        ved = lambda x: getattr(x, 'vid', '') in ('ved', 'vedu') or getattr(x, 'golos', None) == VOICE_VED
+        igraet = getattr(self.igrok, 'kusok', None)
+        # «плюс темп», пока звучит или замолчала из-за его слов (ждёт тишины, чтобы досказать) соведущая — пропускаем её
+        if (igraet is not None and ved(igraet)) or (igraet is None and (self.ved_ostatok or self.ved_zhdu)):
+            k = igraet or k
         self.stop_igrok()
-        self.vybrosit(lambda x: x.uid == uid)
+        if ved(k) or (igraet is None and (self.ved_ostatok or self.ved_zhdu)):
+            # 12.11 (Александр: «пропустить соведущую плюс темп не получается»): её реплика бывает несколькими
+            # файлами — пропускаем всю, не одно предложение
+            self.vybrosit(lambda x: x.uid == uid or ved(x))
+            self.ved_ostatok = self.ved_zhdu = None
+            log('темп: соведущую пропустил')
+        else:
+            self.vybrosit(lambda x: x.uid == uid)
         self.srez_plus = self.perebil_zhdu = 0.0
         self.plus_ostatok = None
         self.vnesh, self.dl = 0.0, time.time()             # и пауза снята: следующий — без ожидания

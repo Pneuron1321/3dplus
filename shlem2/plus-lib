@@ -1137,6 +1137,8 @@ def vid(a):
     (как до 2.7.0); мост запоминает. vid — какой сейчас."""
     a = list(a)
     U = os.environ.get('VIZOR_URL') or APP
+    if a and a[0] in ('plus', 'fon'):
+        return vid_plus_fon(U, a)
     if not a or a[0] in ('status', 's') or a == ['stil']:
         put = '/efir/stil'
     elif a[0] == 'stil' and len(a) > 1 and a[1] in ('viz', 'staryj'):
@@ -1168,6 +1170,54 @@ def vid(a):
     if d.get('stil') == 'staryj':
         return 0, ['Стиль эфира — старый, как до 2.7.0 (мост запомнил). Вернуть визор — vid stil viz.'], None
     return 1, ['Стиль эфира: непонятный ответ моста.'], None
+
+
+SDVIG = {'vverh': ('dy', -5), 'vniz': ('dy', 5), 'vlevo': ('dx', -5), 'vpravo': ('dx', 5)}
+
+
+def vid_plus_fon(U, a):
+    """2.8.7 (Александр 12.11): vid plus pn|ln|pv|lv|domoy|vverh|vniz|vlevo|vpravo|X Y — где Плюс в кадре (X, Y — % кадра
+    от левого верхнего угла); vid fon zel|sin|vykl [сила 0,05–0,5] — вырезать зелёный/синий фон камеры."""
+    if a[0] == 'plus':
+        b = a[1] if len(a) > 1 else ''
+        if b in ('pn', 'ln', 'pv', 'lv'):
+            q = 'ugol=' + b
+        elif b == 'domoy':
+            q = 'domoy=1'
+        elif b in SDVIG:
+            q = '%s=%d' % SDVIG[b]
+        elif len(a) == 3 and all(re.fullmatch(r'\d+(?:[.,]\d+)?', x) for x in a[1:]):
+            q = 'x=%s&y=%s' % (a[1].replace(',', '.'), a[2].replace(',', '.'))
+        elif not b:
+            q = ''
+        else:
+            return 1, ['vid plus pn — в правый нижний угол (ln, pv, lv — другие углы); vid plus vverh|vniz|vlevo|vpravo — '
+                       'сдвиг на 5 %; vid plus 80 60 — левый верхний угол Плюса в 80 % ширины и 60 % высоты; '
+                       'vid plus domoy — на своё место.'], None
+        r = zapros(U, '/efir/plus' + ('?' + q if q else ''), 5)
+    else:
+        b = a[1] if len(a) > 1 else ''
+        if b not in ('zel', 'sin', 'vykl', ''):
+            return 1, ['vid fon zel — вырезать зелёный фон камеры (sin — синий); vid fon zel 0.25 — смелее (0,05–0,5, '
+                       'обычно 0,15); vid fon vykl — выключить.'], None
+        q = ('v=' + ('net' if b == 'vykl' else b)) if b else ''
+        if len(a) > 2 and re.fullmatch(r'\d*[.,]?\d+', a[2]):
+            q += '&sila=' + a[2].replace(',', '.')
+        r = zapros(U, '/efir/fon' + ('?' + q if q else ''), 5)
+    if r is None:
+        return 1, [MOLCHIT], None
+    if r[0] == 404:
+        return 1, ['Нужен мост 2.8.7 (обнови приложение).'], None
+    d = razobrat(r[1]) or {}
+    if d.get('oshibka'):
+        return 1, [d['oshibka']], None
+    if a[0] == 'plus':
+        return 0, ['Плюс в кадре: %s (мост запомнил).' % ('на своём месте, внизу слева' if d.get('svoyo') else
+                   'левый верхний угол в %s %% ширины и %s %% высоты' % (round(d.get('x', 0)), round(d.get('y', 0))))], None
+    if d.get('fon') == 'net':
+        return 0, ['Фон камеры не вырезаю (мост запомнил).'], None
+    return 0, ['Вырезаю %s фон камеры, сила %s (мост запомнил). Остаются пятна фона — vid fon %s 0.25; режет тебя — '
+               'vid fon %s 0.1.' % ('зелёный' if d.get('fon') == 'zel' else 'синий', d.get('sila'), d.get('fon'), d.get('fon'))], None
 
 
 INSTRUMENTY = {'kadr': kadr, 'efir': efir, 'kamera': kamera, 'karta': karta, 'most3': most3, 'klipy': klipy}

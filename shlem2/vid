@@ -3,6 +3,8 @@
 #   vid stil viz     — «Визор» (по умолчанию): золотые скобы по углам, карточки графит с золотом,
 #                      шрифты Unbounded и Manrope, камера в золотых скобах
 #   vid stil staryj  — старые плашки, как до 2.7.0
+#   vid plus pn|ln|pv|lv|vverh|vniz|vlevo|vpravo|X Y|domoy — где Плюс в кадре (мост 2.8.7)
+#   vid fon zel|sin|vykl [0.05–0.5] — вырезать зелёный/синий фон камеры
 #   vid              — какой сейчас
 # Логика — в plus-lib (одна на скрипт и plus-mcp).
 L=${0%/*}/plus-lib; [ -f "$L" ] || L=/usr/local/bin/plus-lib

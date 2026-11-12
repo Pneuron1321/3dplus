@@ -819,6 +819,131 @@ def schet_tekst(n=10):
     return out
 
 
+# ---------- переводчик чата (12.11, Александр: «сообщения ещё и переводились мне в ухо; я говорю, что ответить, —
+# уходит на язык отправителя; не отвечаю сам — пусть агент отвечает, как сейчас») ----------
+GROQ_URL = E('KANAL_GROQ', 'https://api.groq.com/openai/v1/chat/completions')
+GROQ_KEY = E('KANAL_GROQ_KEY', '/root/.groq-key')
+GROQ_MODELI = E('KANAL_GROQ_MODELI', 'openai/gpt-oss-120b,openai/gpt-oss-20b').split(',')
+OTVET_F = E('KANAL_OTVET', '/tmp/kanal.otvet')            # уши кладут: «плюс, ответь …»
+OTVET_ZHDET = E('KANAL_OTVET_ZHDET', '/tmp/kanal.otvet-zhdet')
+OTVET_SEK = 40            # столько ждём его ответа, потом сообщение — агенту
+PEREVOD_RAZ = 15          # в ухо — не чаще раза в 15 с (шквал не заливает ухо)
+PEREVOD_VYKL = os.path.join(PAPKA, 'perevod-vykl')
+ZADANIE_YAZYK = (
+    'Сообщение из чата стрима. Определи язык. Если не русский — переведи на русский коротко и точно, как сказал бы '
+    'человек, без пояснений. Ответь только JSON: {"yazyk": "код ISO 639-1", "nazvanie": "язык по-русски, в '
+    'именительном падеже", "perevod": "перевод на русский или пусто, если сообщение по-русски"}.')
+ZADANIE_NA_YAZYK = (
+    'Стример отвечает зрителю. Переведи его ответ с русского на язык зрителя (код дан) — живо, разговорно, коротко, '
+    'смысл не меняй, ничего не добавляй, без кавычек и без обращения по имени стримера. Ответь только JSON: '
+    '{"tekst": "перевод"}.')
+
+
+def groq(zadanie, tekst, tokenov=300):
+    """Groq: dict из JSON ответа или None (ключ — /root/.groq-key, не печатаем). Лимит Claude не тратит."""
+    key = prochest(GROQ_KEY)
+    if not key:
+        return None
+    for model in GROQ_MODELI:
+        body = {'model': model.strip(), 'temperature': 0.2, 'max_completion_tokens': tokenov + 400,
+                'messages': [{'role': 'system', 'content': zadanie}, {'role': 'user', 'content': tekst}]}
+        if 'gpt-oss' in model:
+            body['reasoning_effort'] = 'low'
+        req = urllib.request.Request(GROQ_URL, data=json.dumps(body).encode(), headers={
+            'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'User-Agent': 'plus-kanal'})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                d = json.loads(r.read().decode('utf-8'))
+            m = re.search(r'\{.*\}', d['choices'][0]['message'].get('content') or '', re.S)
+            if m:
+                return json.loads(m.group(0))
+        except Exception as e:
+            log('Groq', model, type(e).__name__)
+    return None
+
+
+PLOSHCHADKA = {'tw': 'Twitch', 'kick': 'Kick', 'yt': 'YouTube'}
+
+
+class Perevodchik:
+    """Сообщение не по-русски → перевод в ухо и ожидание его ответа («плюс, ответь …»). Ответил — перевод на язык
+    зрителя уходит на его площадку; молчит OTVET_SEK — сообщение отдаём агенту (как было)."""
+    def __init__(self):
+        self.zhdut = []            # [(t, сообщение, yazyk)] — ждут его ответа
+        self.posl_uho = 0.0
+        self.otvet_t = vremya_f(OTVET_F)
+
+    def novye(self, soob, now):
+        """Возвращает сообщения, которые агенту можно брать сразу (русские и непереведённые)."""
+        if os.path.exists(PEREVOD_VYKL):
+            return soob
+        srazu = []
+        for m in soob:
+            o = groq(ZADANIE_YAZYK, m['tekst']) or {}
+            yaz = str(o.get('yazyk') or 'ru').lower()[:5]
+            if yaz == 'ru' or not o.get('perevod'):
+                srazu.append(m)
+                continue
+            if now - self.posl_uho < PEREVOD_RAZ * SEK and self.zhdut:
+                srazu.append(m)               # шквал: в ухо не помещается — агенту, как раньше
+                continue
+            self.posl_uho = now
+            m = dict(m, yazyk=yaz)
+            self.zhdut = [(now, m)] + self.zhdut[:2]
+            v_uho('%s, %s, %s: %s' % (PLOSHCHADKA.get(m['pl'], 'чат'), m['kto'], str(o.get('nazvanie') or yaz)[:20],
+                                      str(o['perevod'])[:220]))
+            try:
+                open(OTVET_ZHDET, 'w').write(m['kto'])
+            except OSError:
+                pass
+            log('перевод в ухо:', m['kto'], yaz)
+        return srazu
+
+    def shag(self, now):
+        """Его ответ — отправить; просроченные — агенту. Возвращает сообщения для агента."""
+        t = vremya_f(OTVET_F)
+        if t > self.otvet_t and self.zhdut:
+            self.otvet_t = t
+            z = chitat(OTVET_F)
+            _, m = self.zhdut.pop(0)
+            self.otpravit(m, str(z.get('tekst') or ''))
+        agentu = [m for (t0, m) in self.zhdut if now - t0 >= OTVET_SEK * SEK]
+        self.zhdut = [(t0, m) for (t0, m) in self.zhdut if now - t0 < OTVET_SEK * SEK]
+        if not self.zhdut:
+            try:
+                os.remove(OTVET_ZHDET)
+            except OSError:
+                pass
+        return agentu
+
+    def otpravit(self, m, ru):
+        if not ru:
+            return
+        o = groq(ZADANIE_NA_YAZYK, json.dumps({'yazyk_zritelya': m.get('yazyk'), 'otvet': ru}, ensure_ascii=False)) or {}
+        t = re.sub(r'https?://\S+', '', str(o.get('tekst') or '')).strip()
+        if not t:
+            v_uho('Перевод не вышел — ответ не отправил.')
+            return
+        t = '@%s %s' % (m['kto'], t)
+        p = {'tw': TW, 'kick': KI}.get(m['pl'])
+        ok = False
+        try:
+            ok = bool(p and p.est() and p.chat(t))
+        except Exception as e:
+            log('ответ зрителю', m['pl'], type(e).__name__)
+        if not ok:                            # YouTube и не вошедшая площадка — туда, куда можем
+            ok = bool(v_chat(t))
+        v_uho('Отправил %s.' % ('на ' + PLOSHCHADKA.get(m['pl'], 'чат') if ok else '— не вышло'))
+        log('ответ зрителю:', m['kto'], m['pl'], 'ок' if ok else 'не вышло')
+
+
+def vremya_f(put):
+    try:
+        return os.path.getmtime(put)
+    except OSError:
+        return 0.0
+
+
 class Kanal:
     def __init__(self, now=None):
         now = now or time.time()
@@ -830,12 +955,18 @@ class Kanal:
         self.ochered = []                 # сообщения чата для агента
         self.idei = []
         self.schet = SchetEfira()
+        self.perevodchik = Perevodchik()
 
     def shag(self, now=None):
         now = now or time.time()
         efir = efir_idyot()
         novye = [m for m in self.chat.novye() if m['kto'].lower() not in svoi()]
         self.sobrat_uroki(novye)
+        if efir:
+            try:
+                novye = self.perevodchik.novye(novye, now) + self.perevodchik.shag(now)
+            except Exception as e:
+                log('переводчик сбой:', type(e).__name__, str(e)[:100])
         self.ochered += novye
         self.ochered = self.ochered[-40:]
         try:

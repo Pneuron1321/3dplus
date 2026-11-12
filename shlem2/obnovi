@@ -106,6 +106,21 @@ if [ "$1" = otdat ]; then
   exit 0
 fi
 
+# 12.11: obnovi vzyat ФАЙЛ — поставить версию из зеркала поверх правленной в шлеме (прежняя — в резерв). Для файла,
+# который сам не сливается (соведущая с правками Плюса 05.11), когда решено взять зеркальную.
+if [ "$1" = vzyat ]; then
+  f=$2
+  case " $FAJLY " in *" $f "*) ;; *) echo "obnovi vzyat ФАЙЛ — один из скриптов шлема (например vedushchiy)."; rm -rf "$T"; exit 1 ;; esac
+  if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f" || ! sintaksis "$T/$f"; then echo "$f: не скачался или с ошибкой — не трогаю"; rm -rf "$T"; exit 1; fi
+  mkdir -p "$REZ" "$BAZA"
+  [ -f "$(gde "$f")" ] && cp "$(gde "$f")" "$REZ/$f.$(date +%Y%m%d-%H%M%S)"
+  if postavit "$f" "$T/$f"; then
+    cp "$T/$f" "$BAZA/$f"; rm -f "$NOV/$f"
+    echo "$f: поставлена версия из зеркала (прежняя, с правками шлема, — в $REZ). Помощник перезапустится сам."
+  fi
+  rm -rf "$T"; exit 0
+fi
+
 if [ "$1" = pravila ]; then
   f=CLAUDE.md
   if ! curl -fsSL "$B/$f?t=$(date +%s)" -o "$T/$f" || [ "$(grep -c . "$T/$f")" -lt 50 ]; then

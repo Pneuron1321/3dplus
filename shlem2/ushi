@@ -269,6 +269,30 @@ SUF_EN = re.compile(r'^(?:а\s+|ну\s+|скажи\s+)?(?:как\s+(?:это\s+)
 SUF_RAZMINKA = re.compile(r'^(?:английская\s+)?разминк\w*\b', re.I)
 
 
+# 12.11 (Александр): сообщение чата не по-русски — kanal переводит в ухо; «плюс, ответь …» — ответ зрителю на его
+# языке и на его площадке (kanal ждёт 40 с, потом отвечает агент, как раньше).
+OTVET_CHAT = re.compile(r'^(?:плюс[,\s]+)?ответь(?:\s+(?:ему|ей|им|зрителю))?[\s,:—-]+(.{2,})$', re.I)
+OTVET_F = os.environ.get('USHI_OTVET_CHAT', '/tmp/kanal.otvet')
+OTVET_ZHDET = os.environ.get('USHI_OTVET_ZHDET', '/tmp/kanal.otvet-zhdet')
+
+
+def otvet_chatu(t):
+    """«Плюс, ответь: …» при ждущем сообщении чата (kanal) — текст kanal'у. True — забрал (Плюсу не идёт)."""
+    m = OTVET_CHAT.match(t.strip())
+    if not m:
+        return False
+    try:
+        if time.time() - os.path.getmtime(OTVET_ZHDET) > 120:     # ждущего сообщения нет — это фраза Плюсу
+            return False
+        with open(OTVET_F + '.tmp', 'w') as f:
+            json.dump({'t': time.time(), 'tekst': m.group(1).strip(' .!?,…«»"')}, f, ensure_ascii=False)
+        os.replace(OTVET_F + '.tmp', OTVET_F)
+    except OSError:
+        return False
+    print(time.strftime('%H:%M:%S'), 'ответ чату:', m.group(1)[:60], flush=True)
+    return True
+
+
 def sufler_zapros(t):
     """«Плюс, по-английски [фраза]» / «плюс, разминка» — суфлёру (он ответит в ухо; Плюсу не идёт). True — забрали."""
     low = t.lower().strip(' .!?,…')
@@ -1394,6 +1418,9 @@ def handle(e, sluh):
         subprocess.run(['tiho'])
     elif kind == 'text' and low in TEMP:
         propustit()
+    elif kind == 'text' and OTVET_CHAT.match(t.strip()) and otvet_chatu(t):
+        ved_dialog(t, 'plus')
+        metka('vpisal', e['id'])
     elif kind == 'text' and (SUF_RAZMINKA.match(low) or SUF_EN.match(t.strip())) and sufler_zapros(t):
         ved_dialog(t, 'plus')
         metka('vpisal', e['id'])

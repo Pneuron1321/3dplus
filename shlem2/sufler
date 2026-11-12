@@ -72,7 +72,7 @@ SEK_SOST = E('SUFLER_SEK_SOST', '/tmp/sekundant.json')   # уши: идёт ли
 SVOI = set(E('SUFLER_SVOI', '3xsks_fu_gun,splus,nightbot,streamelements,streamlabs,moobot,fossabot').lower().split(','))
 
 VERSIYA = '1.1'           # 06.11: 1.0 — шаблоны по таймеру; 1.1 — учит на ЕГО словах
-NASTROYKI = {'vkl': True, 'kazhdye': 300, 'perevod': True, 'ved': True, 'razgovor': True, 'pauza': 8, 'cepochka': 2,
+NASTROYKI = {'vkl': True, 'kazhdye': 300, 'perevod': True, 'ved': False, 'razgovor': True, 'pauza': 8, 'cepochka': 2,
              'fokus': ''}
 PERVAYA = 60              # с от начала эфира до первой подсказки
 OKNO_PODSKAZKI = 75       # с: его английская фраза в это время — ответ на подсказку
