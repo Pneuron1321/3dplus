@@ -1103,7 +1103,7 @@ def main(a):
                 json.dump(av, open(AVTORY, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
         except (OSError, ValueError):
             pass
-        print('Удалила «%s». Осталось треков: %d.' % (imya(n[0]), len(treki())))
+        print('Удалил «%s». Осталось треков: %d.' % (imya(n[0]), len(treki())))
         return 0
     if cmd in ('avtor', 'author'):
         print(AVTOR)

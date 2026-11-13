@@ -482,7 +482,7 @@ class Zal:
                 self.posl_chislo = now
         if skazano:
             skazat(skazano)
-            log('сказала:', skazano)
+            log('сказал:', skazano)
         sohranit_vecher(self.v)
         self.zapisat(now)
         return skazano

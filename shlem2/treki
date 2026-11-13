@@ -475,7 +475,7 @@ def najti(slova, kachat):
     vse = kandidaty(gruppy, temp, n, ist)
     zapros = ' '.join(slova)
     if not vse:
-        print('Новых треков%s не нашла. Попробуй шире (жанр или настроение без темпа) или найди сама в интернете и '
+        print('Новых треков%s не нашёл. Попробуй шире (жанр или настроение без темпа) или найди сама в интернете и '
               'скачай по ссылке: treki skachat ССЫЛКА.' % ((' под «%s»' % zapros) if zapros else ''))
         return 1
     if not kachat:
@@ -510,7 +510,7 @@ def najti(slova, kachat):
         print('Не скачалось ни одного%s%s.' % ((' (мимо темпа %d)' % mimo) if mimo else '',
                                               (': ' + '; '.join(oshibki)) if oshibki else ''))
         return 1
-    print('Скачала %d новых в плейлист novye: %s.%s Послушать — muzyka pleylist novye vkl; понравился — treki ostavit '
+    print('Скачал %d новых в плейлист novye: %s.%s Послушать — muzyka pleylist novye vkl; понравился — treki ostavit '
           'ТРЕК ПЛЕЙЛИСТ; нет — muzyka udalit ТРЕК.' % (
               len(gotovo), '; '.join(gotovo), (' Не скачались: %s.' % '; '.join(oshibki)) if oshibki else ''))
     return 0
@@ -579,9 +579,9 @@ def skachat(rest):
     f = os.path.basename(f)
     t = '«%s»%s%s' % (os.path.splitext(f)[0], (' — %s' % avtor) if avtor else '', (', %d BPM' % bpm) if bpm else '')
     if pl == PLEYLIST:
-        print('Скачала %s, лицензия %s — в плейлист novye, можно в эфир.' % (t, lic))
+        print('Скачал %s, лицензия %s — в плейлист novye, можно в эфир.' % (t, lic))
     else:
-        print('Скачала %s, но лицензия %s — положила не в музыку эфира, а в %s: послушать можно, в ЭФИР НЕЛЬЗЯ '
+        print('Скачал %s, но лицензия %s — положил не в музыку эфира, а в %s: послушать можно, в ЭФИР НЕЛЬЗЯ '
               '(Twitch заглушит или заблокирует). Если знаешь, что трек свободный, — treki skachat ССЫЛКА cc-by.' % (
                   t, lic or 'неизвестна', LICHNOE_DIR))
     return 0

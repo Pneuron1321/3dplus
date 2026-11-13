@@ -1407,7 +1407,7 @@ def handle(e, sluh):
             if not chek:
                 return
         elif not t and not chek:
-            say('Не расслышала.')
+            say('Не расслышал.')
     print(time.strftime('%H:%M:%S'), kind, t, flush=True)
     if kind in ('text', 'chek') and t and os.path.exists(TITR_KOMANDY):
         titr_ya(t)                      # субтитр эфира: что сказал Александр Плюсу (только если включено)
