@@ -1,0 +1,5 @@
+1-andrew-nizhe-20.mp3 — en-US-AndrewMultilingualNeural, ниже на 20 Гц
+2-andrew-nizhe-35.mp3 — en-US-AndrewMultilingualNeural, ниже на 35 Гц
+3-brian-nizhe-30.mp3 — en-US-BrianMultilingualNeural, ниже на 30 Гц
+4-william-nizhe-30.mp3 — en-AU-WilliamMultilingualNeural, ниже на 30 Гц
+5-florian-nizhe-25.mp3 — de-DE-FlorianMultilingualNeural, ниже на 25 Гц

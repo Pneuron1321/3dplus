@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+# skazhi — сказать текст голосом Авы. Текст — аргументами или со stdin.
+# Кладёт текст в очередь голоса-демона golos и сразу возвращается: Ава договорит
+# прежнее и скажет это, не перебивая себя. Демона нет — запускает; не поднялся
+# за 3 с — говорит сама, по-старому (edge-tts и play-audio, фразы по очереди).
+# Оборвать речь — tiho. Молчать — touch /root/.golos-off
+import fcntl, os, re, shutil, subprocess, sys, tempfile, threading, time, queue
+
+OFF = '/root/.golos-off'
+STOP = '/tmp/golos.stop'        # tiho пишет сюда время; речь, начатая раньше, замолкает
+LOCK = '/tmp/golos.lock'        # очередь: говорит тот, кто держит замок
+VOICE = os.environ.get('GOLOS_VOICE', 'en-US-AvaMultilingualNeural')
+PLAY = os.environ.get('GOLOS_PLAY', '/data/data/com.termux/files/usr/bin/play-audio')
+
+
+def kuski(t):
+    """Предложения, склеенные в куски: первый короткий — чтобы начать быстро."""
+    out, cur = [], ''
+    for f in re.split(r'(?<=[.!?…])\s+', t.strip()):
+        if cur and len(cur) + len(f) > (100 if not out else 300):
+            out.append(cur)
+            cur = f
+        else:
+            cur = (cur + ' ' + f).strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
+def oborvano(t0):
+    try:
+        return float(open(STOP).read()) > t0
+    except (OSError, ValueError):
+        return False
+
+
+def ochered(t0):
+    """Ждать, пока договорит прежняя речь. None — оборвали (tiho)."""
+    f = open(LOCK, 'w')
+    while True:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return f
+        except BlockingIOError:
+            if oborvano(t0):
+                f.close()
+                return None
+            time.sleep(0.15)
+        except OSError:
+            return f            # замков нет — говорим без очереди
+
+
+def stary(text):
+    """Как раньше, без демона: синтез программой edge-tts и play-audio."""
+    parts = kuski(text)
+    if not parts:
+        return 0
+    t0 = time.time()
+    tmp = tempfile.mkdtemp(prefix='golos-')
+    ready = queue.Queue()
+    synth = []                                     # текущий edge-tts: оборвём вместе с речью
+
+    def gotovit():
+        for i, k in enumerate(parts):
+            if oborvano(t0):
+                break
+            src, mp3 = os.path.join(tmp, '%d.txt' % i), os.path.join(tmp, '%d.mp3' % i)
+            open(src, 'w').write(k)
+            p = subprocess.Popen(['edge-tts', '--voice', VOICE, '-f', src, '--write-media', mp3],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            synth[:] = [p]
+            ready.put(mp3 if p.wait() == 0 else None)
+        ready.put('')
+    threading.Thread(target=gotovit, daemon=True).start()   # готовим, пока ждём
+
+    code = 0
+    zamok = ochered(t0)
+    while zamok:
+        mp3 = ready.get()
+        if mp3 == '' or oborvano(t0):
+            break
+        if mp3 is None:
+            print('Голос: edge-tts не ответил (интернет?).')
+            code = 1
+            break
+        p = subprocess.Popen([PLAY, mp3], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        while p.poll() is None:
+            if oborvano(t0):
+                p.terminate()
+                break
+            time.sleep(0.15)
+    for p in synth:
+        if p.poll() is None:
+            p.terminate()
+            p.wait()
+    shutil.rmtree(tmp, ignore_errors=True)
+    return code
+
+
+Q = '/tmp/golos/q'
+DEMON = '/tmp/golos-demon.lock'
+GOLOS = os.environ.get('GOLOS_BIN', '/usr/local/bin/golos')
+
+
+def demon_zhiv():
+    """Демон держит замок, пока жив."""
+    try:
+        f = open(DEMON, 'a')
+    except OSError:
+        return False
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f, fcntl.LOCK_UN)
+        return False
+    except BlockingIOError:
+        return True
+    finally:
+        f.close()
+
+
+def main():
+    if os.path.exists(OFF):
+        return 0
+    text = ' '.join(sys.argv[1:]) if len(sys.argv) > 1 else sys.stdin.read()
+    if not text.strip():
+        return 0
+    if os.path.exists(GOLOS):
+        os.makedirs(Q, exist_ok=True)
+        put = '%s/%d.txt' % (Q, time.time_ns())
+        open(put + '.tmp', 'w').write(text)
+        os.replace(put + '.tmp', put)
+        if demon_zhiv():
+            return 0
+        subprocess.Popen([GOLOS], stdin=subprocess.DEVNULL, stdout=open('/tmp/golos.log', 'a'),
+                         stderr=subprocess.STDOUT, start_new_session=True)
+        for _ in range(30):                        # демон поднимается — он и скажет
+            time.sleep(0.1)
+            if demon_zhiv():
+                return 0
+        try:
+            os.remove(put)                         # не поднялся — говорим сами
+        except OSError:
+            return 0                               # уже забрал
+    return stary(text)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

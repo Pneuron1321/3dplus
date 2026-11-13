@@ -1,0 +1,26 @@
+#!/bin/sh
+# plus — запустить Плюса: уши (ushi) в фоне и Claude в tmux-сессии «plus».
+# Уши вписывают услышанное в эту сессию. Выйти из Claude — /exit, как обычно.
+# Уши обновили (ushi или sluh новее запущенных) — перезапускает их сам.
+# -u и UTF-8: без них tmux меняет кириллицу на «_».
+export LANG=C.UTF-8
+P=$(cat /tmp/ushi.pid 2> /dev/null)
+if [ -n "$P" ] && kill -0 "$P" 2> /dev/null; then
+  for f in /usr/local/bin/ushi /usr/local/bin/sluh; do
+    if [ "$f" -nt /tmp/ushi.pid ]; then
+      kill "$P"; sleep 1; P=; break
+    fi
+  done
+fi
+if [ -z "$P" ] || ! kill -0 "$P" 2> /dev/null; then
+  setsid nohup /usr/local/bin/ushi > /tmp/ushi.log 2>&1 < /dev/null &
+fi
+# Не из домашней папки: там Claude Code не запоминает доверие и спрашивает
+# «Do you trust this folder?» при каждом запуске (так устроено, настройки нет).
+D=/root/plus
+mkdir -p "$D"
+# Модель из settings.json на низком усилии — быстрый голос; трудное Плюс отдаёт
+# помощнику dumat (высокое усилие, /root/.claude/agents/dumat.md).
+# Мышь в tmux: джойстик шлема листает вывод, а не историю отправленного
+# (без неё Termux превращает прокрутку в стрелки).
+exec tmux -u new-session -A -s plus -c "$D" claude --effort low \; set -g mouse on

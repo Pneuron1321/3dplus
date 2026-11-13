@@ -1,0 +1,13 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# plus2 — Плюс версии 2. Скрипт Termux (не Ubuntu): его зовёт кнопка «Плюс» в
+# приложении Quest Claude Bridge 2. Вторая версия живёт в своей Ubuntu «plus2»;
+# первая, «ubuntu», остаётся версии 1.0 и не трогается.
+# Вход в Claude общий: файл входа первой Ubuntu подключается сюда же (--bind),
+# второй /login не нужен. Версии работают по очереди, файл у них один.
+P=/data/data/com.termux/files/usr/var/lib/proot-distro
+B=
+for r in "$P/containers/ubuntu/rootfs" "$P/installed-rootfs/ubuntu"; do   # proot-distro 5 и 4
+  f=$r/root/.claude/.credentials.json
+  if [ -f "$f" ]; then B="--bind $f:/root/.claude/.credentials.json"; break; fi
+done
+exec proot-distro login $B plus2 -- /usr/local/bin/plus "$@"

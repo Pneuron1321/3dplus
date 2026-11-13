@@ -1,0 +1,761 @@
+#!/bin/sh
+# nagruzka — что открыто в шлеме и что его грузит: программы Termux и Ubuntu по именам, сколько
+# штук каждой, память, процессор сейчас, сколько живут; лишние копии — предупреждение.
+# Печатает только имена программ (у python/node/sh — имя скрипта), без аргументов: в них бывают
+# ключи и адреса. Приложения Android (бридж, игра) отсюда не видно — только через adb с ноутбука.
+#   nagruzka        — сводка (меряет процессор 3 с)
+# Работает и в обычном Termux, и в Ubuntu (proot-distro login plus2).
+#   nagruzka zhurnal [часов] — что было по 5 минут (по умолчанию 4 ч): сообщений в чате, пачек
+#                    чата Плюсу, память Termux, свободно у шлема, приложение, просьбы системы отдать память
+if [ "$1" = zhurnal ]; then
+  python3 - "${2:-4}" "${NAGRUZKA_URL:-http://localhost:8766}" <<'PY'
+import datetime as dt, re, sys, urllib.request
+CHASOV, URL = float(sys.argv[1]), sys.argv[2]
+seychas = dt.datetime.now()
+nachalo = seychas - dt.timedelta(hours=CHASOV)
+b = {}                                          # «корзина» по 5 мин → что было
+
+
+def korz(t):
+    return t.replace(minute=t.minute - t.minute % 5, second=0, microsecond=0)
+
+
+def k(t):
+    return b.setdefault(korz(t), {'chat': 0, 'plusu': 0, 'termux': 0, 'svob': None, 'pril': 0, 'graf': 0,
+                                  'efir': '', 'sob': []})
+
+
+def stroki(put):
+    try:
+        return open(put, encoding='utf-8', errors='replace').read().splitlines()
+    except OSError:
+        return []
+
+
+def bez_daty(linii, rx):
+    """Журналы только со временем (ЧЧ:ММ): даты — с конца назад, через полночь — на день раньше."""
+    den, pred, out = seychas.date(), None, []
+    for l in reversed(linii):
+        m = re.match(rx, l)
+        if not m:
+            continue
+        hh, mm = int(m.group(1)), int(m.group(2))
+        t = dt.datetime.combine(den, dt.time(hh, mm))
+        if pred is not None and t > pred:
+            den -= dt.timedelta(days=1)
+            t -= dt.timedelta(days=1)
+        if t > seychas + dt.timedelta(minutes=1):
+            den -= dt.timedelta(days=1)
+            t -= dt.timedelta(days=1)
+        pred = t
+        out.append((t, l))
+    return out
+
+
+def s_datoy(l):
+    m = re.match(r'(\d\d)\.(\d\d) (\d\d):(\d\d):(\d\d) ', l)
+    if not m:
+        return None
+    d, mo, hh, mi, ss = map(int, m.groups())
+    t = dt.datetime(seychas.year, mo, d, hh, mi, ss)
+    return t if t <= seychas + dt.timedelta(days=1) else t.replace(year=seychas.year - 1)
+
+
+for t, l in bez_daty(stroki('/tmp/chat.log'), r'(\d\d):(\d\d) '):
+    k(t)['chat'] += 1
+for t, l in bez_daty(stroki('/tmp/ushi.log'), r'(\d\d):(\d\d):\d\d '):
+    if 'чат → Плюсу' in l:
+        k(t)['plusu'] += 1
+    elif 'потолок' in l:
+        k(t)['sob'].append('чат: потолок')
+    elif 'Traceback' in l or 'Error' in l:
+        k(t)['sob'].append('уши: ошибка')
+for l in stroki('/tmp/pamyat.log'):
+    t = s_datoy(l)
+    m = re.search(r'termux (\d+) МБ', l)
+    if t and m:
+        x = k(t); x['termux'] = max(x['termux'], int(m.group(1)))
+try:
+    pril = urllib.request.urlopen(URL + '/pamyat?n=2000', timeout=5).read().decode('utf-8', 'replace').splitlines()
+except Exception:
+    pril = []
+    print('(приложение 2 не ответило — его замера памяти не будет)')
+sdvig = dt.timedelta(0)                         # у Android и Ubuntu может быть разный часовой пояс
+posl = [t for t in map(s_datoy, pril) if t]
+if posl and abs(posl[-1] - seychas) > dt.timedelta(minutes=5):
+    chetv = dt.timedelta(minutes=15)
+    sdvig = round((posl[-1] - seychas) / chetv) * chetv
+for l in pril:
+    t = s_datoy(l)
+    if not t:
+        continue
+    x = k(t - sdvig)
+    m = re.search(r'свободно (\d+) МБ', l)
+    if m:
+        v = int(m.group(1)); x['svob'] = v if x['svob'] is None else min(x['svob'], v)
+    m = re.search(r'приложение (\d+) МБ', l)
+    if m:
+        x['pril'] = max(x['pril'], int(m.group(1)))
+    m = re.search(r'графика (\d+)', l)
+    if m:
+        x['graf'] = max(x['graf'], int(m.group(1)))
+    if 'эфир идёт' in l:
+        x['efir'] = 'да'
+    if ', МАЛО' in l and 'МАЛО' not in x['sob']:
+        x['sob'].append('МАЛО')
+    m = re.search(r'система просит память: (\w+)', l)
+    if m and m.group(1) != 'UI_HIDDEN':
+        x['sob'].append('просит ' + m.group(1))
+    if 'приложение запущено' in l:
+        x['sob'].append('приложение запущено заново')
+print('время   чат  Плюсу  Termux  свободно  прилож.(графика)  эфир  события')
+for t in sorted(b):
+    if t < korz(nachalo):
+        continue
+    x = b[t]
+    sob = sorted(set(x['sob']), key=x['sob'].index)
+    print('%s %4s %5s %6s %8s %8s(%4s)  %4s  %s' % (
+        t.strftime('%H:%M'), x['chat'] or '', x['plusu'] or '', '%d' % x['termux'] if x['termux'] else '',
+        '%d' % x['svob'] if x['svob'] is not None else '', '%d' % x['pril'] if x['pril'] else '',
+        '%d' % x['graf'] if x['graf'] else '', x['efir'], ', '.join(sob)))
+print('(память в МБ: Termux — больше всего за 5 мин, свободно — меньше всего)')
+PY
+  exit 0
+fi
+#   nagruzka demon   — чёрный ящик (запускает plus, второй не встанет): раз в 2 с, пока идёт эфир, —
+#                    кадры, потери и пропуски звука эфира и процессор Плюса и помощников; /tmp/nagruzka.log;
+#                    и предохранитель: тяжёлое у помощника в эфире — низший приоритет, тесно — одно ядро
+#   nagruzka sboi [часов] — где эфир спотыкался (по чёрному ящику) и что в эти секунды делал Плюс
+#   nagruzka povodok [vkl|vykl] — кого предохранитель притормозил сейчас; vykl — не прижимать совсем, vkl — снова
+#   nagruzka otpustit — «пусть работает в полную»: отпустить прижатое до конца этого эфира
+if [ "$1" = otpustit ]; then
+  : > "${NAGRUZKA_OTPUSTIT:-/tmp/nagruzka-otpustit}"
+  echo "Отпущу через пару секунд: тяжёлое работает в полную до конца этого эфира."
+  exit 0
+fi
+if [ "$1" = povodok ]; then
+  V=${NAGRUZKA_POVODOK_VYKL:-/root/.nagruzka-povodok-vykl}
+  case "$2" in
+    vykl) : > "$V"; echo "Предохранитель выключен: тяжёлое в эфире не прижимаю (включить — nagruzka povodok vkl)."; exit 0 ;;
+    vkl) rm -f "$V"; echo "Предохранитель включён: тяжёлое в эфире — на одно ядро с низшим приоритетом."; exit 0 ;;
+  esac
+  [ -f "$V" ] && echo "Предохранитель выключен (nagruzka povodok vkl — включить)."
+  python3 - "${NAGRUZKA_POVODOK:-/tmp/nagruzka-povodok.json}" << 'PY'
+import json, sys, time
+try:
+    d = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    print('Чёрный ящик ещё не писал (эфира не было или plus не запущен).'); sys.exit(0)
+if d.get('otpushcheno'):
+    print('В этом эфире отпущено: тяжёлое работает в полную.')
+p = d.get('prizhaty') or []
+if not p:
+    print('Сейчас никто не уступает: тяжёлого нет.')
+for x in p:
+    print('Уступает %d мин: %s%s — было ~%d%% ядра; %s.' % ((time.time() - x['t']) / 60, x['imya'],
+          ' (%s)' % x['sostav'] if x.get('sostav') else '', x['sr'],
+          'эфиру было тесно — на одном ядре %s' % d.get('yadro') if x.get('yadro') else 'низший приоритет, скорость обычная'))
+PY
+  exit 0
+fi
+if [ "$1" = demon ] || [ "$1" = sboi ]; then
+  REZHIM=$1; shift
+  exec python3 - "nagruzka-$REZHIM" "$0" "${1:-4}" "${NAGRUZKA_URL:-http://localhost:8766}" <<'PY'
+import datetime as dt, fcntl, json, os, re, statistics, sys, time, urllib.request
+REZHIM, SKRIPT, CHASOV, URL = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
+ZHURNAL = os.environ.get('NAGRUZKA_LOG', '/tmp/nagruzka.log')
+SHAG = float(os.environ.get('NAGRUZKA_SHAG', 2))
+HZ = os.sysconf('SC_CLK_TCK')
+GRUPPY = ('claude', 'golos', 'ushi', 'obzor', 'vedushchiy', 'raciya')
+GOSTI = ('sinhron', 'gosti', 'cloudflared')       # 2.5.0: гости и субтитры — своим столбцом в конце строки
+
+
+def gruppa(pid):
+    try:
+        c = open('/proc/%s/comm' % pid).read().strip()
+        a = open('/proc/%s/cmdline' % pid, 'rb').read().split(b'\0')
+    except OSError:
+        return None
+    imena = [c] + [os.path.basename(x.decode('utf-8', 'replace')) for x in a[:4]]
+    for g in GRUPPY:
+        if g in imena:
+            return g
+    if any(g in imena for g in GOSTI):
+        return 'gosti'
+    return 'drugoe'
+
+
+PPID = {}                                         # pid → родитель (последний снимок)
+
+
+def tiki():
+    out = {}
+    PPID.clear()
+    for d in os.listdir('/proc'):
+        if not d.isdigit():
+            continue
+        try:
+            st = open('/proc/%s/stat' % d).read()
+        except OSError:
+            continue
+        f = st[st.rfind(')') + 2:].split()
+        out[d] = int(f[11]) + int(f[12])
+        PPID[d] = f[1]
+    return out
+
+
+def efir():
+    try:
+        return json.loads(urllib.request.urlopen(URL + '/efir', timeout=1.5).read().decode())
+    except Exception:
+        return None
+
+
+def kamera():
+    """Счётчики камеры телефона (22.10: «картинка камеры рвалась» — пропуски декодера до ключевого кадра)."""
+    try:
+        return json.loads(urllib.request.urlopen(URL + '/kamera', timeout=1.5).read().decode())
+    except Exception:
+        return None
+
+
+# ---------- предохранитель (17.10, Александр: «нужно сделать предохранитель… чтобы он кусками это делал») ----------
+# В эфире помощник Плюса качал треки и искал файлы по всей системе — Termux съел 4,5 ядра, игра проседала. Тяжёлую
+# работу не убиваем и не запрещаем: пока идёт эфир, дерево помощника, которое долго ест больше POROG % ядра, получает
+# низший приоритет (SCHED_IDLE, nice 19) — скорость обычная, просто не в ущерб (Александр 18.10: «по умолчанию
+# нормальная скорость, просто не критична для процессора»); если бридж говорит «тесно», а оно всё ещё тяжёлое —
+# на одно самое слабое ядро, и Александру один раз в ухо. Остановка сигналами (0,5 с работает / 1,5 с стоит) под proot не
+# держится: proot отпускает остановленный процесс (проверено 17.10 и изнутри, и снаружи), а привязка к ядру — да
+# (3 загруженных процесса: 296 % → 98 %).
+# Кандидаты — потомки Claude Плюса (окно tmux «plus»: его инструменты, помощники, поиск) и осиротевшие (родитель — 1);
+# свои демоны (уши, голос, музыка, субтитры…) и всё под ними — никогда.
+POROG = float(os.environ.get('NAGRUZKA_POROG', 50))           # % одного ядра у дерева помощника, в среднем за окно
+OKNO = int(os.environ.get('NAGRUZKA_OKNO', 10))               # шагов подряд (по 2 с — 20 с)
+TESNO_SHAGOV = int(os.environ.get('NAGRUZKA_TESNO', 3))      # «тесно» столько шагов подряд — на одно ядро
+POVODOK = os.environ.get('NAGRUZKA_POVODOK', '/tmp/nagruzka-povodok.json')        # кто сейчас прижат
+OTPUSTIT = os.environ.get('NAGRUZKA_OTPUSTIT', '/tmp/nagruzka-otpustit')          # «пусть работает в полную»
+POVODOK_VYKL = os.environ.get('NAGRUZKA_POVODOK_VYKL', '/root/.nagruzka-povodok-vykl')
+GOLOS_Q = os.environ.get('NAGRUZKA_GOLOS_Q', '/tmp/golos/q')
+KORNI = os.environ.get('NAGRUZKA_KORNI', '')                  # проверка: pid вместо окна tmux
+SVOI = {'ushi', 'sluh', 'golos', 'skazhi', 'tiho', 'sinhron', 'gosti', 'cloudflared', 'vedushchiy', 'muzyka', 'obzor',
+        'donaty', 'zriteli', 'raciya', 'nagruzka', 'nagruzka-demon', 'plus', 'plus-mcp', 'golos-hook', 'tmux',
+        'tmux: server', 'tmux: client', 'proot', 'play-audio', 'edge-tts', 'sshd'}
+NICE_BYLO = 10                                    # так plus ставит своим (12.10)
+
+
+def imena_procesa(pid):
+    try:
+        c = open('/proc/%s/comm' % pid).read().strip()
+        a = open('/proc/%s/cmdline' % pid, 'rb').read().split(b'\0')
+    except OSError:
+        return []
+    return [c] + [os.path.basename(x.decode('utf-8', 'replace')) for x in a[:3] if x]
+
+
+def korotkoe_imya(pid):
+    """Имя для уха и журнала — без аргументов (в них бывают адреса и ключи): программа, у интерпретатора — скрипт."""
+    im = imena_procesa(pid) or ['?']
+    c = im[0]
+    if re.match(r'^(python\d*(\.\d+)?|bash|sh|dash|node)$', c) and len(im) > 2 and re.match(r'^[A-Za-z0-9._-]+$', im[2]) \
+            and not im[2].startswith('-'):
+        return '%s:%s' % (c, im[2])
+    return c
+
+
+def korni():
+    """pid Claude Плюса — то, что запущено в окне tmux «plus» (раз в 30 с)."""
+    if KORNI:
+        return set(KORNI.split(','))
+    if time.time() - KORNI_KESH[0] > 30:
+        try:
+            import subprocess
+            r = subprocess.run(['tmux', 'list-panes', '-t', 'plus', '-F', '#{pane_pid}'], capture_output=True,
+                               text=True, timeout=3)
+            KORNI_KESH[1] = set(r.stdout.split())
+        except Exception:
+            KORNI_KESH[1] = set()
+        KORNI_KESH[0] = time.time()
+    return KORNI_KESH[1]
+
+
+KORNI_KESH = [0.0, set()]
+
+
+def svoy_uid(pid):
+    """Процесс того же пользователя, что и мы (Termux/Ubuntu); игра, мост и система — чужие."""
+    try:
+        return os.stat('/proc/%s' % pid).st_uid == os.getuid()
+    except OSError:
+        return False
+
+
+def predki(pid):
+    res, p, n = set(), PPID.get(pid), 0
+    while p and p not in ('0', '1') and n < 64:
+        res.add(p)
+        p, n = PPID.get(p), n + 1
+    return res
+
+
+def verh_pomoshchnika(pid, kor):
+    """Верхний процесс дерева помощника, к которому относится pid, или None (свой, Плюс, система).
+    18.10: на Android все приложения (игра, мост, сам Termux) растут из одного системного zygote — поэтому
+    чужие (другой пользователь) и всё, что выше окна Плюса (общие предки), помощником не бывают никогда."""
+    p, verh, n = pid, None, 0
+    moy = str(os.getpid())
+    while p and n < 64:
+        if p == moy or p in kor:
+            return verh if p in kor else None
+        if not svoy_uid(p) or any(x in SVOI for x in imena_procesa(p)):
+            return None
+        rod = PPID.get(p)
+        if rod in (None, '0', '1') or rod not in PPID:
+            # сирота (родитель — init): помощник, если он не предок окна Плюса и не наш
+            return None if any(p in predki(k) for k in kor) or p in predki(moy) else p
+        if not svoy_uid(rod):
+            return None                               # ребёнок системы (сам Termux) — не помощник
+        verh, p, n = p, rod, n + 1
+    return None
+
+
+def yadro_slaboe():
+    """Самое слабое из доступных ядер (меньше всех частота), иначе первое доступное."""
+    dostupno = sorted(os.sched_getaffinity(0))
+    def chastota(c):
+        try:
+            return int(open('/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq' % c).read())
+        except (OSError, ValueError):
+            return 1 << 40
+    return min(dostupno, key=lambda c: (chastota(c), c))
+
+
+def potoki(pid):
+    try:
+        return [int(t) for t in os.listdir('/proc/%s/task' % pid)]
+    except OSError:
+        return []
+
+
+def poderevo(verh, kor=()):
+    """verh и все его потомки (по последнему снимку) — кроме своих демонов, окна Плюса, чужих и всего под ними."""
+    deti, res, ochered = {}, [], [verh]
+    for p, r in PPID.items():
+        deti.setdefault(r, []).append(p)
+    moy = str(os.getpid())
+    while ochered:
+        p = ochered.pop()
+        if p != verh and (p in kor or p == moy or not svoy_uid(p) or any(x in SVOI for x in imena_procesa(p))):
+            continue
+        res.append(p)
+        ochered.extend(deti.get(p, []))
+    return res
+
+
+def prizhat(pid, yadro=None):
+    """Низший приоритет (SCHED_IDLE, nice 19) — скорость обычная, но любое своё дело и игра впереди; yadro — ещё и
+    на одно ядро (когда эфиру тесно)."""
+    for t in potoki(pid):
+        for f in ((lambda: os.sched_setaffinity(t, {yadro})) if yadro is not None else (lambda: None),
+                  lambda: os.sched_setscheduler(t, os.SCHED_IDLE, os.sched_param(0)),
+                  lambda: os.setpriority(os.PRIO_PROCESS, t, 19)):
+            try:
+                f()
+            except (OSError, AttributeError):
+                pass
+
+
+def otpustit_pid(pid):
+    vse = os.sched_getaffinity(0)
+    for t in potoki(pid):
+        for f in (lambda: os.sched_setaffinity(t, vse),
+                  lambda: os.sched_setscheduler(t, os.SCHED_OTHER, os.sched_param(0)),
+                  lambda: os.setpriority(os.PRIO_PROCESS, t, NICE_BYLO)):
+            try:
+                f()
+            except (OSError, AttributeError):
+                pass
+
+
+def v_uho(tekst):
+    """Голосом только Александру (дорожка .uho голос-демона: не в эфир, без субтитров)."""
+    try:
+        os.makedirs(GOLOS_Q, exist_ok=True)
+        put = os.path.join(GOLOS_Q, '%d.uho' % time.time_ns())
+        open(put + '.tmp', 'w').write(tekst)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
+class Povodok:
+    def __init__(self):
+        self.okna = {}            # верх → последние суммы % ядра
+        self.prizhaty = {}        # верх → {'imya', 't', 'sr'}
+        self.otpushcheno = False  # Александр сказал «в полную» — до конца эфира не трогаем
+        self.tesno = 0            # шагов подряд, когда бридж говорит «тесно»
+        self.yadro = yadro_slaboe()
+        self.zapisat()
+
+    def zapisat(self):
+        try:
+            json.dump({'yadro': self.yadro, 'otpushcheno': self.otpushcheno,
+                       'prizhaty': [dict(v, pid=k) for k, v in self.prizhaty.items()]},
+                      open(POVODOK + '.tmp', 'w'), ensure_ascii=False)
+            os.replace(POVODOK + '.tmp', POVODOK)
+        except OSError:
+            pass
+
+    def vse_otpustit(self):
+        for verh in list(self.prizhaty):
+            for p in poderevo(verh):
+                otpustit_pid(p)
+        self.prizhaty.clear()
+        self.okna.clear()
+
+    def shag(self, idet, cpu_pid, tesno=False):
+        """Раз в шаг: cpu_pid — % ядра каждого процесса за шаг; idet — эфир идёт; tesno — бридж сказал «тесно»."""
+        if os.path.exists(OTPUSTIT):
+            try:
+                os.remove(OTPUSTIT)
+            except OSError:
+                pass
+            self.vse_otpustit()
+            self.otpushcheno = True
+            self.zapisat()
+        if not idet or os.path.exists(POVODOK_VYKL):
+            if self.prizhaty:
+                self.vse_otpustit()
+            self.otpushcheno = self.otpushcheno and idet
+            self.zapisat()
+            return
+        for verh in [v for v in self.prizhaty if v not in PPID]:
+            del self.prizhaty[verh]                   # доделал и вышел
+        kor = korni()
+        summy = {}
+        for pid, c in cpu_pid.items():
+            v = verh_pomoshchnika(pid, kor)
+            if v:
+                summy[v] = summy.get(v, 0.0) + c
+        for v in list(self.okna):
+            if v not in summy:
+                del self.okna[v]
+        for v, sm in summy.items():
+            self.okna.setdefault(v, []).append(sm)
+            self.okna[v] = self.okna[v][-OKNO:]
+        self.tesno = self.tesno + 1 if tesno else 0
+        if self.otpushcheno:
+            self.zapisat()
+            return
+        for v, okno in self.okna.items():             # долго тяжёлое — низший приоритет, скорость обычная
+            if v in self.prizhaty or len(okno) < OKNO or sum(okno) / len(okno) < POROG:
+                continue
+            deti = {}
+            for p in poderevo(v, kor)[1:]:
+                n = korotkoe_imya(p)
+                deti[n] = deti.get(n, 0) + 1
+            self.prizhaty[v] = {'imya': korotkoe_imya(v), 't': time.time(), 'sr': round(sum(okno) / len(okno)),
+                                'sostav': ', '.join('%s×%d' % (n, k) if k > 1 else n
+                                                    for n, k in sorted(deti.items(), key=lambda x: -x[1])[:3]),
+                                'yadro': False}
+        for v, x in self.prizhaty.items():           # эфиру тесно, а помощник всё ещё тяжёл — на одно ядро
+            okno = self.okna.get(v, [])
+            if not x['yadro'] and self.tesno >= TESNO_SHAGOV and okno and sum(okno) / len(okno) >= POROG / 2:
+                x['yadro'] = True
+                v_uho('Эфиру тесно, а тяжёлая работа помощника всё ещё грузит шлем: %s, около %d процентов ядра. '
+                      'Посадила её на одно ядро — доделает медленнее, а игре и эфиру просторнее. Скажи Плюсу «пусть '
+                      'работает в полную» — отпущу.' % (x['imya'] + (' (%s)' % x['sostav'] if x['sostav'] else ''),
+                                                       sum(okno) / len(okno)))
+            for p in poderevo(v, kor):                # и новые дети (следующий curl) — так же
+                prizhat(p, self.yadro if x['yadro'] else None)
+        self.zapisat()
+
+
+def demon():
+    zamok = open(os.environ.get('NAGRUZKA_ZAMOK', '/tmp/nagruzka-demon.lock'), 'w')
+    try:
+        fcntl.flock(zamok, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return                                    # чёрный ящик уже пишет
+    import signal
+    versiya = os.path.getmtime(SKRIPT) if os.path.exists(SKRIPT) else 0
+    imena, t0, e0, m0, posl, k0 = {}, tiki(), efir(), time.time(), 0.0, None
+    pov = Povodok()
+
+    def proch(*_):                                # выходим — никого не оставляем прижатым
+        pov.vse_otpustit()
+        pov.zapisat()
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, proch)
+    signal.signal(signal.SIGHUP, proch)
+    while True:
+        time.sleep(SHAG)
+        if os.path.exists(SKRIPT) and os.path.getmtime(SKRIPT) != versiya:
+            pov.vse_otpustit()
+            zamok.close()
+            os.execv('/bin/sh', ['sh', SKRIPT, 'demon'])          # обновили — новая версия
+        t1, e1, m1 = tiki(), efir(), time.time()
+        k1 = kamera() if e1 is not None and e1.get('state') == 'efir' else None
+        dt_ = max(0.5, m1 - m0)
+        cpu = dict.fromkeys(GRUPPY + ('drugoe', 'gosti'), 0.0)
+        cpu_pid = {}
+        for pid, t in t1.items():
+            if pid not in imena:
+                imena[pid] = gruppa(pid)
+            g = imena[pid]
+            if pid in t0:
+                c = (t - t0[pid]) / HZ / dt_ * 100
+                cpu_pid[pid] = c
+                if g:
+                    cpu[g] += c
+        for pid in list(imena):
+            if pid not in t1:
+                del imena[pid]
+        idet = e1 is not None and e1.get('state') == 'efir'
+        try:
+            pov.shag(idet, cpu_pid, bool(e1 and e1.get('tesno')))
+        except Exception as e:                    # предохранитель не должен ронять чёрный ящик
+            print('povodok:', type(e).__name__, e, file=sys.stderr)
+        if idet or m1 - posl >= 30:
+            metki = []
+            try:
+                if os.listdir('/tmp/golos/q'):
+                    metki.append('говорит')
+            except OSError:
+                pass
+            if os.path.exists('/tmp/golos.pauza'):
+                metki.append('слушает')
+            if e1 is not None and e1.get('tesno'):           # 2.3.9: бридж сказал «тесно»
+                metki.append('тесно')
+            if idet and e0 is not None and e0.get('state') == 'efir':
+                d = lambda k: max(0, int(e1.get(k) or 0) - int(e0.get(k) or 0))
+                ef = '%.1f\t%d\t%d\t%d\t%d' % (d('kadrov') / dt_, int(e1.get('kbps') or 0), d('drops'),
+                                              d('mic_propuski'), d('mic_sbrosy'))
+            else:
+                ef = 'нет\t\t\t\t'
+            # 2.3.9: игра или эфир — кадры экрана, мс загрузок плашек в секунду, кадры глаз (в конце строки:
+            # старые строки без них читаются как раньше)
+            ek = '\t'.join(str(e1.get(k, '')) for k in ('ekran_fps', 'plashki_ms', 'glaza_fps')) if idet else '\t\t'
+            # 22.10: пропуски кадров камеры за шаг (декодер не успел — окно камеры замерло до ключевого кадра)
+            kp = ''
+            if k1 is not None and k0 is not None and 'propushcheno' in k1:
+                kp = str(max(0, int(k1.get('propushcheno') or 0) - int(k0.get('propushcheno') or 0)))
+            stroka = '%s\t%s\t%s\t%s\t%s\t%.0f\t%s\n' % (dt.datetime.now().strftime('%d.%m %H:%M:%S'), ef,
+                                                     '\t'.join('%.0f' % cpu[g] for g in GRUPPY + ('drugoe',)), ','.join(metki), ek,
+                                                     cpu['gosti'], kp)
+            try:
+                if os.path.exists(ZHURNAL) and os.path.getsize(ZHURNAL) > 2_000_000:
+                    t = open(ZHURNAL).read()
+                    open(ZHURNAL, 'w').write(t[t.index('\n', len(t) // 2) + 1:])
+                open(ZHURNAL, 'a').write(stroka)
+            except OSError:
+                pass
+            posl = m1
+        t0, e0, m0, k0 = t1, e1, m1, k1
+
+
+def sboi():
+    seychas = dt.datetime.now()
+    zap = []
+    try:
+        linii = open(ZHURNAL, encoding='utf-8', errors='replace').read().splitlines()
+    except OSError:
+        print('Чёрного ящика ещё нет (/tmp/nagruzka.log): он пишет, пока идёт эфир, — после обновления и /exit.')
+        return
+    for l in linii:
+        p = l.split('\t')
+        if len(p) < 12 or p[1] == 'нет':
+            continue
+        try:
+            t = dt.datetime.strptime('%d.' % seychas.year + p[0], '%Y.%d.%m %H:%M:%S')
+        except ValueError:
+            continue
+        if t > seychas + dt.timedelta(days=1):
+            t = t.replace(year=seychas.year - 1)
+        if seychas - t > dt.timedelta(hours=CHASOV):
+            continue
+        fps, kbps, drops, mic, sbros = float(p[1]), int(p[2]), int(p[3]), int(p[4]), int(p[5])
+        cpu = dict(zip(GRUPPY + ('drugoe',), map(float, p[6:13])))
+
+        def chislo(i):
+            try:
+                return float(p[i])
+            except (IndexError, ValueError):
+                return None
+        zap.append((t, fps, kbps, drops, mic, sbros, cpu, p[13] if len(p) > 13 else '', chislo(14), chislo(15), chislo(17),
+                    chislo(18)))
+    if not zap:
+        print('За %g ч эфира в чёрном ящике нет.' % CHASOV)
+        return
+    norma = statistics.median(z[1] for z in zap)
+    plohie = [z for z in zap if z[1] < norma * 0.8 or z[3] or z[4] or z[5]]
+    print('Эфир в чёрном ящике: %d мин, обычно %.0f кадров/с. Спотыкался %d раз из %d замеров (%.0f %%).' % (
+        len(zap) * SHAG / 60, norma, len(plohie), len(zap), 100 * len(plohie) / len(zap)))
+    def sred(nabor, g):
+        return sum(z[6][g] for z in nabor) / len(nabor) if nabor else 0
+    horoshie = [z for z in zap if z not in plohie]
+    print('Процессор в среднем, % одного ядра:   когда спотыкался   /   когда ровно')
+    for g in GRUPPY + ('drugoe',):
+        print('  %-11s %18.0f %15.0f' % (g, sred(plohie, g), sred(horoshie, g)))
+    gs = [z for z in zap if z[10] is not None]                # 2.5.0: гости и субтитры (sinhron, gosti, cloudflared)
+    if gs:
+        gp = [z for z in plohie if z[10] is not None]; gh = [z for z in horoshie if z[10] is not None]
+        print('  %-11s %18.0f %15.0f' % ('гости', sum(z[10] for z in gp) / max(1, len(gp)), sum(z[10] for z in gh) / max(1, len(gh))))
+    ek = [z for z in zap if z[8] is not None]                 # 2.3.9: кадры экрана — сама игра
+    if ek:
+        norma_e = statistics.median(z[8] for z in ek)
+        pe = [z for z in plohie if z[8] is not None]
+        igra = [z for z in ek if z[8] < norma_e * 0.8]
+        print('Игра (кадры экрана): обычно %.0f/с; в сбоях эфира — %s; сама проседала %d раз из %d.' % (
+            norma_e, '%.0f/с' % (sum(z[8] for z in pe) / len(pe)) if pe else 'нет данных', len(igra), len(ek)))
+        pl = [z for z in ek if z[9] is not None]
+        if pl:
+            print('Плашки эфира: %.1f мс в секунду в среднем, в сбоях — %.1f мс.' % (
+                sum(z[9] for z in pl) / len(pl),
+                sum(z[9] for z in pe if z[9] is not None) / max(1, sum(1 for z in pe if z[9] is not None))))
+    km = [z for z in zap if z[11] is not None]                # 22.10: пропуски кадров камеры
+    if km:
+        vsego = sum(z[11] for z in km)
+        s_prop = [z for z in km if z[11] > 0]
+        kp = sum(1 for z in s_prop if z in plohie)
+        print('Камера телефона: пропущено %d кадров (декодер не успевал — окно замирало до ключевого кадра) в %d замерах '
+              'из %d; из них в сбоях эфира — %d.' % (vsego, len(s_prop), len(km), kp) if vsego else
+              'Камера телефона: пропусков кадров нет (%d замеров).' % len(km))
+    for metka in ('говорит', 'слушает', 'тесно'):
+        a = sum(1 for z in plohie if metka in z[7]); b = sum(1 for z in horoshie if metka in z[7])
+        if metka == 'тесно' and not a and not b:
+            continue                                         # бридж до 2.3.9 «тесно» не говорит
+        print('%s: в %.0f %% сбоев и в %.0f %% ровного времени' % (
+            {'говорит': 'Плюс говорит (голос)', 'слушает': 'Плюс слушает тебя («плюс плюс»)',
+             'тесно': 'Бридж говорил «тесно»'}[metka],
+            100 * a / max(1, len(plohie)), 100 * b / max(1, len(horoshie))))
+    # сбои — отрезками
+    otrezki, cur = [], None
+    for z in plohie:
+        if cur and (z[0] - cur[1]).total_seconds() <= SHAG * 2.5:
+            cur[1] = z[0]; cur[2].append(z)
+        else:
+            cur = [z[0], z[0], [z]]; otrezki.append(cur)
+    if otrezki:
+        print('\nСамые длинные сбои:')
+        for a, b, zz in sorted(otrezki, key=lambda o: -len(o[2]))[:15]:
+            cl = max(z[6]['claude'] for z in zz)
+            go = max(z[6]['golos'] for z in zz)
+            met = sorted({m for z in zz for m in z[7].split(',') if m})
+            kam = sum(z[11] or 0 for z in zz)
+            print('  %s–%s  кадров/с от %.0f, потерь %d, пропусков звука %d · claude до %.0f %%, golos до %.0f %%%s%s' % (
+                a.strftime('%H:%M:%S'), b.strftime('%H:%M:%S'), min(z[1] for z in zz), sum(z[3] for z in zz),
+                sum(z[4] + z[5] for z in zz), cl, go, (' · ' + ', '.join(met)) if met else '',
+                ' · камера: пропущено %d кадров' % kam if kam else ''))
+
+
+demon() if REZHIM == 'nagruzka-demon' else sboi()
+PY
+fi
+SEK=${NAGRUZKA_SEK:-3}
+HZ=100
+up() { cut -d' ' -f1 /proc/uptime | cut -d. -f1; }
+
+imya() {   # $1 — pid: имя программы, у интерпретаторов — с именем скрипта
+  c=$(cat /proc/$1/comm 2> /dev/null) || return 1
+  case "$c" in
+    python*|node|sh|bash|dash|perl|ruby)
+      a=$(tr '\0' '\n' < /proc/$1/cmdline 2> /dev/null | sed -n '2,4p' | grep -v '^-' | head -n 1)
+      b=${a##*/}
+      case "$b" in ''|*[!A-Za-z0-9._-]*) ;; *) c="$c:$b" ;; esac ;;
+  esac
+  printf '%s' "$c"
+}
+
+snimok() {   # pid utime+stime rss_kB nachalo(tiki) ppid
+  for d in /proc/[0-9]*; do
+    p=${d#/proc/}
+    s=$(cat "$d/stat" 2> /dev/null) || continue
+    s=${s##*) }                                   # после «(имя) »: состояние, ppid, …
+    set -- $s
+    ppid=$2; t=$(( ${12} + ${13} )); nach=${20}; rss=$(( ${22} * 4 ))
+    echo "$p $t $rss $nach $ppid"
+  done
+}
+
+[ -r /proc/uptime ] || { echo "Нет /proc — запусти в Termux или в Ubuntu шлема."; exit 1; }
+A=$(snimok); U0=$(up)
+sleep "$SEK"
+B=$(snimok); U1=$(up)
+# «сейчас» — по началу самой этой проверки (в тиках от включения шлема): /proc/uptime в Ubuntu
+# (proot-distro) поддельный, а время начала процессов — настоящее
+MOJ=$(echo "$B" | awk -v p=$$ '$1 == p { print $4 }')
+SEJCHAS=$(( ${MOJ:-$((U1 * HZ))} / HZ + SEK ))
+PODDELKA=; [ "$U1" -lt "$SEJCHAS" ] && PODDELKA=1
+
+echo "=== Шлем: работает без перезагрузки $(( SEJCHAS / 3600 )) ч $(( SEJCHAS % 3600 / 60 )) мин ==="
+if [ -r /proc/meminfo ]; then
+  awk '/^MemTotal/{t=$2} /^MemAvailable/{a=$2} /^SwapTotal/{st=$2} /^SwapFree/{sf=$2}
+       END{printf "Память: свободно %.1f из %.1f ГБ", a/1048576, t/1048576;
+           if (st>0) printf "; подкачка занята %.1f ГБ", (st-sf)/1048576; print ""}' /proc/meminfo
+fi
+[ -r /proc/loadavg ] && [ -z "$PODDELKA" ] && echo "Нагрузка (1/5/15 мин): $(cut -d' ' -f1-3 /proc/loadavg)"
+T=
+for z in /sys/class/thermal/thermal_zone*/temp /sys/class/power_supply/battery/temp; do
+  v=$(cat "$z" 2> /dev/null) || continue
+  case "$v" in ''|*[!0-9]*) continue ;; esac
+  case "$z" in *battery*) v=$(( v * 100 )) ;; esac          # батарея — в десятых градуса
+  [ "$v" -gt 1000 ] && [ -z "$T" -o "$v" -gt "${T:-0}" ] && T=$v
+done
+[ -n "$T" ] && echo "Температура (самая горячая, что видно): $(( T / 1000 )) °C"
+
+# имена всех живых — один раз
+IM=$(echo "$B" | while read -r p t rss nach pp; do n=$(imya "$p") && echo "$p $n"; done)
+
+echo "$A" > /tmp/.nagr.a; echo "$B" > /tmp/.nagr.b; echo "$IM" > /tmp/.nagr.i
+awk -v sek="$SEK" -v hz=$HZ -v now="$SEJCHAS" '
+  FILENAME ~ /\.a$/ { t0[$1] = $2; next }
+  FILENAME ~ /\.i$/ { n[$1] = $2; next }
+  {
+    p = $1; if (!(p in n)) next
+    nm = n[p]
+    d = (p in t0) ? $2 - t0[p] : 0
+    cpu = d / hz / sek * 100
+    vozr = now - $4 / hz; if (vozr < 0) vozr = 0
+    k[nm]++; mem[nm] += $3; pr[nm] += cpu
+    if (!(nm in star) || vozr > star[nm]) star[nm] = vozr
+    if (!(nm in mlad) || vozr < mlad[nm]) mlad[nm] = vozr
+    vsego_mem += $3; vsego_cpu += cpu
+  }
+  function vremya(s) { return s >= 3600 ? sprintf("%d ч %02d мин", s / 3600, s % 3600 / 60) : sprintf("%d мин", s / 60) }
+  END {
+    printf "Всего у Termux/Ubuntu: память %.0f МБ, процессор сейчас %.0f %% (100 %% — одно ядро)\n", vsego_mem / 1024, vsego_cpu > "/dev/stderr"
+    for (x in k) printf "%s\t%d\t%.0f\t%.0f\t%s\t%s\n", x, k[x], mem[x] / 1024, pr[x], vremya(star[x]), vremya(mlad[x])
+  }' /tmp/.nagr.a /tmp/.nagr.i /tmp/.nagr.b 2>&1 > /tmp/.nagr.t
+echo
+echo "программа                  штук  память   проц.  живёт (старшая / младшая)"
+sort -t "$(printf '\t')" -k4,4nr -k3,3nr /tmp/.nagr.t | awk -F '\t' '$3 > 0' | head -n 15 |
+  awk -F '\t' '{ printf "%-26s %4s %5s МБ %5s %%  %s / %s\n", $1, $2, $3, $4, $5, $6 }'
+
+# лишние копии того, что должно быть одно
+echo
+LISHN=
+for x in bash:plus python3:ushi python3:golos python3:obzor python3:vedushchiy python3:donaty python3:zriteli python3:raciya python3:nagruzka-demon python3:sinhron python3:gosti ffmpeg cloudflared; do
+  c=$(awk -v x="$x" '$2 == x' /tmp/.nagr.i | wc -l)
+  [ "$c" -gt 1 ] && LISHN="$LISHN $x×$c"
+done
+CL=$(awk '$2 == "node:claude" || $2 == "claude"' /tmp/.nagr.i | wc -l)
+[ "$CL" -gt 3 ] && LISHN="$LISHN claude×$CL"
+# зомби — кончились, а родитель их не забрал (17.10: Плюс насчитал 13, а чьи — не видно): по имени родителя
+ZOMBI=$(for d in /proc/[0-9]*; do s=$(cat "$d/stat" 2> /dev/null) || continue; s=${s##*) }; set -- $s
+  [ "$1" = Z ] || continue; imya "$2" || printf '?'; echo; done)
+[ -n "$ZOMBI" ] && LISHN="$LISHN зомби×$(echo "$ZOMBI" | wc -l) (не забрал: $(echo "$ZOMBI" | sort | uniq -c |
+  sort -rn | awk '{ printf "%s%s×%d", (NR > 1 ? ", " : ""), $2, $1 }'))"
+NI=$(for p in $(awk '$2 == "claude" || $2 == "node:claude" { print $1 }' /tmp/.nagr.i); do
+  s=$(cat /proc/$p/stat 2> /dev/null) || continue; s=${s##*) }; set -- $s; echo "${17}"; done | sort -n | tail -n 1)
+[ -n "$NI" ] && echo "Приоритет Плюса: nice $NI (10 — уступает игре и бриджу, 0 — наравне с ними)"
+if command -v tmux > /dev/null 2>&1; then
+  TS=$(tmux ls 2> /dev/null | wc -l)
+  [ "$TS" -gt 0 ] && echo "Сессий tmux: $TS ($(tmux ls -F '#S' 2> /dev/null | tr '\n' ' '))"
+fi
+if [ -n "$LISHN" ]; then
+  echo "ЛИШНИЕ КОПИИ:$LISHN"
+  echo "(claude — это Плюс, его помощники и разовые автопросмотр/соведущий; больше 3 сразу — много)"
+else
+  echo "Лишних копий не видно: всё, что должно быть одно, — одно."
+fi
+rm -f /tmp/.nagr.a /tmp/.nagr.b /tmp/.nagr.i /tmp/.nagr.t
