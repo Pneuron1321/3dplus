@@ -195,6 +195,10 @@ class VizorPlashki(
      * ник фиолетом, ниже текст (до 4 строк; шквал — 1). Обращённые к Плюсу и донаты — золотой кант. Влезают
      * только целые сообщения выше [potolok]. Ответ — сколько нарисовано.
      */
+    /** 2.8.7: сколько точек (1080p) по высоте заняли сообщения в последний раз — чат ставится посередине просвета. */
+    @Volatile var chatVysota = 0f
+        private set
+
     fun chat(b: Bitmap, ss: List<Chat.Soob>, now: Long, bystro: Boolean, mesto: Int): Int {
         val c = Canvas(b)
         c.drawColor(0, PorterDuff.Mode.CLEAR)
@@ -226,6 +230,7 @@ class VizorPlashki(
             niz = verh - 8f
             n++
         }
+        chatVysota = if (n == 0) 0f else b.height - niz - 8f
         return n
     }
 

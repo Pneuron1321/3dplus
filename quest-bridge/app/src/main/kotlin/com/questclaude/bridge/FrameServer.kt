@@ -392,6 +392,10 @@ class FrameServer(
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.scenaUpr(query).toByteArray(Charsets.UTF_8))
             "/efir/stil" ->                        // визор: стиль плашек viz | staryj
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.stilUpr(query["v"]).toByteArray(Charsets.UTF_8))
+            "/efir/plus" ->                        // 2.8.7: Плюс в любое место кадра
+                reply(out, 200, "application/json; charset=utf-8", Oformlenie.plusUpr(query).toByteArray(Charsets.UTF_8))
+            "/efir/fon" ->                         // 2.8.7: вырезать зелёный/синий фон камеры
+                reply(out, 200, "application/json; charset=utf-8", Oformlenie.fonUpr(query).toByteArray(Charsets.UTF_8))
             "/efir/lico" ->                        // лицо в эфире: plus | zver (живой рисунок зверя)
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.licoUpr(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir/osnova" ->                      // Струны: основа эфира — igra (Мост 3) или shlem

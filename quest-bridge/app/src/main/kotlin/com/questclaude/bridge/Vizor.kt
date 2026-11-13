@@ -283,6 +283,10 @@ object Vizor {
 object Oformlenie {
     private const val FAJL = "efir-stil"
     private const val FAJL_LICO = "efir-lico"
+    private const val FAJL_PLUS = "efir-plus-mesto"
+    private const val FAJL_FON = "efir-fon"
+    /** 2.8.7: вырезать фон камеры — net, zel (зелёный), sin (синий). */
+    val FONY = setOf("net", "zel", "sin")
     val STILI = setOf("viz", "staryj")
     /** Лицо в эфире: plus — Плюс; zver — живой рисунок зверя (ZverLico). */
     val LICA = setOf("plus", "zver")
@@ -295,6 +299,15 @@ object Oformlenie {
         private set
     val viz: Boolean get() = stil == "viz"
     @Volatile var lico = "plus"
+        private set
+    /** 2.8.7 (Александр 12.11: «чтобы и Плюса можно было перемещать в любое место»): левый верхний угол Плюса
+     *  в кадре, точки 1080p; null — на своём месте (внизу слева). */
+    @Volatile var plusMesto: FloatArray? = null
+        private set
+    /** 2.8.7: зелёный/синий фон камеры — прозрачный; sila — насколько смело резать (0,05…0,5). */
+    @Volatile var fon = "net"
+        private set
+    @Volatile var fonSila = 0.15f
         private set
     /** Сцена: "" — нет, skoro, otoshyol, konec. */
     @Volatile var scena = ""
@@ -314,6 +327,11 @@ object Oformlenie {
         dir = d
         stil = try { File(d, FAJL).readText().trim().takeIf { it in STILI } ?: "viz" } catch (e: Exception) { "viz" }
         lico = try { File(d, FAJL_LICO).readText().trim().takeIf { it in LICA } ?: "plus" } catch (e: Exception) { "plus" }
+        plusMesto = try { File(d, FAJL_PLUS).readText().trim().split(' ').map { it.toFloat() }.takeIf { it.size == 2 }?.toFloatArray() }
+            catch (e: Exception) { null }
+        try { File(d, FAJL_FON).readText().trim().split(' ').let { f ->
+            fon = f[0].takeIf { it in FONY } ?: "net"; f.getOrNull(1)?.toFloatOrNull()?.let { fonSila = it.coerceIn(0.05f, 0.5f) } }
+        } catch (e: Exception) { }
         versiya++
     }
 
@@ -335,6 +353,45 @@ object Oformlenie {
             dir?.let { try { File(it, FAJL_LICO).writeText(v) } catch (e: Exception) { } }
         }
         return status()
+    }
+
+    /**
+     * /efir/plus — где Плюс в кадре: ugol=pn|ln|pv|lv (углы), x=&y= (% кадра от левого верхнего угла, левый верхний
+     * угол Плюса), dx=&dy= (сдвиг в %), domoy=1 — на своё место. Без параметров — только состояние.
+     */
+    fun plusUpr(q: Map<String, String>): String {
+        val w = Vizor.PL_W.toFloat(); val h = Vizor.PL_H.toFloat(); val W = 1920f; val H = 1080f; val m = 12f
+        val f = { k: String -> q[k]?.replace(',', '.')?.toFloatOrNull()?.takeIf { !it.isNaN() } }
+        val bylo = plusMesto ?: floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+        val novoe: FloatArray? = when {
+            q["domoy"] != null -> null
+            q["ugol"] != null -> when (q["ugol"]) {
+                "pn" -> floatArrayOf(W - w - m, H - h - 2f); "ln" -> floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+                "pv" -> floatArrayOf(W - w - m, m); "lv" -> floatArrayOf(m, m)
+                else -> return plusStatus(",\"oshibka\":\"угол: pn, ln, pv, lv\"")
+            }
+            f("x") != null || f("y") != null -> floatArrayOf((f("x") ?: (bylo[0] / W * 100)) * W / 100, (f("y") ?: (bylo[1] / H * 100)) * H / 100)
+            f("dx") != null || f("dy") != null -> floatArrayOf(bylo[0] + (f("dx") ?: 0f) * W / 100, bylo[1] + (f("dy") ?: 0f) * H / 100)
+            else -> return plusStatus("")
+        }
+        plusMesto = novoe?.let { floatArrayOf(it[0].coerceIn(0f, W - w), it[1].coerceIn(0f, H - h)) }
+        versiya++
+        dir?.let { d -> try { val p = plusMesto; if (p == null) File(d, FAJL_PLUS).delete()
+            else File(d, FAJL_PLUS).writeText("${p[0]} ${p[1]}") } catch (e: Exception) { } }
+        return plusStatus("")
+    }
+
+    private fun plusStatus(dop: String): String {
+        val p = plusMesto ?: floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+        return String.format(Locale.ROOT, "{\"svoyo\":%s,\"x\":%.1f,\"y\":%.1f%s}", plusMesto == null, p[0] / 19.2f, p[1] / 10.8f, dop)
+    }
+
+    /** /efir/fon?v=zel|sin|net&sila=0.15 — вырезать фон камеры (хромакей); мост запоминает. */
+    fun fonUpr(q: Map<String, String>): String {
+        q["v"]?.takeIf { it in FONY }?.let { fon = it }
+        q["sila"]?.replace(',', '.')?.toFloatOrNull()?.takeIf { !it.isNaN() }?.let { fonSila = it.coerceIn(0.05f, 0.5f) }
+        if (q.isNotEmpty()) { versiya++; dir?.let { try { File(it, FAJL_FON).writeText("$fon $fonSila") } catch (e: Exception) { } } }
+        return String.format(Locale.ROOT, "{\"fon\":\"%s\",\"sila\":%.2f}", fon, fonSila)
     }
 
     /** /efir/scena?s=skoro|otoshyol|konec|net&min=5&t=фраза (без s — только состояние; чужое — oshibka). */
@@ -376,5 +433,5 @@ object Oformlenie {
     }
 
     /** Только для проверок: как после установки. */
-    internal fun zanovo() { stil = "viz"; scena = ""; doMs = 0L; fraza = ""; dir = null; versiya++ }
+    internal fun zanovo() { stil = "viz"; scena = ""; doMs = 0L; fraza = ""; plusMesto = null; fon = "net"; fonSila = 0.15f; dir = null; versiya++ }
 }

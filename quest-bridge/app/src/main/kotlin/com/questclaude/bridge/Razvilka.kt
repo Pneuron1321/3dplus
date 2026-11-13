@@ -82,6 +82,8 @@ class Razvilka(private val w: Int, private val h: Int) {
     @Volatile var vid = Okno.Vid()
     /** Сколько места под чат справа (точки кадра 1080p): плашка рисует только влезающие сообщения. */
     @Volatile var chatMesto = Nalozhenie.CH
+    /** 2.8.7: высота нарисованных сообщений (1080p) — ставим их посередине просвета. */
+    @Volatile var chatVysota = 0f
 
     private var ktex = 0
     private var kst: SurfaceTexture? = null
@@ -139,6 +141,7 @@ class Razvilka(private val w: Int, private val h: Int) {
     private var sh2d = Sh(0, 0, 0, 0, 0, 0)
     private var shKamera = Sh(0, 0, 0, 0, 0, 0)               // окно камеры: уменьшение в 4 выборки (0 — не собралась)
     private var uShag = 0
+    private var uFon = 0
     private var released = false
 
     /** Кадров от захвата — для статуса. */
@@ -416,6 +419,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         try {                                         // не собралась — окно камеры рисуем как раньше
             shKamera = sh(program(VERTEX_KAMERA, FRAGMENT_KAMERA))
             uShag = GLES20.glGetUniformLocation(shKamera.p, "uShag")
+            uFon = GLES20.glGetUniformLocation(shKamera.p, "uFon")
         } catch (e: Exception) { shKamera = Sh(0, 0, 0, 0, 0, 0) }
         tex = oesTexture()
         st = SurfaceTexture(tex)
@@ -582,7 +586,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             "vn" -> { x = 0; y = 0 }
             "pv" -> { x = (Vizor.PV.l * s).toInt(); y = gl(Vizor.PV.t) }
             "lv" -> { x = (Vizor.LV.l * s).toInt(); y = gl(Vizor.LV.t) }
-            "pl" -> { x = (Vizor.PL.l * s).toInt(); y = gl(Vizor.PL.t) }                     // 2.7.9: Плюс — на месте розы
+            "pl" -> { val p = plusMesto(); x = (p[0] * s).toInt(); y = gl(p[1]) }          // 2.7.9: место розы; 2.8.7: любое
             "nc" -> { x = (titryLevo(o) * s).toInt(); y = gl(Vizor.TITRY_VERH) }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
@@ -596,16 +600,18 @@ class Razvilka(private val w: Int, private val h: Int) {
             }
             "mz" -> { x = (Vizor.MUZ.l * s).toInt(); y = gl(Vizor.MUZ.t) }   // наверху по центру (2.7.9)
             "pc" -> {
-                val zazor = (Vizor.ZAZOR * s).toInt()
-                // 2.8.2: под счётчиками, если они есть
+                // 2.8.2: под счётчиками, если они есть. 2.8.7 (Александр 12.11: окно камеры меньше, сдвинуто, «своё» —
+                // чат падал вниз, под окно): просвет столбца ищем по всем помехам — окно камеры в любом виде и Плюс,
+                // если его поставили в столбец; сообщения — посередине самого большого просвета.
                 val sv = sloi["sv"]?.takeIf { it.w > 0 }?.let { (it.h + Vizor.ZAZOR) * s } ?: 0f
                 val verh = o.h - ((Vizor.CHAT_VERH + sv) * s).toInt()
-                val niz = kameraVerh(o)?.let { it + zazor } ?: (o.h - (Vizor.NIZ * s).toInt())   // музыка — не в столбце
-                chatMesto = ((verh - niz) / s).toInt().coerceIn(0, Vizor.CH)
-                if (verh - niz < (60 * s).toInt()) return false
-                y = niz
+                val (niz, vrh) = Razmetka.prosvet(niz = o.h - (Vizor.NIZ * s).toInt(), verh = verh, x0 = x, x1 = o.w,
+                    pomehi = pomehiStolba(o), zazor = (Vizor.ZAZOR * s).toInt())
+                chatMesto = ((vrh - niz) / s).toInt().coerceIn(0, Vizor.CH)
+                if (vrh - niz < (60 * s).toInt()) return false
+                y = niz + Razmetka.poSeredine(vrh - niz, (chatVysota * s).toInt())
                 GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
-                GLES20.glScissor(x, niz, w, verh - niz)
+                GLES20.glScissor(x, niz, w, vrh - niz)
             }
             else -> { x = if (ugol.startsWith("l")) o.h / 100 else o.w - w - o.h / 100; y = if (ugol.endsWith("n")) o.h / 100 else o.h - h - o.h / 100 }
         }
@@ -789,6 +795,22 @@ class Razvilka(private val w: Int, private val h: Int) {
     private class Sh(val p: Int, val aPos: Int, val aTex: Int, val uMtx: Int, val uRazmer: Int, val uR: Int, val uA: Int = -1)
 
     /** Верх окна камеры (GL — от низа кадра, с рамкой), если окно справа внизу и видно; иначе null. */
+    /** Левый верхний угол Плюса (1080p): своё место или куда поставили (/efir/plus). */
+    private fun plusMesto(): FloatArray = Oformlenie.plusMesto ?: floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+
+    /** Помехи чату в правом столбце (GL, от низа): окно камеры в любом виде и Плюс. [x, y, w, h]. */
+    private fun pomehiStolba(o: Out): List<IntArray> {
+        val s = o.h / 1080f
+        val L = ArrayList<IntArray>()
+        if (kameraVidna()) L += Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, vid.povorot), vid)
+        if (sloi["pl"]?.let { it.w > 0 } == true) {
+            val p = plusMesto()
+            val ph = (Vizor.PL_H * s).toInt()
+            L += intArrayOf((p[0] * s).toInt(), o.h - (p[1] * s).toInt() - ph, (Vizor.PL_W * s).toInt(), ph)
+        }
+        return L
+    }
+
     private fun kameraVerh(o: Out): Int? {
         val v = vid
         if (!kameraVidna() || v.rezhim != "ugol" || v.gde != "pn") return null
@@ -806,7 +828,9 @@ class Razvilka(private val w: Int, private val h: Int) {
         val v = vid
         val ar = Okno.proporcii(kw, kh, v.povorot)
         val r = Okno.mesto(o.w, o.h, ar, v)
-        if (v.rezhim != "krupno" && Oformlenie.viz) {        // визор: золотые скобы по углам окна
+        val fon = if (shKamera.p == 0) "net" else Oformlenie.fon      // 2.8.7: вырезанный фон — без скоб и рамки
+        if (fon != "net") Unit
+        else if (v.rezhim != "krupno" && Oformlenie.viz) {        // визор: золотые скобы по углам окна
             GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
             GLES20.glClearColor(0xF2 / 255f, 0xC2 / 255f, 0x30 / 255f, 1f)
             for (p in Vizor.skobyKamery(r[0], r[1], r[2], r[3], o.h / 1080f)) {
@@ -830,7 +854,11 @@ class Razvilka(private val w: Int, private val h: Int) {
         }
         if (shKamera.p == 0) return kvadrat(ktex, kmtxPov)
         val umen = maxOf(r[2], r[3]) < maxOf(kw, kh)      // кадр телефона больше окна — уменьшаем
+        if (fon != "net") { GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA) }
+        GLES20.glUseProgram(shKamera.p)
+        GLES20.glUniform2f(uFon, if (fon == "zel") 1f else if (fon == "sin") 2f else 0f, Oformlenie.fonSila)
         kvadratKamery(kmtxPov, if (umen) 0.25f / r[2] else 0f, if (umen) 0.25f / r[3] else 0f)
+        if (fon != "net") GLES20.glDisable(GLES20.GL_BLEND)
     }
 
     /**
@@ -987,9 +1015,18 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vDx;
             varying vec2 vDy;
             uniform samplerExternalOES sTex;
+            uniform vec2 uFon;      // 2.8.7: x — 0 нет, 1 зелёный, 2 синий фон прочь; y — сила (0,05…0,5)
             void main() {
-                gl_FragColor = 0.25 * (texture2D(sTex, vTex - vDx - vDy) + texture2D(sTex, vTex + vDx - vDy)
+                vec4 c = 0.25 * (texture2D(sTex, vTex - vDx - vDy) + texture2D(sTex, vTex + vDx - vDy)
                     + texture2D(sTex, vTex - vDx + vDy) + texture2D(sTex, vTex + vDx + vDy));
+                if (uFon.x > 0.5) {
+                    float drugie = uFon.x < 1.5 ? max(c.r, c.b) : max(c.r, c.g);
+                    float fon = uFon.x < 1.5 ? c.g : c.b;
+                    float a = 1.0 - smoothstep(uFon.y * 0.5, uFon.y * 1.5, fon - drugie);   // чем зеленее — тем прозрачнее
+                    if (uFon.x < 1.5) c.g = min(c.g, drugie + 0.02); else c.b = min(c.b, drugie + 0.02);   // зелёный ореол прочь
+                    c = vec4(c.rgb * a, a);                                                 // с умноженной альфой
+                }
+                gl_FragColor = c;
             }
         """.trimIndent()
 

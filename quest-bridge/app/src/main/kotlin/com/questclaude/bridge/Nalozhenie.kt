@@ -351,7 +351,7 @@ class Nalozhenie(
                     // не чаще 4 раз в секунду: в шквал плашка не перерисовывается на каждое сообщение
                     if (chKlyuch != chatBylo && (cs.isEmpty() || now - chatMs >= CHAT_MS)) {
                         if (cs.isEmpty()) { razvilka.sloy("pc", null); chatNaEkrane = 0 }
-                        else if (v) { chatNaEkrane = viz.chat(chatV, cs, now, bystro, razvilka.chatMesto); razvilka.sloy("pc", chatV) }
+                        else if (v) { chatNaEkrane = viz.chat(chatV, cs, now, bystro, razvilka.chatMesto); razvilka.chatVysota = viz.chatVysota; razvilka.sloy("pc", chatV) }
                         else { chatRisovat(cs, now, bystro); razvilka.sloy("pc", chatBmp) }
                         chatBylo = chKlyuch; chatMs = now
                     }
