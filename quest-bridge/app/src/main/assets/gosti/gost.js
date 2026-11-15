@@ -37,6 +37,8 @@
     kamPropala: 'Камера пропала — поднимаю…', kamNet2: 'Камера не вернулась: не занята ли она другим приложением? Голос в эфире идёт.',
     naushnikiSmena: '🎧 Наушники отключились — включила «🔇 Только голоса», чтобы эфир не услышал эхо твоего динамика.',
     tolkoZvuk: 'Камера недоступна — входишь только со звуком.',
+    lait: 'Лайт режим', laitPod: 'Лайт: слышно только Александра и Плюса, без игры и картинки эфира. Четыре кнопки: микрофон, камера, Александр, Плюс.',
+    lnMik: 'Мой микрофон', lnKam: 'Моя камера', lnAleks: 'Голос Александра', lnPlus: 'Голос Плюса', lnPolnyy: 'Полный режим', lnVyyti: 'Выйти',
     prevyuZhdi: 'Картинка эфира появится, когда начнётся эфир.', prevyuNet: 'Этот браузер не показывает картинку эфира — смотри стрим на Twitch, звук идёт отсюда.',
     prevyuVykl: 'Картинка эфира выключена (тесная сеть шлема) — смотри стрим на Twitch.',
     vKadre: 'Ты в кадре.', zaKadrom: 'Ты за кадром — слушаешь и управляешь.', skryt: 'Модератор убрал тебя с экрана — звук идёт.',
@@ -84,6 +86,8 @@
     kamPropala: 'Camera lost — restoring…', kamNet2: 'The camera did not come back: is another app using it? Your voice is still on stream.',
     naushnikiSmena: '🎧 Headphones unplugged — “🔇 Voices only” is on so the stream won’t hear your speaker as an echo.',
     tolkoZvuk: 'Camera unavailable — joining with audio only.',
+    lait: 'Lite mode', laitPod: 'Lite: you hear only Alexander and Plus — no game sound, no stream picture. Four buttons: mic, camera, Alexander, Plus.',
+    lnMik: 'My mic', lnKam: 'My camera', lnAleks: 'Alexander\'s voice', lnPlus: 'Plus\'s voice', lnPolnyy: 'Full mode', lnVyyti: 'Leave',
     prevyuZhdi: 'The stream picture appears when the stream starts.', prevyuNet: 'This browser cannot show the stream picture — watch on Twitch, audio comes from here.',
     prevyuVykl: 'Stream picture is off (tight headset network) — watch on Twitch.',
     vKadre: 'You are on screen.', zaKadrom: 'You are off screen — listening and moderating.', skryt: 'The moderator hid you from the screen — audio still on.',
@@ -133,6 +137,9 @@
     lyudi: [], govoryat: new Set(), lock: null, mest: 2, vpusk: 'ruchnoy',
     tolkoGolosa: false, igraDo: 50, golosaReshili: false, sprashivaem: false,
     raciya: false, zhmu: false,
+    // ⚡ Лайт (2.8.8): ?lait в ссылке или прошлый выбор; слышу ли Александра и Плюса
+    lait: poisk.has('lait') || hash.get('l') === '1' || (() => { try { return localStorage.getItem('plus-lait') === '1'; } catch (x) { return false; } })(),
+    aleks: true, plus: true,
   };
   const umeet = {
     zvuk: typeof WebAssembly === 'object' && 'AudioWorkletNode' in window,
@@ -158,6 +165,9 @@
     $('knRaciya').title = T.raciyaT; $('knGovori').textContent = T.govori;
     $('tPult').textContent = T.pult; $('tPriglasit').textContent = T.priglasit; $('tModerSsylka').textContent = T.moderSsylka;
     $('tNovaya').textContent = T.novaya; $('knSnova').textContent = T.snova;
+    $('tLait').textContent = T.lait; $('tVLait').textContent = T.lait; $('laitPod').textContent = T.laitPod;
+    $('tLnMik').textContent = T.lnMik; $('tLnKam').textContent = T.lnKam; $('tLnAleks').textContent = T.lnAleks;
+    $('tLnPlus').textContent = T.lnPlus; $('tLnPolnyy').textContent = T.lnPolnyy; $('tLnVyyti').textContent = T.lnVyyti;
     document.title = 'Plus · ' + zag;
   }
 
@@ -375,6 +385,25 @@
     for (const id of ['knKamera', 'knKam2', 'knKamP']) { $(id).classList.toggle('vkl', S.kamera && !S.kameraZapret); $(id).classList.toggle('zapret', S.kameraZapret); }
     for (const id of ['knMikrofon', 'knMik2', 'knMikP']) $(id).classList.toggle('vkl', S.mikrofon && !S.zaglushen);
     $('knRaciya').classList.toggle('vkl', S.raciya);
+    const lk = (id, vkl, zapret) => { const b = $(id); b.classList.toggle('vkl', vkl); b.classList.toggle('zapret', !!zapret); b.setAttribute('aria-pressed', String(vkl)); };
+    lk('lnMik', S.mikrofon && !S.zaglushen, S.zaglushen); lk('lnKam', S.kamera && !S.kameraZapret, S.kameraZapret);
+    lk('lnAleks', S.aleks); lk('lnPlus', S.plus);
+    $('knLait').classList.toggle('vkl', S.lait); $('knLait').setAttribute('aria-pressed', String(S.lait)); pokaz('laitPod', S.lait);
+  }
+
+  // ---------- ⚡ Лайт (2.8.8, Александр): слышно только его и Плюса; без игры и картинки эфира ----------
+  function laitPokazat() {
+    const v = S.lait && S.vnutri && S.rol !== 'hozyain';
+    document.body.classList.toggle('lait', v);
+    pokaz('laitBlok', v);
+    knopki();
+  }
+  function laitStavit(vkl) {
+    S.lait = vkl;
+    try { localStorage.setItem('plus-lait', vkl ? '1' : '0'); } catch (x) { }
+    if (vkl && S.polnyy) polnyy(false);
+    laitPokazat(); otpravitSam();
+    if (!vkl && S.kodek) prositKlyuch();                                // картинка эфира — снова с ключевого кадра
   }
 
   // Камера в эфире вкл/выкл: выключенная гаснет совсем (огонёк камеры тоже), включённая — заново.
@@ -442,7 +471,8 @@
   function otpravitSam(dop) {
     if (S.ws && S.ws.readyState === 1 && S.vnutri)
       S.ws.send(JSON.stringify(Object.assign({ t: 'sam', kamera: S.kamera && !!(S.stream && S.stream.getVideoTracks()[0]), mikrofon: S.mikrofon,
-        igra: Number($('igra').value) / 100, raciya: S.raciya }, dop || {})));
+        igra: Number($('igra').value) / 100, raciya: S.raciya,
+        lait: S.lait, aleks: S.aleks, plus: S.plus, prevyu: !S.lait }, dop || {})));
   }
 
   // Вопрос с двумя ясными ответами (confirm на телефоне — «OK / Отмена», непонятно, что чем)
@@ -488,7 +518,7 @@
     } catch (x) { return false; }
   }
   async function golosaReshit() {                                       // один раз, при входе в эфир
-    if (S.golosaReshili || S.rol === 'hozyain') return;
+    if (S.golosaReshili || S.rol === 'hozyain' || S.lait) return;     // в лайте игры нет — решать нечего
     S.golosaReshili = true;
     if (!(await estNaushniki())) golosaStavit(true, true);
   }
@@ -739,9 +769,9 @@
         if (!m.kamera && S.kamera && S.rol !== 'hozyain') { S.kamera = false; pokazatSebya(); }
         if (!m.mikrofon && S.mikrofon && S.rol !== 'hozyain') { S.mikrofon = false; knopki(); }
         zametka('');
-        if (S.vnutri) { ekran('ekranEfir'); sostoyanie(); S.nuzhenKlyuch = true; if (S.kodek) prositKlyuch(); budilnik(); golosaReshit(); }
+        if (S.vnutri) { ekran('ekranEfir'); sostoyanie(); S.nuzhenKlyuch = true; if (S.kodek) prositKlyuch(); budilnik(); golosaReshit(); otpravitSam(); }
         else ekran('ekranZhdi');
-        pokaz('paneli', S.rol !== 'hozyain'); pokaz('prevyuBlok', S.rol !== 'hozyain');
+        pokaz('paneli', S.rol !== 'hozyain'); pokaz('prevyuBlok', S.rol !== 'hozyain'); laitPokazat();
         $('tochka').classList.toggle('efir', S.efir);
         if (!umeet.vdec) prevyuTekst(T.prevyuNet); else if (!S.kodek) prevyuTekst(S.efir ? '' : T.prevyuZhdi);
         break;
@@ -816,7 +846,7 @@
       const n = document.createElement('span'); n.className = 'imya'; n.textContent = x.imya + (x.id === S.id ? T.vy : '');
       const r = document.createElement('span'); r.className = 'rol';
       r.textContent = (x.rol === 'moder' ? T.moder + ' · ' : '') + (x.mikrofon && !x.zaglushen ? '🎤' : '🔇') + (x.kamera && !x.kamera_zapret ? ' 📷' : '') +
-        (x.raciya ? ' 📻' : '');
+        (x.raciya ? ' 📻' : '') + (x.lait ? ' ⚡' : '');
       li.append(c, n, r); ul.append(li);
     }
   }
@@ -908,6 +938,15 @@
       golosaPokazat(); otpravitSam();
     };
     $('knGolosa').onclick = () => (S.tolkoGolosa ? igruVernut() : golosaStavit(true, false));
+    // ⚡ Лайт: на входе — выбор, в эфире — четыре кнопки и «Полный режим»
+    $('knLait').onclick = () => { S.lait = !S.lait; try { localStorage.setItem('plus-lait', S.lait ? '1' : '0'); } catch (x) { } knopki(); };
+    $('knVLait').onclick = () => laitStavit(true);
+    $('lnPolnyy').onclick = () => laitStavit(false);
+    $('lnMik').onclick = mikrofonTumbler;
+    $('lnKam').onclick = kameraTumbler;
+    $('lnAleks').onclick = () => { S.aleks = !S.aleks; knopki(); otpravitSam(); };
+    $('lnPlus').onclick = () => { S.plus = !S.plus; knopki(); otpravitSam(); };
+    $('lnVyyti').onclick = () => $('knVyyti').onclick();
     // 📻 рация: держишь — слышно; отпустил, увёл палец, свернул страницу — нет
     $('knRaciya').onclick = raciyaTumbler;
     const gv = $('knGovori');
@@ -954,7 +993,7 @@
       navigator.mediaDevices.addEventListener('devicechange', async () => {
         const p = await podpis();
         // наушники сняли посреди эфира — сами «только голоса»; надели — решает гость (кнопкой)
-        if (bylo !== null && p !== bylo && S.vnutri && S.rol !== 'hozyain' && !S.tolkoGolosa && !(await estNaushniki())) {
+        if (bylo !== null && p !== bylo && S.vnutri && S.rol !== 'hozyain' && !S.tolkoGolosa && !S.lait && !(await estNaushniki())) {
           golosaStavit(true, true); zametka(T.naushnikiSmena);
         }
         bylo = p;
@@ -968,6 +1007,7 @@
   // ---------- начало ----------
   teksty();
   knopkiVhoda();
+  knopki();                                                             // ⚡ Лайт из ссылки или прошлого раза — кнопка входа сразу горит
   if (!klyuch) { oshibkaVhoda(T.netKlyucha); $('knRazreshit').disabled = true; return; }
   if (!umeet.zvuk) { oshibkaVhoda(T.neumeet); $('knRazreshit').disabled = true; return; }
   // встроенный браузер приложения (Instagram, Facebook…) часто без камеры и микрофона — сразу сказать, куда открыть

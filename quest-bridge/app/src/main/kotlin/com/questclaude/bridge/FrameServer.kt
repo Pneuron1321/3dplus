@@ -561,7 +561,9 @@ class FrameServer(
                     }
                     val mp3 = ByteArray(got) { chars[it].code.toByte() }   // ISO-8859-1: символ = байт
                     c.soTimeout = 0                                         // играет, сколько длится
-                    val end = g.play(mp3, when (query["mode"]) { "uho" -> "uho"; "efir" -> "efir"; "oba" -> "oba"; else -> "vsluh" })
+                    Hub.ktoGovorit = query["kto"]                          // 2.8.8: «ved» — соведущая, не Плюс
+                    val end = try { g.play(mp3, when (query["mode"]) { "uho" -> "uho"; "efir" -> "efir"; "oba" -> "oba"; else -> "vsluh" }) }
+                        finally { Hub.ktoGovorit = null }
                     reply(out, 200, "application/json", "{\"end\":\"$end\"}".toByteArray())
                 }
             }

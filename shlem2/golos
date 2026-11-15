@@ -839,14 +839,15 @@ class Most:
     """Играет приложение-мост (POST /say): «uho» — звук помечен «не записывать»,
     захват стрима его пропускает. Ответ приходит, когда кусок доиграл."""
 
-    def __init__(self, put, rezhim):
+    def __init__(self, put, rezhim, kto=''):
         self.res, self.err = None, ''
         self.t0 = time.time()
-        threading.Thread(target=self.run, args=(put, rezhim), daemon=True).start()
+        threading.Thread(target=self.run, args=(put, rezhim, kto), daemon=True).start()
 
-    def run(self, put, rezhim):
+    def run(self, put, rezhim, kto=''):
         try:
-            req = urllib.request.Request('%s/say?mode=%s' % (MOST, rezhim), data=open(put, 'rb').read(),
+            # 14.11: kto=ved — говорит соведущая: мост не двигает рот Плюса, а показывает её знак над его головой
+            req = urllib.request.Request('%s/say?mode=%s%s' % (MOST, rezhim, '&kto=' + kto if kto else ''), data=open(put, 'rb').read(),
                                          method='POST', headers={'Content-Type': 'audio/mpeg'})
             with urllib.request.urlopen(req, timeout=180) as r:
                 self.res = json.loads(r.read().decode() or '{}').get('end', 'done')
@@ -1645,11 +1646,12 @@ class Golos:
             except OSError:
                 pass
         m = None if uho else self.cherez_most()
+        kto = 'ved' if k.golos == VOICE_VED else ''
         if uho:
-            self.igrok = self.Most(put, 'uho')
+            self.igrok = self.Most(put, 'uho', kto)
             kuda = 'uho'
         elif m:
-            self.igrok = self.Most(put, m)       # мост: «oba» — в шлем и прямо в эфир; «vsluh» — его пишет захват
+            self.igrok = self.Most(put, m, kto)  # мост: «oba» — в шлем и прямо в эфир; «vsluh» — его пишет захват
             self.igrok.oba = True                # «вслух» мостом: не сыграл — самооткат на play-audio
             kuda = 'most-' + m
         else:

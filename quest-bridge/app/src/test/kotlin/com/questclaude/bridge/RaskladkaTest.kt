@@ -10,7 +10,7 @@ class RaskladkaTest {
     private fun kv(s0: Float, kvadratov: Int, stroki: Float = 0f) = minOf(s0, (mesto - stroki) / kvadratov)
 
     @Test fun dvaGostyaPoCentruSlevaMezhduTabloIPlyusom() {
-        assertEquals(Vizor.PL.t - 20f, Raskladka.NIZ, 0f)
+        assertEquals(Vizor.plusDomoy()[1] - 20f, Raskladka.NIZ, 0f)
         val p = Raskladka.plitki(2, 2)
         assertEquals(2, p.size)
         assertEquals(kv(240f, 2, Raskladka.ZAZOR), p[0].s, 0.01f)

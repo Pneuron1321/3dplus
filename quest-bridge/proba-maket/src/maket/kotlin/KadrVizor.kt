@@ -3,6 +3,7 @@ package com.questclaude.bridge
 import android.content.Context as AContext
 import android.graphics.Bitmap as ABitmap
 import android.graphics.Canvas as ACanvas
+import android.graphics.RectF as ARectF
 import java.io.File
 
 /**
@@ -14,7 +15,7 @@ class VizVaryant(val imya: String, val vid: Okno.Vid, val muzyka: Boolean = true
                  val niz: List<Triple<String, String, String>> = emptyList(), val lico: String = "plus",
                  val sost: String = "obychno", val morgaet: Boolean = false, val t: Long = 0L,
                  val prisedT: Long = -1L, val ulybka: Boolean = false, val gostey: Int = 0,
-                 val schet: Boolean = false)
+                 val schet: Boolean = false, val pulsT: Long = -1L)
 
 fun kadryVizor(out: File) {
     val ya = Okno.Vid("ugol", "pn", 0.25f, 90, true, 4f)                // айфон стоя, снизу вплотную (как у Александра)
@@ -29,6 +30,9 @@ fun kadryVizor(out: File) {
         VizVaryant("vizor-schet", ya, schet = true, niz = listOf(
             Triple("plus", "Rex, спасибо за донат!", "Rex, thanks for the donation!"))),
         VizVaryant("vizor-gosti-3", ya, gostey = 3),
+        // 2.8.8: пульс плашки ссылок (раз в 5 мин) — 3-й пульс (130 %) и пик рывка (155 %); Плюс в приседе, стоит на ней
+        VizVaryant("vizor-puls-3", ya, schet = true, pulsT = 1499L),
+        VizVaryant("vizor-puls-pik", ya, schet = true, pulsT = 1650L),
         VizVaryant("vizor-efir-bokom", bokom, muzyka = false, sotnya = true, niz = listOf(
             Triple("ya", "Макс, прикрой слева, я захожу на крышу, а ты держи вертолёт подальше от нас",
                 "Max, cover the left, I'm going up to the roof, keep the chopper away from us"))),
@@ -39,6 +43,7 @@ fun kadryVizor(out: File) {
         VizVaryant("zver-morgaet", ya, lico = "zver", morgaet = true),
         // 2.7.2: Плюс во весь рост — речь, моргает, приседания (кадры 2 и нижняя точка)
         VizVaryant("plus-govorit", ya, sost = "govorit", t = 90L * 5),
+        VizVaryant("plus-ved", ya, sost = "ved", t = 90L * 5),         // 2.8.8: говорит соведущая — её знак, Плюс смотрит вверх
         VizVaryant("plus-morgaet", ya, morgaet = true),
         VizVaryant("plus-ulybka", ya, ulybka = true),
         VizVaryant("plus-prised-2", ya, prisedT = 130L),
@@ -112,7 +117,9 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     if (v.ulybka) pole(n, "ulybka", true)
     val tt = if (v.t != 0L) v.t else now
     if (v.prisedT >= 0) pole(n, "prisedS", tt - v.prisedT)
-    zvat(n, "risovatViz", Nalozhenie.Pokaz(), v.sost, tt)
+    val tp = if (v.pulsT >= 0) 7 * Vizor.NK_PULS_RAZ_MS + v.pulsT else tt
+    if (v.pulsT >= 0) pole(n, "nkVidno", true)
+    zvat(n, "risovatViz", Nalozhenie.Pokaz(), v.sost, if (v.pulsT >= 0) tp else tt)
     Oformlenie.licoUpr("plus")
     val pv = zvat(n, "getPvV") as ABitmap
     val pl = zvat(n, "getPlV") as ABitmap
@@ -148,9 +155,13 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
         sk.restore()
     }
     kc.drawBitmap(pv, Vizor.PV.l, Vizor.PV.t, null)                                            // pv
-    kc.drawBitmap(pl, Vizor.PL.l, Vizor.PL.t, null)                                            // pl (2.7.9: вместо розы)
+    val pk = if (v.pulsT >= 0) Vizor.nkPuls(v.pulsT) else 1f                                  // пульс плашки (как Razvilka)
+    kc.drawBitmap(pl, Vizor.plusDomoy()[0], Vizor.plusDomoy()[1] - Vizor.NK_H * (pk - 1f), null)   // pl (2.8.8: стоит на нике)
     kc.drawBitmap(lv, Vizor.LV.l, Vizor.LV.t, null)                                            // lv
-    if (ts.isNotEmpty()) kc.drawBitmap(titrB, Vizor.titryX(minOf(Vizor.PRAVO, r[0].toFloat())), Vizor.TITRY_VERH, null)  // nc
+    val nkB = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)
+    if (v.schet) viz.niki(nkB, "nik", schet.nik, schet.ssylka)
+    val levoT = maxOf(Vizor.PL.r, Vizor.NK_X + (if (v.schet) viz.nkShirina else 0f))      // как в Razvilka.titryLevo
+    if (ts.isNotEmpty()) kc.drawBitmap(titrB, Vizor.titryX(minOf(Vizor.PRAVO, r[0].toFloat()), levoT), Vizor.TITRY_VERH, null)  // nc
     if (s.rz.chatMesto >= 60) {                                                                 // pc
         kc.save()
         kc.clipRect(Vizor.STOLB_X, chatVerh.toFloat(), Vizor.PRAVO, chatNiz.toFloat())
@@ -162,10 +173,8 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
         val svB = ABitmap.createBitmap(Vizor.SV_W, Vizor.schetH(2).toInt(), ABitmap.Config.ARGB_8888)
         viz.schet(svB, schet)
         kc.drawBitmap(svB, Vizor.STOLB_X, Vizor.SCHET_VERH, null)                              // sv
-        val nkB = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)
-        viz.niki(nkB, "nik", schet.nik, schet.ssylka)
-        val tl = Vizor.titryX(minOf(Vizor.PRAVO, r[0].toFloat()))
-        kc.drawBitmap(nkB, tl + Vizor.TW / 2f - Vizor.NK_W / 2f, Vizor.NK_VERH, null)          // nk
+        val nkNiz = Vizor.NK_VERH + Vizor.NK_H                                                  // nk (2.8.8: под ногами Плюса)
+        kc.drawBitmap(nkB, null, ARectF(Vizor.NK_X, nkNiz - Vizor.NK_H * pk, Vizor.NK_X + Vizor.NK_W * pk, nkNiz), null)
         val dnB = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)       // nk во вторую очередь — ссылка
         viz.niki(dnB, "donat", schet.nik, schet.ssylka)
         val kd = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)

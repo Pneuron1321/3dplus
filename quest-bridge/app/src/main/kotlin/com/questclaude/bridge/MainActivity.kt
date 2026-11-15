@@ -74,6 +74,16 @@ class MainActivity : Activity() {
             addView(button("КАМЕРА ТЕЛЕФОНА: подключить айфон") { kameraKnopka() }.apply {
                 setOnLongClickListener { kameraNovyKlyuch(); true }
             })
+            // 2.8.8 (Александр 13.11: «добавь кнопку на включение и выключение фона»): одно нажатие — следующий режим
+            lateinit var fonK: Button
+            fun fonNadpis() = "ФОН КАМЕРЫ: " + when (Oformlenie.fon) { "zel" -> "зелёный вырезан"; "sin" -> "синий вырезан"; else -> "как есть" } +
+                " (нажми — " + when (Oformlenie.fon) { "net" -> "вырезать зелёный"; "zel" -> "вырезать синий"; else -> "вернуть фон" } + ")"
+            if (Oformlenie.fon == "net") Oformlenie.zagruzit(filesDir)          // захват ещё не включён — взять запомненное
+            fonK = button(fonNadpis()) {
+                Oformlenie.fonUpr(mapOf("v" to when (Oformlenie.fon) { "net" -> "zel"; "zel" -> "sin"; else -> "net" }))
+                fonK.text = fonNadpis()
+            }
+            addView(fonK)
             addView(button("КЛИП КАМЕРЫ: сохранить последние 2 минуты") { klipKnopka() })
             addView(button("КЛИПЫ: открыть на айфоне (15 минут)") { klipyKnopka() }.apply {
                 setOnLongClickListener { Hub.klipy?.zakrytVse(); klipyStatus = "Клипы: страница закрыта, ключ больше не работает."; true }

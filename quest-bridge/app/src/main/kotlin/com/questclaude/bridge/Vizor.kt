@@ -32,6 +32,8 @@ object Vizor {
     const val KANT = 0x59F2C230
     /** Метки площадок у сообщений чата. */
     const val TWITCH = 0xFF9146FF.toInt()
+    /** 2.8.8: цвет соведущей (её знак над Плюсом). */
+    const val VED_CVET = 0xFFFFD60A.toInt()      // 14.11: жёлтый с чёрным (Александр)
     const val KICK = 0xFF53FC18.toInt()
     const val YOUTUBE = 0xFFFF0033.toInt()
     const val INSTAGRAM = 0xFFE1306C.toInt()      // 2.8.2: значки внизу кадра
@@ -203,6 +205,35 @@ object Vizor {
     const val NK_W = 900
     const val NK_H = 36
     val NK_VERH = H - NK_H - 2f
+    /** 2.8.8 (Александр 14.11: «плашку со ссылками — под ноги Плюсу, в нижний левый угол»): левый край ника. */
+    val NK_X = PL.l
+
+    // 2.8.8 (Александр 15.11): раз в 5 минут плашка ссылок пульсирует — три пульса по 0,5 с, каждый +10 % к исходному
+    // (110 → 120 → 130 %), четвёртый — резко до +25 % сверху (155 %) и сразу назад к 100 %. Растёт от левого нижнего
+    // угла (кадр не теряет её). Плюс приседает на всё время и встаёт, когда плашка вернулась.
+    const val NK_PULS_RAZ_MS = 300_000L
+    const val NK_PULS_MS = 500L
+    const val NK_PULS_SHAG = 0.10f
+    const val NK_PULS_RYVOK = 0.25f
+    const val NK_PULS_VSEGO = NK_PULS_MS * 4
+
+    /** Где мы в пульсации: мс от её начала или −1 (сейчас не пульсирует). */
+    fun nkPulsT(now: Long): Long = (now % NK_PULS_RAZ_MS).let { if (it < NK_PULS_VSEGO) it else -1L }
+
+    /** Масштаб плашки ссылок через [t] мс от начала пульсации (1 — как есть). */
+    fun nkPuls(t: Long): Float {
+        if (t < 0 || t >= NK_PULS_VSEGO) return 1f
+        val i = (t / NK_PULS_MS).toInt()
+        val u = (t % NK_PULS_MS) / NK_PULS_MS.toFloat()
+        val bylo = 1f + NK_PULS_SHAG * minOf(i, 3)
+        if (i < 3) {                                                   // пульс: толчок с запасом и встать на +10 %
+            val k = 1f - (1f - u) * (1f - u)
+            return bylo + NK_PULS_SHAG * k + 0.04f * kotlin.math.sin(Math.PI * u).toFloat()
+        }
+        val pik = bylo + NK_PULS_RYVOK                                 // четвёртый: рывок за 0,15 с, сжатие к 100 %
+        return if (u < 0.3f) bylo + (pik - bylo) * (u / 0.3f)
+        else { val v = (u - 0.3f) / 0.7f; pik + (1f - pik) * (1f - (1f - v) * (1f - v)) }
+    }
 
     // слой "sp" — живой Плюс на сценах и в итогах (2.8.5, Александр 05.11: «в итогах — анимация разговора и моргания»):
     // во весь рост, поверх "vse" и "sc"; место — по сцене (Nalozhenie кладёт сюда, развилка берёт)
@@ -219,7 +250,9 @@ object Vizor {
     // слой "nc" — субтитры: низ по центру, не выше нижней границы центра
     const val TW = 1030                 // уже прежних 1100: слева Плюс
     const val TH = 172
-    val TITRY_VERH = NIZ - TH
+    val TITRY_VERH = H - TH - 4f        // 2.8.8: субтитры — в самом низу кадра (ник ушёл под Плюса)
+    /** 2.8.8: фон субтитров на 25 % прозрачнее остальных карточек. */
+    const val TITRY_FON = 0.75f
 
     // слои "vv", "vn" — скобы и линия: полосы во всю ширину сверху и снизу ("vn" с 2.7.9 не шлётся — нижних скоб нет)
     const val RAMKA_H = 96
@@ -252,8 +285,11 @@ object Vizor {
     }
 
     /** Место субтитров по горизонтали: между Плюсом и окном камеры ([pravo] — его левый край, 1080p). */
-    fun titryX(pravo: Float = PRAVO): Float {
-        val levo = PL.r + ZAZOR
+    /** Своё место Плюса (левый верхний угол, 1080p): с 2.8.8 — над плашкой ника, «стоит на ней». */
+    fun plusDomoy(): FloatArray = floatArrayOf(PL.l, PL.t - NK_H - ZAZOR)
+
+    fun titryX(pravo: Float = PRAVO, levo0: Float = PL.r): Float {
+        val levo = levo0 + ZAZOR
         val c = (levo + pravo - ZAZOR) / 2f
         return (c - TW / 2f).coerceIn(levo, maxOf(levo, W - TW - SKOBA_OTSTUP))
     }
@@ -362,11 +398,11 @@ object Oformlenie {
     fun plusUpr(q: Map<String, String>): String {
         val w = Vizor.PL_W.toFloat(); val h = Vizor.PL_H.toFloat(); val W = 1920f; val H = 1080f; val m = 12f
         val f = { k: String -> q[k]?.replace(',', '.')?.toFloatOrNull()?.takeIf { !it.isNaN() } }
-        val bylo = plusMesto ?: floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+        val bylo = plusMesto ?: Vizor.plusDomoy()
         val novoe: FloatArray? = when {
             q["domoy"] != null -> null
             q["ugol"] != null -> when (q["ugol"]) {
-                "pn" -> floatArrayOf(W - w - m, H - h - 2f); "ln" -> floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+                "pn" -> floatArrayOf(W - w - m, H - h - 2f); "ln" -> Vizor.plusDomoy()
                 "pv" -> floatArrayOf(W - w - m, m); "lv" -> floatArrayOf(m, m)
                 else -> return plusStatus(",\"oshibka\":\"угол: pn, ln, pv, lv\"")
             }
@@ -382,7 +418,7 @@ object Oformlenie {
     }
 
     private fun plusStatus(dop: String): String {
-        val p = plusMesto ?: floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+        val p = plusMesto ?: Vizor.plusDomoy()
         return String.format(Locale.ROOT, "{\"svoyo\":%s,\"x\":%.1f,\"y\":%.1f%s}", plusMesto == null, p[0] / 19.2f, p[1] / 10.8f, dop)
     }
 

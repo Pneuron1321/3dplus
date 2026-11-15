@@ -30,6 +30,8 @@
       <button id="knMikrofon" class="tumbler vkl" type="button">🎤 <span id="tMikrofon">Микрофон</span></button>
       <button id="knPovernut" class="tumbler" type="button" hidden>🔄</button>
     </div>
+    <button id="knLait" class="tumbler lait" type="button" aria-pressed="false">⚡ <span id="tLait">Лайт режим</span></button>
+    <p id="laitPod" class="sovet laitPod" hidden></p>
     <p id="tNaushniki" class="sovet">🎧 Надень наушники — иначе эфир услышит эхо.</p>
     <p id="tTwitch" class="sovet">📺 Twitch держи без звука.</p>
     <button id="knRazreshit" class="glavnaya" type="button">Включить камеру и микрофон</button>
@@ -54,6 +56,19 @@
       </div>
     </div>
     <div id="zametka" class="zametka" hidden></div>
+    <!-- ⚡ Лайт (2.8.8): слышно только Александра и Плюса, четыре кнопки -->
+    <div id="laitBlok" class="laitBlok" hidden>
+      <div class="laitSetka">
+        <button id="lnMik" class="laitKn vkl" type="button" aria-pressed="true"><b>🎤</b><span id="tLnMik">Мой микрофон</span></button>
+        <button id="lnKam" class="laitKn vkl" type="button" aria-pressed="true"><b>📷</b><span id="tLnKam">Моя камера</span></button>
+        <button id="lnAleks" class="laitKn vkl" type="button" aria-pressed="true"><b>🗣</b><span id="tLnAleks">Голос Александра</span></button>
+        <button id="lnPlus" class="laitKn vkl" type="button" aria-pressed="true"><b>➕</b><span id="tLnPlus">Голос Плюса</span></button>
+      </div>
+      <div class="ryad laitNiz">
+        <button id="lnPolnyy" type="button">⚙ <span id="tLnPolnyy">Полный режим</span></button>
+        <button id="lnVyyti" class="krasnyy2" type="button">✕ <span id="tLnVyyti">Выйти</span></button>
+      </div>
+    </div>
     <div id="paneli" class="paneli">
       <div class="ya malenkiy">
         <div class="kvadrat"><video id="ya2" autoplay muted playsinline></video><div id="ya2Net" class="bezvideo">🙂</div></div>
@@ -74,6 +89,7 @@
         <button id="knGolosa" class="tumbler golosa" type="button" aria-pressed="false">🔇 <span id="tGolosa">Только голоса</span></button>
         <p id="golosaPodskazka" class="sovet golosaPod" hidden></p>
         <p id="tTwitch2" class="sovet golosaPod">📺 Twitch держи без звука.</p>
+        <button id="knVLait" class="tumbler golosa" type="button">⚡ <span id="tVLait">Лайт режим</span></button>
       </div>
     </div>
     <h2 id="tLyudi">В эфире</h2>

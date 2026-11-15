@@ -84,6 +84,8 @@ class Razvilka(private val w: Int, private val h: Int) {
     @Volatile var chatMesto = Nalozhenie.CH
     /** 2.8.7: высота нарисованных сообщений (1080p) — ставим их посередине просвета. */
     @Volatile var chatVysota = 0f
+    /** 2.8.8: ширина плашки ника внизу слева (1080p) — субтитры начинаются правее. */
+    @Volatile var nkShirina = 0f
 
     private var ktex = 0
     private var kst: SurfaceTexture? = null
@@ -540,6 +542,10 @@ class Razvilka(private val w: Int, private val h: Int) {
         val m = o.h / 100
         var x = if (ugol.startsWith("l")) m else o.w - w - m
         var y = if (ugol.endsWith("n")) m else o.h - h - m
+        if (ugol == "nk" && Oformlenie.viz) {                           // 2.8.8: пульс плашки ссылок — от левого нижнего угла
+            val k = Vizor.nkPuls(Vizor.nkPulsT(System.currentTimeMillis()))
+            if (k != 1f) { w = (w * k).toInt(); h = (h * k).toInt() }
+        }
         if (ugol == "sc") { x = 0; y = 0; w = o.w; h = o.h }
         else if (Oformlenie.viz) { if (!mestoViz(o, ugol, sl, w, h)) return; return risovatSloy(x0Viz, y0Viz, w, h, sl) }
         when (ugol) {
@@ -586,14 +592,19 @@ class Razvilka(private val w: Int, private val h: Int) {
             "vn" -> { x = 0; y = 0 }
             "pv" -> { x = (Vizor.PV.l * s).toInt(); y = gl(Vizor.PV.t) }
             "lv" -> { x = (Vizor.LV.l * s).toInt(); y = gl(Vizor.LV.t) }
-            "pl" -> { val p = plusMesto(); x = (p[0] * s).toInt(); y = gl(p[1]) }          // 2.7.9: место розы; 2.8.7: любое
+            "pl" -> {                                                                       // Плюс дома стоит на плашке —
+                val p = plusMesto()                                                         // в её пульс поднимается с ней
+                val pod = if (Oformlenie.plusMesto == null && sloi["nk"]?.let { it.w > 0 } == true)
+                    Vizor.NK_H * (Vizor.nkPuls(Vizor.nkPulsT(System.currentTimeMillis())) - 1f) else 0f
+                x = (p[0] * s).toInt(); y = gl(p[1] - pod)
+            }          // 2.7.9: место розы; 2.8.7: любое
             "nc" -> { x = (titryLevo(o) * s).toInt(); y = gl(Vizor.TITRY_VERH) }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
             "al" -> { x = (o.w - w) / 2; y = gl(Opoveshchenie.VERH) }                      // 2.7.8: оповещение — сверху по центру
             "sp" -> { x = (Vizor.spX * s).toInt(); y = gl(Vizor.spY) }                    // 2.8.5: живой Плюс сцены
             "sv" -> y = gl(Vizor.SCHET_VERH)                                                 // 2.8.2: счётчики — под налётом
-            "nk" -> { x = ((titryLevo(o) + Vizor.TW / 2f - Vizor.NK_W / 2f) * s).toInt(); y = gl(Vizor.NK_VERH) }   // ник — под субтитрами
+            "nk" -> { x = (Vizor.NK_X * s).toInt(); y = gl(Vizor.NK_VERH) }   // 2.8.8: ник — в нижнем левом углу, под Плюсом
             "dn" -> {                                                                        // строка доната — под карточкой топа
                 x = ((Vizor.LEVO - 4f) * s).toInt()
                 y = gl(if (sloi["lv"]?.let { it.w > 0 } == true) Vizor.DN_VERH else Vizor.VERH)
@@ -622,12 +633,18 @@ class Razvilka(private val w: Int, private val h: Int) {
     /** Левый край субтитров визора (1080p): между розой и окном камеры внизу справа. */
     private fun titryLevo(o: Out): Float {
         val v = vid
+        val k = 1080f / o.h
         var pravo = Vizor.PRAVO
-        if (kameraVidna() && v.rezhim == "ugol" && v.gde == "pn") {
+        if (kameraVidna() && v.rezhim != "krupno") {      // 2.8.8: окно в любом виде, если доходит до полосы субтитров
             val r = Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v)
-            pravo = minOf(pravo, r[0] * 1080f / o.h)
+            if (r[1] * k < Vizor.TH + 4f && r[0] * k > Vizor.W / 2f) pravo = minOf(pravo, r[0] * k)
         }
-        return Vizor.titryX(pravo)
+        // слева — плашка ника под Плюсом и сам Плюс, если он внизу слева
+        var levo = maxOf(Vizor.PL.r, Vizor.NK_X + nkShirina)
+        val p = plusMesto()
+        if (sloi["pl"]?.let { it.w > 0 } == true && p[1] + Vizor.PL_H > Vizor.TITRY_VERH && p[0] < Vizor.W / 2f)
+            levo = maxOf(levo, p[0] + Vizor.PL_W)
+        return Vizor.titryX(pravo, levo)
     }
 
     private fun risovatSloy(x: Int, y: Int, w: Int, h: Int, sl: Sloy) {
@@ -796,7 +813,7 @@ class Razvilka(private val w: Int, private val h: Int) {
 
     /** Верх окна камеры (GL — от низа кадра, с рамкой), если окно справа внизу и видно; иначе null. */
     /** Левый верхний угол Плюса (1080p): своё место или куда поставили (/efir/plus). */
-    private fun plusMesto(): FloatArray = Oformlenie.plusMesto ?: floatArrayOf(Vizor.PL.l, Vizor.PL.t)
+    private fun plusMesto(): FloatArray = Oformlenie.plusMesto ?: Vizor.plusDomoy()
 
     /** Помехи чату в правом столбце (GL, от низа): окно камеры в любом виде и Плюс. [x, y, w, h]. */
     private fun pomehiStolba(o: Out): List<IntArray> {

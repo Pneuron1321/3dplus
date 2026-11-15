@@ -150,6 +150,7 @@ class Nalozhenie(
     private var ulybkaS = 0L
     private var ulybkaDo = 0L
     private var ozhidanij = 0                                     // сколько было анимаций ожидания (каждая 4-я — присед)
+    @Volatile private var nkVidno = false                          // плашка ссылок на экране — её пульс сажает Плюса
     private var prisedS = 0L                                      // начало приседаний; 0 — не приседает
     private var otvetNa = 0L                                      // на какой вызов Ава уже ответила
 
@@ -264,6 +265,7 @@ class Nalozhenie(
                             tesnoIgre -> if (sost == "govorit") 100L else 200L
                             sost == "govorit" -> 0L
                             sost == "slushaet" -> 100L
+                            sost == "ved" -> 100L                     // её знак — волна голоса дышит
                             else -> 200L
                         }
                         if (klyuch != bylo || sost != sostBylo || mim != mimikaBylo || (anim && now - liceMs >= shagMs)) {
@@ -337,9 +339,10 @@ class Nalozhenie(
                     }
                     val chto = if (v) schet.nizSeychas(now) else ""
                     val nk = if (chto.isEmpty()) "net" else "$chto ${schet.nik} ${schet.ssylka}"
+                    nkVidno = nk != "net"
                     if (nk != nikBylo) {
                         if (nk == "net") razvilka.sloy("nk", null)
-                        else { viz.niki(nkV, chto, schet.nik, schet.ssylka); razvilka.sloy("nk", nkV) }
+                        else { viz.niki(nkV, chto, schet.nik, schet.ssylka); razvilka.nkShirina = maxOf(razvilka.nkShirina, viz.nkShirina);   /* ник и ссылка по очереди — субтитры не прыгают */ razvilka.sloy("nk", nkV) }
                         nikBylo = nk
                     }
                 }
@@ -457,7 +460,11 @@ class Nalozhenie(
     private fun sostoyanie(now: Long): String {
         val rezhim = (Hub.say as? Golos)?.govoritSeychas                // и когда говорит сама, через Termux
         if (rezhim != null) otvetNa = Hub.lastWakeMs
+        val ved = Hub.ktoGovorit == "ved"
         return when {
+            // 2.8.8 (Александр 14.11: «Плюс шевелит губами, когда говорит соведущая»): её голос — Плюс молчит и смотрит
+            // вверх на её знак; в ухо (зрители её не слышат) — без знака, просто молчит
+            rezhim != null && ved -> if (rezhim == "uho") "obychno" else "ved"
             rezhim != null -> "govorit"
             Hub.ear.state == "hearing" -> "slushaet"
             Hub.lastWakeMs > otvetNa && now - Hub.lastWakeMs in 0L..15_000L -> "dumaet"
@@ -486,9 +493,11 @@ class Nalozhenie(
         if (p.lico && Oformlenie.lico == "plus" && telo != null) {
             teloViz(c, sost, now, Vizor.TELO_X - dx, Vizor.TELO_Y - dy, Vizor.KT, Vizor.PL_W.toFloat(), Vizor.PL_H.toFloat())
             viz.plashkaPlyusa(c, dx, dy)
+            if (sost == "ved") viz.znakVedushchey(c, Vizor.TELO_X - dx + (Vizor.TELO_GOLOVA_X + 128f) * Vizor.KT, Vizor.TELO_Y - dy - 4f, now)
         } else if (p.lico) licoPryamoe?.let {
             golova(it, sost, now, c, Vizor.D_LICA, Vizor.LICO_X - dx, Vizor.LICO_Y - dy, Vizor.PL_W.toFloat(), Vizor.PL_H.toFloat())
             viz.plashkaPlyusa(c, dx, dy)
+            if (sost == "ved") viz.znakVedushchey(c, Vizor.LICO_X - dx + Vizor.D_LICA / 2f, Vizor.LICO_Y - dy - 4f, now)
         }
     }
 
@@ -662,12 +671,13 @@ class Nalozhenie(
         val k = dst.width() / 256f
         fun pr(x0: Float, y0: Float, x1: Float, y1: Float, p: Paint) =
             c.drawRect(dst.left + x0 * k, dst.top + y0 * k, dst.left + x1 * k, dst.top + y1 * k, p)
-        if (morgaet || sost == "dumaet") {                             // закрыть глаза стеклом
+        if (morgaet || sost == "dumaet" || sost == "ved") {          // закрыть глаза стеклом
             pr(92f, 129f, 117f, 150f, steklo); pr(148f, 129f, 169f, 150f, steklo)
         }
         when {
             morgaet -> { pr(92f, 138f, 117f, 141f, glaz); pr(148f, 138f, 169f, 141f, glaz) }      // веки
             sost == "dumaet" -> { pr(100f, 129f, 122f, 150f, glaz); pr(156f, 129f, 175f, 150f, glaz) } // взгляд вбок
+            sost == "ved" -> { pr(96f, 129f, 113f, 138f, glaz); pr(152f, 129f, 165f, 138f, glaz) }    // 2.8.8: вверх, на её знак
         }
         val r = ROT                                                    // рот (2.2.6) — на ряд кирпичей ниже
         // у фигуры (2.7.5) рот на 15 % уже и по середине лица (между глаз — x 131,5), лицо ниже глаз на 15 % короче
@@ -725,6 +735,11 @@ class Nalozhenie(
 
     /** Кадр приседания сейчас (0…3, plus-prised-1…4) или −1 — не приседает. Круг ~1 с: вниз, пауза внизу, вверх. */
     private fun prisedKadr(now: Long): Int {
+        // 2.8.8: пульс плашки ссылок — присел с первым пульсом, сидит, пока она не вернулась, потом встал
+        if (nkVidno) {
+            val tp = Vizor.nkPulsT(now)
+            if (tp >= 0 || now % Vizor.NK_PULS_RAZ_MS < Vizor.NK_PULS_VSEGO + PRISED_VSTAT) return prisedPuls(now % Vizor.NK_PULS_RAZ_MS)
+        }
         if (prisedS == 0L || now < prisedS) return -1
         val t = now - prisedS
         if (t >= PRISED_RAZ * PRISED_KRUG) { prisedS = 0L; return -1 }
@@ -1251,6 +1266,14 @@ class Nalozhenie(
         const val LICO_KOROCHE = 0.85f
         /** Приседания: 10 раз, круг 1 с — кадры (номер, мс): вниз, внизу дольше, вверх. */
         const val PRISED_RAZ = 10
+        /** Присед под пульс плашки: вниз кадрами 0→2 по 120 мс, внизу (3) до конца пульса, вверх 2→0 по 120 мс. */
+        const val PRISED_VSTAT = 360L
+        fun prisedPuls(t: Long): Int = when {
+            t < 360L -> (t / 120L).toInt()
+            t < Vizor.NK_PULS_VSEGO -> 3
+            t < Vizor.NK_PULS_VSEGO + PRISED_VSTAT -> 2 - ((t - Vizor.NK_PULS_VSEGO) / 120L).toInt()
+            else -> -1
+        }
         val PRISED_KADRY = listOf(0 to 120L, 1 to 120L, 2 to 120L, 3 to 280L, 2 to 120L, 1 to 120L, 0 to 120L)
         val PRISED_KRUG = PRISED_KADRY.sumOf { it.second }
         /** На сколько плечи модели выходят за картинку головы с каждой стороны (точки картинки 256). */

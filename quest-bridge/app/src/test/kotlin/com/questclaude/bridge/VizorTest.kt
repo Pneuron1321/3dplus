@@ -211,4 +211,23 @@ class VizorTest {
         ch.upr(mapOf("kto" to "d", "tekst" to "zz", "pl" to "<script>"))
         assertEquals(listOf("tw", "kick", "yt", "tw"), ch.vidimye().map { it.pl })
     }
+
+    /** 2.8.8: раз в 5 мин — три пульса по 0,5 с (+10 % каждый), четвёртый — рывок до 155 % и назад к 100 %; Плюс сидит всё время. */
+    @Test fun pulsPlashkiSsylok() {
+        assertEquals(-1L, Vizor.nkPulsT(Vizor.NK_PULS_VSEGO))
+        assertEquals(0L, Vizor.nkPulsT(3 * Vizor.NK_PULS_RAZ_MS))
+        assertEquals(1f, Vizor.nkPuls(-1), 0f)
+        assertEquals(1f, Vizor.nkPuls(0), 1e-4f)
+        assertEquals(1.10f, Vizor.nkPuls(499), 0.01f)                  // после 1-го пульса
+        assertEquals(1.20f, Vizor.nkPuls(999), 0.01f)
+        assertEquals(1.30f, Vizor.nkPuls(1499), 0.01f)
+        assertEquals(1.55f, Vizor.nkPuls(1650), 0.01f)                 // рывок +25 %
+        assertEquals(1.00f, Vizor.nkPuls(1999), 0.01f)                 // и сразу к исходному
+        assertEquals(1f, Vizor.nkPuls(2000), 0f)
+        for (t in 0L until 1500L step 10) assertTrue(Vizor.nkPuls(t) in 1f..1.36f)
+        // Плюс: сел за 0,36 с, сидит до конца пульса, встаёт за 0,36 с
+        assertEquals(0, Nalozhenie.prisedPuls(0)); assertEquals(3, Nalozhenie.prisedPuls(400))
+        assertEquals(3, Nalozhenie.prisedPuls(1999)); assertEquals(2, Nalozhenie.prisedPuls(2000))
+        assertEquals(0, Nalozhenie.prisedPuls(2300)); assertEquals(-1, Nalozhenie.prisedPuls(2360))
+    }
 }

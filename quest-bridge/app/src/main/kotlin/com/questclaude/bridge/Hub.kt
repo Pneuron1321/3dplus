@@ -17,6 +17,8 @@ object Hub {
     val plenka = Plenka()
     /** Когда прозвучал последний вызов «плюс плюс» (часы шлема, мс). */
     @Volatile var lastWakeMs = 0L
+    /** 2.8.8: кто сейчас звучит через мост — «ved» (соведущая) или null (Плюс). */
+    @Volatile var ktoGovorit: String? = null
     /** Плёнка одной картинкой вокруг момента t; ставит служба глаз, пока она жива. */
     @Volatile var plenkaRisunok: (Long, Int) -> ByteArray? = { _, _ -> null }
     /** Голос только в эфир (ответ донатеру): ставит Efir, пока эфир идёт. */

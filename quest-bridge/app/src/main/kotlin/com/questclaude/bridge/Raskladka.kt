@@ -19,7 +19,7 @@ object Raskladka {
     const val KRAY = 11f                     // отступ от края, как у плашек (1 % высоты)
     const val VERH = 150f                    // ниже табло левого верха
     /** Выше Плюса в левом нижнем углу (2.7.9, на месте розы ветров): не влезают — квадраты чуть меньше. */
-    val NIZ = Vizor.PL.t - 20f
+    val NIZ = Vizor.plusDomoy()[1] - 20f       // 2.8.8: Плюс стоит выше — на плашке ника
     const val ZAZOR = 14f
     const val RADIUS = 18f
     const val PUZYR_OTSTUP = 16f

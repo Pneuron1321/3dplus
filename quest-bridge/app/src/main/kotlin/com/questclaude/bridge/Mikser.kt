@@ -17,7 +17,8 @@ import kotlin.math.sqrt
  *    тише, пока Плюс слушает Александра), и каждому участнику — его смесь:
  *    игра (кладёт эфир, [fon]) × его громкость игры + голос Плюса и ответ донатеру ([golos], 2.5.3:
  *    «🔇 Только голоса» гасит игру, а Плюса — нет) + микрофон Александра (через заслонку эха) + все
- *    остальные гости; кодируется и уходит ему;
+ *    остальные гости; кодируется и уходит ему; «⚡ Лайт» (2.8.8) — только Александр и Плюс, каждый по
+ *    его кнопке;
  *  - [vEfir] — гости в звук эфира (поток эфира, со своим буфером на гостя).
  * Заслонка эха: голос гостей из динамиков шлема попадает в микрофон и вернулся бы им эхом через
  * полсекунды. Пока в шлеме звучат гости, а микрофон тише [eho] × их громкости (Александр сам не
@@ -169,8 +170,12 @@ class Mikser(
         for (u in vnutri) {
             val k = kanaly.getOrPut(u.id) { Kanal(u.id) }
             val e = k.enc ?: noviyKoder().also { k.enc = it }
-            for (i in 0 until KADR) smes[i] = fonKadr[i] * u.igra + golosKadr[i] + micKadr[i] * MIC_USIL * micUsil
-            for (o in zvuchat) if (o.id != u.id) for (i in 0 until KADR) smes[i] += o.kadr[i] * o.usil
+            // 2.8.8 «⚡ Лайт»: только Александр и Плюс, каждый — своей кнопкой гостя; ни игры, ни других гостей
+            val gIgra = if (u.lait) 0f else u.igra
+            val gPlus = if (u.lait && !u.slyshuPlus) 0f else 1f
+            val gMic = if (u.lait && !u.slyshuAleks) 0f else MIC_USIL * micUsil
+            for (i in 0 until KADR) smes[i] = fonKadr[i] * gIgra + golosKadr[i] * gPlus + micKadr[i] * gMic
+            if (!u.lait) for (o in zvuchat) if (o.id != u.id) for (i in 0 until KADR) smes[i] += o.kadr[i] * o.usil
             for (i in 0 until KADR) izMiks[i] = myagko(smes[i])
             val t0 = System.nanoTime()
             val n = try { e.encode(izMiks, 0, KADR, k.vyhod, 0, k.vyhod.size) } catch (x: Exception) { k.oshibok++; 0 }

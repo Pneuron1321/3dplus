@@ -145,6 +145,47 @@ class MikserTest {
         assertTrue(m.status().contains("\"golos_ms\""))
     }
 
+    /** 2.8.8 «⚡ Лайт»: гость слышит только Александра и Плюса — без игры и других гостей; каждый — своей кнопкой. */
+    @Test fun laitTolkoAleksandrIPlus() {
+        val (a, sa) = gost("Лайт")
+        val (b, _) = gost("Гость")
+        k.sam(a, null, null, 1.0, null, lait = true)
+        val tb = Ton(440.0)
+        val shlem = ShortArray(960)
+        fun takty(ot: Int, n: Int) {
+            for (i in ot until ot + n) {
+                val p = tb.paket(); m.prinyat(b, i, p, 0, p.size)
+                m.fon(ShortArray(960) { (4000 * sin(2 * PI * 700.0 * (i * 960 + it) / 48000)).toInt().toShort() }, 960)
+                m.golos(ShortArray(960) { (4000 * sin(2 * PI * 1900.0 * (i * 960 + it) / 48000)).toInt().toShort() }, 960)
+                m.mic(ShortArray(320) { (3000 * sin(2 * PI * 1000.0 * (i * 320 + it) / 16000)).toInt().toShort() }, 320)
+                m.tik(shlem, 50_000L + i * 20)
+            }
+        }
+        takty(0, 80)
+        val A = raskodirovat(sa.pakety.drop(30))
+        // игра в смесь не кладётся вовсе; на 700 Гц — лишь призвуки кодека от Плюса и Александра (≈ −40 дБ)
+        assertTrue("игры нет", ton(A, 700.0) * 50 < ton(A, 1900.0))
+        assertTrue("других гостей нет", ton(A, 440.0) < 3)
+        assertTrue("Плюс слышен", ton(A, 1900.0) > 300)
+        assertTrue("Александр слышен", ton(A, 1000.0) > 300)
+        assertTrue(k.status().contains("\"lait\":true"))
+        // выключил Александра — его нет, Плюс остался
+        k.sam(a, null, null, null, null, aleks = false)
+        sa.pakety.clear(); takty(80, 60)
+        val A2 = raskodirovat(sa.pakety.drop(15))
+        assertTrue(ton(A2, 1000.0) * 50 < ton(A2, 1900.0) && ton(A2, 1900.0) > 300)
+        // выключил и Плюса — тишина
+        k.sam(a, null, null, null, null, plus = false)
+        sa.pakety.clear(); takty(140, 60)
+        val A3 = raskodirovat(sa.pakety.drop(15))
+        assertTrue(ton(A3, 1000.0) < 3 && ton(A3, 1900.0) < 3)
+        // вышел из лайта — снова игра и гости (кнопки лайта на полный режим не влияют)
+        k.sam(a, null, null, null, null, lait = false)
+        sa.pakety.clear(); takty(200, 60)
+        val A4 = raskodirovat(sa.pakety.drop(15))
+        assertTrue(ton(A4, 700.0) > 300 && ton(A4, 440.0) > 100 && ton(A4, 1900.0) > 300)
+    }
+
     @Test fun plusSlushaetGostiTishe() {
         val (a, _) = gost("А")
         val t = Ton(500.0)

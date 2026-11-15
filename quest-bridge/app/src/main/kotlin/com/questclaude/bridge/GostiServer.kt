@@ -226,7 +226,8 @@ class GostiServer(
             }
             when (t) {
                 "uhozhu" -> return true
-                "sam" -> komnata.sam(ya, m.bool("kamera"), m.bool("mikrofon"), m.num("igra"), m.bool("prevyu"), m.bool("raciya"))
+                "sam" -> komnata.sam(ya, m.bool("kamera"), m.bool("mikrofon"), m.num("igra"), m.bool("prevyu"), m.bool("raciya"),
+                    m.bool("lait"), m.bool("aleks"), m.bool("plus"))
                 "upr" -> tekst("{\"t\":\"upr_otvet\",\"chto\":${Komnata.js(m.str("chto"))},\"otvet\":" +
                     komnata.upr(ya, m.str("chto") ?: "", m.int("id"), m.str("dop")) + "}")
                 "ping" -> tekst("{\"t\":\"pong\",\"c\":${m.num("c")?.toLong() ?: 0},\"s\":${System.currentTimeMillis()}}")

@@ -37,11 +37,15 @@ class VizorKist(ctx: Context) {
     }
 
     /** Карточка: тень (кэш), подложка графит 80 %, кант (по умолчанию — золото 35 %). */
-    fun karta(c: Canvas, r: RectF, cvetKanta: Int = Vizor.KANT, radius: Float = Vizor.RADIUS, ten: Boolean = true) {
+    /** [fon] — доля непрозрачности подложки и тени (1 — как у всех карточек; субтитры 2.8.8 — Vizor.TITRY_FON). */
+    fun karta(c: Canvas, r: RectF, cvetKanta: Int = Vizor.KANT, radius: Float = Vizor.RADIUS, ten: Boolean = true, fon: Float = 1f) {
+        val a0 = pod.alpha
+        if (fon != 1f) { pod.alpha = (a0 * fon).toInt(); tenKist.alpha = (255 * fon).toInt() }
         if (ten) ten(r.width().toInt(), r.height().toInt(), radius)?.let {
             c.drawBitmap(it, r.left - Vizor.TEN * 2, r.top - Vizor.TEN * 2 + Vizor.TEN_DY, tenKist)
         }
         c.drawRoundRect(r, radius, radius, pod)
+        if (fon != 1f) { pod.alpha = a0; tenKist.alpha = 255 }
         if (cvetKanta != 0) {
             kant.color = cvetKanta
             val p = Vizor.KANT_SHIR / 2

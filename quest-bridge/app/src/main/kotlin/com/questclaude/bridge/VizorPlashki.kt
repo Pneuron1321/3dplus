@@ -12,6 +12,8 @@ import android.graphics.PorterDuff
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import kotlin.math.abs
+import kotlin.math.sin
 
 /**
  * Плашки эфира в стиле «Визор» (2.7.0, Vizor): рисует в картинки слоёв по раскладке Vizor; когда и что
@@ -195,6 +197,32 @@ class VizorPlashki(
      * ник фиолетом, ниже текст (до 4 строк; шквал — 1). Обращённые к Плюсу и донаты — золотой кант. Влезают
      * только целые сообщения выше [potolok]. Ответ — сколько нарисовано.
      */
+    // ---------- 2.8.8: знак соведущей над головой Плюса, пока звучит она ----------
+    private val vedPod = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Vizor.VED_CVET }
+    private val vedKant = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = Color.BLACK }
+    private val vedVolna = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+
+    /**
+     * Её знак — своё лицо другого персонажа, а не реплика Плюса: облачко её цвета (жёлтое с чёрным, у Плюса — красный визор и
+     * фиолетовый гребень) с хвостиком вниз к нему и с волной её голоса внутри: пять полосок дышат по времени.
+     * [cx] — центр над головой, [niz] — где кончается хвостик (верх головы).
+     */
+    fun znakVedushchey(c: Canvas, cx: Float, niz: Float, now: Long) {
+        val w = 64f; val h = 34f; val hv = 8f
+        val verh = maxOf(0f, niz - hv - h)
+        val r = RectF(cx - w / 2, verh, cx + w / 2, verh + h)
+        val hvost = Path().apply { moveTo(cx - 7f, r.bottom - 1f); lineTo(cx, r.bottom + hv); lineTo(cx + 7f, r.bottom - 1f); close() }
+        c.drawPath(hvost, vedPod)
+        c.drawRoundRect(r, h / 2, h / 2, vedPod)
+        c.drawRoundRect(r, h / 2, h / 2, vedKant)
+        for (i in 0 until 5) {
+            val v = 0.35f + 0.65f * abs(sin(now / 140.0 + i * 1.3)).toFloat()
+            val bh = (h - 14f) * v
+            val x = r.centerX() - 20f + i * 10f
+            c.drawRoundRect(RectF(x - 2.5f, r.centerY() - bh / 2, x + 2.5f, r.centerY() + bh / 2), 2.5f, 2.5f, vedVolna)
+        }
+    }
+
     /** 2.8.7: сколько точек (1080p) по высоте заняли сообщения в последний раз — чат ставится посередине просвета. */
     @Volatile var chatVysota = 0f
         private set
@@ -296,6 +324,10 @@ class VizorPlashki(
      * Полоска внизу кадра — тонкой пилюлей по центру картинки слоя: [chto] "nik" — значки TW KICK YT IG TIKTOK и ник,
      * "donat" — золотой значок DONATE и ссылка доната.
      */
+    /** 2.8.8: ширина нарисованной плашки ника (1080p, от левого края слоя) — субтитры не заходят на неё. */
+    @Volatile var nkShirina = 0f
+        private set
+
     fun niki(b: Bitmap, chto: String, nik: String, ssylka: String) {
         val c = Canvas(b)
         c.drawColor(0, PorterDuff.Mode.CLEAR)
@@ -320,7 +352,8 @@ class VizorPlashki(
         val zh = 26f
         val nw = nikNizK.measureText(nik)
         val w = minOf(b.width - 8f, 12f + ik.size * (zh + 6f) + 6f + nw + 16f)
-        val x0 = (b.width - w) / 2f
+        val x0 = 4f                                                   // 2.8.8: прижата влево — под ногами Плюса
+        nkShirina = x0 + w
         val r = RectF(x0, 4f, x0 + w, h - 4f)
         kist.karta(c, r, radius = r.height() / 2, ten = false)
         var x = x0 + 12f
@@ -336,7 +369,8 @@ class VizorPlashki(
         val zw = zn.map { plNizK.measureText(it.first) + 12f }
         val nw = nikNizK.measureText(nik)
         val w = minOf(b.width - 8f, 14f + zw.sum() + 6f * zn.size + 8f + nw + 16f)
-        val x0 = (b.width - w) / 2f
+        val x0 = 4f
+        nkShirina = x0 + w
         val r = RectF(x0, 4f, x0 + w, h - 4f)
         kist.karta(c, r, radius = r.height() / 2, ten = false)
         var x = x0 + 14f
@@ -380,7 +414,7 @@ class VizorPlashki(
         val imya = imyaGolosa(nov.kto)
         val pw = (listOf(ktoK.measureText(imya)) + ryady.map { titrK.measureText(it) } + per.map { perevodK.measureText(it) }).max() + 52f
         val r = RectF((w - pw) / 2, b.height - h, (w + pw) / 2, b.height.toFloat())
-        kist.karta(c, r)
+        kist.karta(c, r, fon = Vizor.TITRY_FON)
         var y = r.top + 12f + 20f
         c.drawText(imya, (w - ktoK.measureText(imya)) / 2, y, ktoK)
         y += 6f
@@ -394,7 +428,7 @@ class VizorPlashki(
             val t = kist.vlezet(kratkoK, st.tekst, shir - ktoK.measureText(im) - 70f)
             val sw = ktoK.measureText(im) + 12f + kratkoK.measureText(t) + 40f
             val rr = RectF((w - sw) / 2, niz - 44f, (w + sw) / 2, niz)
-            kist.karta(c, rr, radius = 22f)
+            kist.karta(c, rr, radius = 22f, fon = Vizor.TITRY_FON)
             c.drawText(im, rr.left + 20f, rr.centerY() + 8f, ktoK)
             c.drawText(t, rr.left + 20f + ktoK.measureText(im) + 12f, rr.centerY() + 10f, kratkoK)
             niz = rr.top - 8f

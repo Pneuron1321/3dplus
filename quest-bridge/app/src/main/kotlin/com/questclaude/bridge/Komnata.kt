@@ -47,6 +47,10 @@ class Komnata(
         @Volatile var igra = IGRA                    // громкость игры в его смеси, 0–1
         @Volatile var prevyu = true                  // хочет картинку эфира
         @Volatile var raciya = false                 // 2.5.3: рация — слышно, только пока держит кнопку (видно модератору)
+        // 2.8.8 «⚡ Лайт»: в его смеси только Александр и Плюс (без игры и других гостей), каждый — своей кнопкой
+        @Volatile var lait = false
+        @Volatile var slyshuAleks = true
+        @Volatile var slyshuPlus = true
         @Volatile var h264 = false                   // умеет раскодировать H.264 (WebCodecs)
         @Volatile var govorit = false                // слышно сейчас (ставит движок звука)
         /** 2.7.8: цвет рамки (имя из RAMKI; null — по умолчанию: модератору мандарин, гостям по месту) и размер плитки. */
@@ -107,9 +111,10 @@ class Komnata(
     private class Vozvrat(val rol: String, val imya: String, val cvet: Int, val ms: Long,
                           val skryt: Boolean = false, val zaglushen: Boolean = false, val kameraZapret: Boolean = false,
                           val igra: Float = IGRA, val ramka: String? = null, val razmer: Float = 1f,
-                          val prozrachnost: Float = -1f) {
+                          val prozrachnost: Float = -1f, val lait: Boolean = false,
+                          val slyshuAleks: Boolean = true, val slyshuPlus: Boolean = true) {
         constructor(u: Uchastnik, ms: Long) : this(u.rol, u.imya, u.cvet, ms, u.skryt, u.zaglushen, u.kameraZapret, u.igra,
-            u.ramka, u.razmer, u.prozrachnost)
+            u.ramka, u.razmer, u.prozrachnost, u.lait, u.slyshuAleks, u.slyshuPlus)
     }
     private val vozvraty = HashMap<String, Vozvrat>()
 
@@ -160,6 +165,7 @@ class Komnata(
                 val u = Uchastnik(sledId++, rol, v.imya, svyaz, chasy())
                 u.h264 = h264
                 u.skryt = v.skryt; u.zaglushen = v.zaglushen; u.kameraZapret = v.kameraZapret; u.igra = v.igra
+                u.lait = v.lait; u.slyshuAleks = v.slyshuAleks; u.slyshuPlus = v.slyshuPlus
                 u.ramka = v.ramka; u.razmer = v.razmer; u.prozrachnost = v.prozrachnost
                 if (rol != "hozyain") { u.kamera = kamera; u.mikrofon = mikrofon }
                 lyudi[u.id] = u
@@ -294,10 +300,13 @@ class Komnata(
         return "{\"ok\":true}"
     }
 
-    /** Участник сам: камера, микрофон, громкость игры, картинка эфира, рация. */
+    /** Участник сам: камера, микрофон, громкость игры, картинка эфира, рация; «⚡ Лайт» — слышит ли Александра, Плюса. */
     fun sam(u: Uchastnik, kamera: Boolean?, mikrofon: Boolean?, igra: Double?, prevyu: Boolean?,
-            raciya: Boolean? = null): Unit = synchronized(zamok) {
+            raciya: Boolean? = null, lait: Boolean? = null, aleks: Boolean? = null, plus: Boolean? = null): Unit = synchronized(zamok) {
         if (!lyudi.containsKey(u.id) || u.rol == "hozyain") return
+        lait?.let { u.lait = it }
+        aleks?.let { u.slyshuAleks = it }
+        plus?.let { u.slyshuPlus = it }
         igra?.takeIf { !it.isNaN() }?.let { u.igra = it.toFloat().coerceIn(0f, 1f) }
         prevyu?.let { u.prevyu = it }
         raciya?.let { u.raciya = it }
@@ -441,7 +450,7 @@ class Komnata(
 
     private fun chelovek(u: Uchastnik) = "{\"id\":${u.id},\"imya\":${js(u.imya)},\"rol\":\"${u.rol}\",\"sost\":\"${u.sost}\"," +
         "\"kamera\":${u.kamera},\"mikrofon\":${u.mikrofon},\"skryt\":${u.skryt},\"zaglushen\":${u.zaglushen}," +
-        "\"kamera_zapret\":${u.kameraZapret},\"igra\":${u.igra},\"raciya\":${u.raciya}," +
+        "\"kamera_zapret\":${u.kameraZapret},\"igra\":${u.igra},\"raciya\":${u.raciya},\"lait\":${u.lait}," +
         "\"cvet\":${u.cvet},\"ramka\":\"${ramkaHex(u)}\",\"razmer\":${u.razmer},\"prozrachnost\":${Math.round(prozrachnost(u) * 100)},\"govorit\":${u.govorit}}"
 
     private fun sobytie(vid: String, imya: String) {
