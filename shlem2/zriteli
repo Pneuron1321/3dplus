@@ -5,7 +5,8 @@
   вышел» (JOIN/PART, возможность membership) → /tmp/zriteli.jsonl. Видно зрителей, вошедших в
   Twitch со своим аккаунтом (они в чате, даже если молчат), пачками раз в ~10 с. Боты-наблюдатели
   отсеиваются. Пока идёт эфир, Плюс здоровается вслух — голосом, с субтитрами: каждого раз за
-  вечер, несколько — одной фразой, не чаще раза в 90 с и не поверх речи Плюса и вызова.
+  вечер, несколько — одной фразой, не чаще раза в 90 с и не поверх речи Плюса и вызова; только тех, кто зашёл
+  не раньше 10 минут назад (16.11): давние входы и история после перезапуска приветствия не получают.
   Сколько смотрят — точное число Twitch (и зрители без аккаунта) — только с ключом приложения
   Twitch (dev.twitch.tv → Your Console → Register Your Application): `! kluch twitch-id`, потом
   `! kluch twitch-secret`. Раз в минуту, пока идёт эфир; стало больше, а по имени никто не
@@ -58,6 +59,11 @@ GOLOS_Q = os.environ.get('ZR_GOLOS_Q', '/tmp/golos/q')
 SEK = float(os.environ.get('ZR_SEK', 1))                   # в проверке — доли секунды
 PACHKA = 15         # с первого нового имени ждём, не зайдёт ли кто ещё, — одной фразой
 RAZ_PRIVET = 90     # здороваться не чаще
+# 16.11 (Александр: «здоровается с теми, кто заходил в прошлом, а не с теми, кто заходит на эфир»): имена копились без
+# срока — зашедшие в чат часы назад, вне эфира (Twitch не всегда шлёт «вышел»), и вся история файла событий после
+# перезапуска демона ждали приветствия и получали его пачкой «a, b and 12 more» — первыми назывались самые старые, а
+# только что зашедший тонул в «and more». Теперь приветствие — только тому, кто зашёл не раньше SVEZHEST секунд назад.
+SVEZHEST = float(os.environ.get('ZR_SVEZHEST', 600))
 RAZ_CHISLO = 300    # «нас стало больше» — не чаще раза в 5 минут
 RAZ_HELIX = 60      # число зрителей спрашивать раз в минуту
 VECHER = 8 * 3600   # дольше перерыв — новый вечер: здороваться заново
@@ -367,8 +373,9 @@ class Zal:
         self.schet_osh = {}
         self.v = vecher()
 
-    def chitat(self):
-        """Новые JOIN/PART из ушей."""
+    def chitat(self, now=None):
+        """Новые JOIN/PART из ушей. Старый вход (раньше [SVEZHEST]) — «в чате», но приветствия не ждёт."""
+        now = now or time.time()
         try:
             razmer = os.path.getsize(SOBYTIYA)
         except OSError:
@@ -392,8 +399,9 @@ class Zal:
                 self.v_chate.add(imya)
                 if imya not in self.v['za_vecher']:
                     self.v['za_vecher'].append(imya)
-                if imya not in self.v['pozdorovalis']:
-                    self.zhdut.setdefault(imya, float(e.get('t') or time.time()))
+                t = float(e.get('t') or now)
+                if imya not in self.v['pozdorovalis'] and now - t <= SVEZHEST * SEK:
+                    self.zhdut.setdefault(imya, t)
             elif e.get('chto') == 'part':
                 self.v_chate.discard(imya)
                 self.zhdut.pop(imya, None)                  # ушёл, не дождавшись, — не здороваемся
@@ -457,7 +465,9 @@ class Zal:
     def shag(self, now=None):
         """Один шаг цикла. Возвращает сказанное (или '')."""
         now = now or time.time()
-        self.chitat()
+        self.chitat(now)
+        for k in [k for k, t in self.zhdut.items() if now - t > SVEZHEST * SEK]:
+            del self.zhdut[k]                               # ждал слишком долго (эфира не было) — уже не «только что зашёл»
         efir = efir_idyot()
         self.chislo(now, efir)
         self.schetchiki(now, efir)
