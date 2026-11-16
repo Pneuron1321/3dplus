@@ -291,10 +291,23 @@ object Vizor {
     /** Своё место Плюса (левый верхний угол, 1080p): с 2.8.8 — над плашкой ника, «стоит на ней». */
     fun plusDomoy(): FloatArray = floatArrayOf(PL.l, PL.t - NK_H - ZAZOR)
 
-    fun titryX(pravo: Float = PRAVO, levo0: Float = PL.r): Float {
+    fun titryX(pravo: Float = PRAVO, levo0: Float = PL.r): Float = titryMesto(pravo, levo0)[0]
+
+    /** Меньше этого субтитры не сжимаются (доля полной ширины): мельче — не прочесть с телефона. */
+    const val TITRY_MIN = 0.6f
+
+    /**
+     * Субтитры между Плюсом с плашкой ссылок и окном камеры: [x, масштаб]. 2.8.10 (Александр 16.11: «налезают на окно
+     * камеры»): с плашкой внизу между ней и окном ~850 точек, а субтитры — [TW] = 1030; не влезают — уменьшаются
+     * (не меньше [TITRY_MIN]) и встают посередине, на окно не заходят.
+     */
+    fun titryMesto(pravo: Float = PRAVO, levo0: Float = PL.r): FloatArray {
         val levo = levo0 + ZAZOR
+        val mesto = pravo - ZAZOR - levo
+        val k = (mesto / TW).coerceIn(TITRY_MIN, 1f)
+        val w = TW * k
         val c = (levo + pravo - ZAZOR) / 2f
-        return (c - TW / 2f).coerceIn(levo, maxOf(levo, W - TW - SKOBA_OTSTUP))
+        return floatArrayOf((c - w / 2f).coerceIn(levo, maxOf(levo, W - w - SKOBA_OTSTUP)), k)
     }
 
     /** Таймер сцены «04:59» (и «1:04:59»); прошло — «00:00». */

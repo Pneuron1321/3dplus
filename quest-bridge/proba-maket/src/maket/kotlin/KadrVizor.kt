@@ -161,7 +161,11 @@ private fun kadrViz(v: VizVaryant, dir: File): ABitmap {
     val nkB = ABitmap.createBitmap(Vizor.NK_W, Vizor.NK_H, ABitmap.Config.ARGB_8888)
     if (v.schet) viz.niki(nkB, "nik", schet.nik, schet.ssylka)
     val levoT = maxOf(Vizor.PL.r, Vizor.NK_X + (if (v.schet) viz.nkShirina else 0f))      // как в Razvilka.titryLevo
-    if (ts.isNotEmpty()) kc.drawBitmap(titrB, Vizor.titryX(minOf(Vizor.PRAVO, r[0].toFloat()), levoT), Vizor.TITRY_VERH, null)  // nc
+    if (ts.isNotEmpty()) {                                                                      // nc (2.8.10: не влезли — меньше)
+        val tm = Vizor.titryMesto(minOf(Vizor.PRAVO, r[0].toFloat()), levoT)
+        val tv = Vizor.TITRY_VERH + Vizor.TH * (1f - tm[1])
+        kc.drawBitmap(titrB, null, ARectF(tm[0], tv, tm[0] + titrB.width * tm[1], tv + titrB.height * tm[1]), null)
+    }
     if (s.rz.chatMesto >= 60) {                                                                 // pc
         kc.save()
         kc.clipRect(Vizor.STOLB_X, chatVerh.toFloat(), Vizor.PRAVO, chatNiz.toFloat())

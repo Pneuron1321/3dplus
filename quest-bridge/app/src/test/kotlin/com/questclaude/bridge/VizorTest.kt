@@ -230,4 +230,16 @@ class VizorTest {
         assertEquals(3, Nalozhenie.prisedPuls(3999)); assertEquals(2, Nalozhenie.prisedPuls(4000))
         assertEquals(0, Nalozhenie.prisedPuls(4300)); assertEquals(-1, Nalozhenie.prisedPuls(4360))
     }
+
+    /** 2.8.10: субтитры между плашкой ссылок (~535) и окном камеры (~1380) не влезают — меньше и на окно не заходят. */
+    @Test fun titryNeNaOkno() {
+        val okno = 1380f
+        val m = Vizor.titryMesto(okno, 535f)
+        assertTrue("масштаб ${m[1]}", m[1] < 1f && m[1] >= Vizor.TITRY_MIN)
+        assertTrue(m[0] >= 535f + Vizor.ZAZOR)
+        assertTrue("правый край ${m[0] + Vizor.TW * m[1]}", m[0] + Vizor.TW * m[1] <= okno - Vizor.ZAZOR + 0.5f)
+        val polno = Vizor.titryMesto(Vizor.PRAVO, Vizor.PL.r)                // места хватает — как было
+        assertEquals(1f, polno[1], 0f)
+        assertEquals(Vizor.titryX(Vizor.PRAVO, Vizor.PL.r), polno[0], 0f)
+    }
 }

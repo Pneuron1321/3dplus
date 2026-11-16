@@ -546,6 +546,10 @@ class Razvilka(private val w: Int, private val h: Int) {
             val k = Vizor.nkPuls(Vizor.nkPulsT(System.currentTimeMillis()))
             if (k != 1f) { w = (w * k).toInt(); h = (h * k).toInt() }
         }
+        if (ugol == "nc" && Oformlenie.viz) {                           // 2.8.10: субтитры не влезли меж плашкой и камерой — меньше
+            val k = titryLevo(o)[1]
+            if (k < 1f) { w = (w * k).toInt(); h = (h * k).toInt() }
+        }
         if (ugol == "sc") { x = 0; y = 0; w = o.w; h = o.h }
         else if (Oformlenie.viz) { if (!mestoViz(o, ugol, sl, w, h)) return; return risovatSloy(x0Viz, y0Viz, w, h, sl) }
         when (ugol) {
@@ -598,7 +602,10 @@ class Razvilka(private val w: Int, private val h: Int) {
                     Vizor.NK_H * (Vizor.nkPuls(Vizor.nkPulsT(System.currentTimeMillis())) - 1f) else 0f
                 x = (p[0] * s).toInt(); y = gl(p[1] - pod)
             }          // 2.7.9: место розы; 2.8.7: любое
-            "nc" -> { x = (titryLevo(o) * s).toInt(); y = gl(Vizor.TITRY_VERH) }
+            "nc" -> {                                                                       // 2.8.10: не влезли — меньше, низ на месте
+                val t = titryLevo(o)
+                x = (t[0] * s).toInt(); y = gl(Vizor.TITRY_VERH + Vizor.TH * (1f - t[1]))
+            }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }
             "vse" -> { x = 0; y = 0 }
             "al" -> { x = (o.w - w) / 2; y = gl(Opoveshchenie.VERH) }                      // 2.7.8: оповещение — сверху по центру
@@ -630,8 +637,8 @@ class Razvilka(private val w: Int, private val h: Int) {
         return true
     }
 
-    /** Левый край субтитров визора (1080p): между розой и окном камеры внизу справа. */
-    private fun titryLevo(o: Out): Float {
+    /** Субтитры визора (1080p): [левый край, масштаб] — между Плюсом с плашкой и окном камеры внизу справа. */
+    private fun titryLevo(o: Out): FloatArray {
         val v = vid
         val k = 1080f / o.h
         var pravo = Vizor.PRAVO
@@ -639,14 +646,13 @@ class Razvilka(private val w: Int, private val h: Int) {
             val r = Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v)
             if (r[1] * k < Vizor.TH + 4f && r[0] * k > Vizor.W / 2f) pravo = minOf(pravo, r[0] * k)
         }
-        // слева — плашка ника под Плюсом и сам Плюс, если он внизу слева
-        // 2.8.8: в пульс плашка шире — субтитры плавно отъезжают вместе с ней, не под неё
-        val nkK = if (sloi["nk"]?.let { it.w > 0 } == true) Vizor.nkPuls(Vizor.nkPulsT(System.currentTimeMillis())) else 1f
-        var levo = maxOf(Vizor.PL.r, Vizor.NK_X + nkShirina * nkK)
+        // слева — плашка ника под Плюсом и сам Плюс, если он внизу слева. 2.8.10 (Александр 16.11): в пульс плашки
+        // субтитры стоят на месте — не ездят за ней и не наезжают на окно камеры
+        var levo = maxOf(Vizor.PL.r, Vizor.NK_X + nkShirina)
         val p = plusMesto()
         if (sloi["pl"]?.let { it.w > 0 } == true && p[1] + Vizor.PL_H > Vizor.TITRY_VERH && p[0] < Vizor.W / 2f)
             levo = maxOf(levo, p[0] + Vizor.PL_W)
-        return Vizor.titryX(pravo, levo)
+        return Vizor.titryMesto(pravo, levo)
     }
 
     private fun risovatSloy(x: Int, y: Int, w: Int, h: Int, sl: Sloy) {
@@ -876,7 +882,8 @@ class Razvilka(private val w: Int, private val h: Int) {
         if (fon != "net") { GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA) }
         GLES20.glUseProgram(shKamera.p)
         GLES20.glUniform2f(uFon, if (fon == "zel") 1f else if (fon == "sin") 2f else 0f, Oformlenie.fonSila)
-        kvadratKamery(kmtxPov, if (umen) 0.25f / r[2] else 0f, if (umen) 0.25f / r[3] else 0f)
+        val shag = umen || fon != "net"                   // 2.8.9: вырезу фона нужны соседи и без уменьшения
+        kvadratKamery(kmtxPov, if (shag) 0.25f / r[2] else 0f, if (shag) 0.25f / r[3] else 0f)
         if (fon != "net") GLES20.glDisable(GLES20.GL_BLEND)
     }
 
@@ -1034,15 +1041,25 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vDx;
             varying vec2 vDy;
             uniform samplerExternalOES sTex;
-            uniform vec2 uFon;      // 2.8.7: x — 0 нет, 1 зелёный, 2 синий фон прочь; y — сила (0,05…0,5)
+            uniform vec2 uFon;      // 2.8.7: x — 0 нет, 1 зелёный, 2 синий фон прочь; y — порог (0,05…0,5)
+            // 2.8.9 (Александр 16.11: «зелёный разных оттенков, неровный — вырезай лучше»): «насколько это фон» — доля
+            // от яркости (тень складки и пятно света одинаково), бирюза — тоже фон (второй цвет весит 0,75), жёлтое и
+            // белое — нет. Прозрачность — среднее по точке и четырём соседям в ~1,5 точки окна: крапины сжатия не мигают.
+            float fonnost(vec3 c) {
+                float f = uFon.x < 1.5 ? c.g : c.b;
+                float d = uFon.x < 1.5 ? max(c.r, c.b * 0.75) : max(c.r, c.g * 0.75);
+                return (f - d) / max(f, 0.12);
+            }
+            float alfa(vec3 c) { return 1.0 - smoothstep(uFon.y, uFon.y + 0.15, fonnost(c)); }
             void main() {
                 vec4 c = 0.25 * (texture2D(sTex, vTex - vDx - vDy) + texture2D(sTex, vTex + vDx - vDy)
                     + texture2D(sTex, vTex - vDx + vDy) + texture2D(sTex, vTex + vDx + vDy));
                 if (uFon.x > 0.5) {
-                    float drugie = uFon.x < 1.5 ? max(c.r, c.b) : max(c.r, c.g);
-                    float fon = uFon.x < 1.5 ? c.g : c.b;
-                    float a = 1.0 - smoothstep(uFon.y * 0.5, uFon.y * 1.5, fon - drugie);   // чем зеленее — тем прозрачнее
-                    if (uFon.x < 1.5) c.g = min(c.g, drugie + 0.02); else c.b = min(c.b, drugie + 0.02);   // зелёный ореол прочь
+                    vec2 sx = vDx * 6.0, sy = vDy * 6.0;
+                    float a = 0.4 * alfa(c.rgb) + 0.15 * (alfa(texture2D(sTex, vTex + sx).rgb) + alfa(texture2D(sTex, vTex - sx).rgb)
+                        + alfa(texture2D(sTex, vTex + sy).rgb) + alfa(texture2D(sTex, vTex - sy).rgb));
+                    a = smoothstep(0.1, 0.9, a);                                            // край чёткий, без серой каймы
+                    if (uFon.x < 1.5) c.g = min(c.g, max(c.r, c.b) + 0.02); else c.b = min(c.b, max(c.r, c.g) + 0.02);   // ореол прочь
                     c = vec4(c.rgb * a, a);                                                 // с умноженной альфой
                 }
                 gl_FragColor = c;
