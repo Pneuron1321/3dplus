@@ -25,6 +25,8 @@ object Hub {
     @Volatile var vstavka: Vstavka? = null
     /** Голос Авы «вслух» прямо в звук эфира (2.3.9, режим «oba»): ставит Efir; вызов «плюс плюс» его чистит. */
     @Volatile var vstavkaGolos: Vstavka? = null
+    /** 2.8.8: звуки оповещений (фоловер, донат, чат) прямо в звук эфира — не через захват шлема. Ставит Efir. */
+    @Volatile var vstavkaZvuki: Vstavka? = null
     /** «Тесно / свободно» (2.3.9): новый на каждый эфир, шагает раз в секунду (Nalozhenie), читает /efir. */
     @Volatile var dispetcher = Dispetcher()
     /** Тепловой статус шлема (PowerManager: 0 — норма … 6), ставит служба глаз; -1 — не знаем. */

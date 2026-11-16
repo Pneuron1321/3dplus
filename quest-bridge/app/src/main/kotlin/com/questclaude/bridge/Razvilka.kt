@@ -640,7 +640,9 @@ class Razvilka(private val w: Int, private val h: Int) {
             if (r[1] * k < Vizor.TH + 4f && r[0] * k > Vizor.W / 2f) pravo = minOf(pravo, r[0] * k)
         }
         // слева — плашка ника под Плюсом и сам Плюс, если он внизу слева
-        var levo = maxOf(Vizor.PL.r, Vizor.NK_X + nkShirina)
+        // 2.8.8: в пульс плашка шире — субтитры плавно отъезжают вместе с ней, не под неё
+        val nkK = if (sloi["nk"]?.let { it.w > 0 } == true) Vizor.nkPuls(Vizor.nkPulsT(System.currentTimeMillis())) else 1f
+        var levo = maxOf(Vizor.PL.r, Vizor.NK_X + nkShirina * nkK)
         val p = plusMesto()
         if (sloi["pl"]?.let { it.w > 0 } == true && p[1] + Vizor.PL_H > Vizor.TITRY_VERH && p[0] < Vizor.W / 2f)
             levo = maxOf(levo, p[0] + Vizor.PL_W)

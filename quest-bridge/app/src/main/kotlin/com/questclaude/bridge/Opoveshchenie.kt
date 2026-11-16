@@ -96,21 +96,43 @@ class Opoveshchenie(private val ctx: Context, private val razvilka: () -> Razvil
     }
 
     companion object {
-        /** Звук из assets как медиа: с захватом — слышат эфир и шлем (2.8.2: и строка доната); efir=false — только шлем. */
+        /**
+         * Звук из assets: в шлеме — медиа; efir — и в звук эфира. 2.8.8 (Александр 16.11: фоловер Kick — в ушах звук был,
+         * в эфире нет): в эфир кладём сами — PCM прямо в Hub.vstavkaZvuki, а в шлеме — «не записывать», чтобы захват не
+         * взял второй раз. Эфира нет или не раскодировалось — как раньше: медиа с захватом.
+         */
         fun zvuk(ctx: Context, put: String, efir: Boolean = true) {
+            val v = if (efir) Hub.vstavkaZvuki else null
+            val pcm = if (v != null) pcm(ctx, put) else null
+            val pryamo = v != null && pcm != null
             try {
                 val p = MediaPlayer()
                 ctx.assets.openFd(put).use { p.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
                 p.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .setAllowedCapturePolicy(if (efir) AudioAttributes.ALLOW_CAPTURE_BY_ALL     // эфир его захватывает
+                    .setAllowedCapturePolicy(if (efir && !pryamo) AudioAttributes.ALLOW_CAPTURE_BY_ALL   // эфир его захватывает
                         else AudioAttributes.ALLOW_CAPTURE_BY_NONE).build())                   // 2.8.6: только в шлеме
                 p.setOnCompletionListener { it.release() }
                 p.setOnErrorListener { mp, _, _ -> mp.release(); true }
                 p.prepare()
+                if (pryamo) v!!.dobavit(pcm!!)                                          // в эфир — в тот же миг
                 p.start()
-            } catch (e: Exception) { Pamyat.zapis("звук $put не сыгран (${e.message})") }
+            } catch (e: Exception) {
+                Pamyat.zapis("звук $put не сыгран (${e.message})")
+                if (pryamo) try { v!!.dobavit(pcm!!) } catch (x: Exception) { }      // шлем не сыграл — эфир всё равно услышит
+            }
         }
+
+        private val pcmKesh = java.util.concurrent.ConcurrentHashMap<String, ShortArray>()
+
+        /** MP3 из assets → PCM 48 кГц моно (раз на звук, дальше из памяти); не вышло — null. */
+        fun pcm(ctx: Context, put: String): ShortArray? = pcmKesh[put] ?: try {
+            val f = java.io.File(ctx.cacheDir, "zvuk-" + put.replace('/', '-'))
+            ctx.assets.open(put).use { i -> f.outputStream().use { i.copyTo(it) } }
+            val r = Mp3.raskodirovat(f)?.let { Vstavka.v48mono(it.pcm, it.rate, it.kanalov) }
+            f.delete()
+            r?.takeIf { it.isNotEmpty() }?.also { pcmKesh[put] = it }
+        } catch (e: Exception) { null }
         const val ZVUK = "zvuki/folover.mp3"
         const val W = 720
         const val H = 130

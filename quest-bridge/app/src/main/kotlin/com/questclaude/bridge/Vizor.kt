@@ -208,14 +208,16 @@ object Vizor {
     /** 2.8.8 (Александр 14.11: «плашку со ссылками — под ноги Плюсу, в нижний левый угол»): левый край ника. */
     val NK_X = PL.l
 
-    // 2.8.8 (Александр 15.11): раз в 5 минут плашка ссылок пульсирует — три пульса по 0,5 с, каждый +10 % к исходному
-    // (110 → 120 → 130 %), четвёртый — резко до +25 % сверху (155 %) и сразу назад к 100 %. Растёт от левого нижнего
-    // угла (кадр не теряет её). Плюс приседает на всё время и встаёт, когда плашка вернулась.
-    const val NK_PULS_RAZ_MS = 300_000L
+    // 2.8.8 (Александр 15–16.11): раз в 377 с плашка ссылок пульсирует — восемь ступеней по 0,5 с. Ступени 1–3: +10 % к
+    // исходному каждая (110 → 120 → 130 %); 4-я — рывок +25 % (155 %) и назад к 130 %; 5–7: 140 → 150 → 160 %; 8-я —
+    // финал до 180 % и сразу к 100 %. Растёт от левого нижнего угла (кадр не теряет её). Плюс приседает на всё время и
+    // встаёт, когда плашка вернулась.
+    const val NK_PULS_RAZ_MS = 377_000L
     const val NK_PULS_MS = 500L
-    const val NK_PULS_SHAG = 0.10f
-    const val NK_PULS_RYVOK = 0.25f
-    const val NK_PULS_VSEGO = NK_PULS_MS * 4
+    /** Размер после каждой ступени и пик рывка у 4-й и 8-й (доли исходного). */
+    private val NK_STUPENI = floatArrayOf(1.10f, 1.20f, 1.30f, 1.30f, 1.40f, 1.50f, 1.60f, 1.00f)
+    private val NK_RYVKI = mapOf(3 to 1.55f, 7 to 1.80f)
+    val NK_PULS_VSEGO = NK_PULS_MS * NK_STUPENI.size
 
     /** Где мы в пульсации: мс от её начала или −1 (сейчас не пульсирует). */
     fun nkPulsT(now: Long): Long = (now % NK_PULS_RAZ_MS).let { if (it < NK_PULS_VSEGO) it else -1L }
@@ -225,14 +227,15 @@ object Vizor {
         if (t < 0 || t >= NK_PULS_VSEGO) return 1f
         val i = (t / NK_PULS_MS).toInt()
         val u = (t % NK_PULS_MS) / NK_PULS_MS.toFloat()
-        val bylo = 1f + NK_PULS_SHAG * minOf(i, 3)
-        if (i < 3) {                                                   // пульс: толчок с запасом и встать на +10 %
+        val bylo = if (i == 0) 1f else NK_STUPENI[i - 1]
+        val stanet = NK_STUPENI[i]
+        val pik = NK_RYVKI[i]
+        if (pik == null) {                                             // ступень: толчок с запасом и встать на +10 %
             val k = 1f - (1f - u) * (1f - u)
-            return bylo + NK_PULS_SHAG * k + 0.04f * kotlin.math.sin(Math.PI * u).toFloat()
+            return bylo + (stanet - bylo) * k + 0.04f * kotlin.math.sin(Math.PI * u).toFloat()
         }
-        val pik = bylo + NK_PULS_RYVOK                                 // четвёртый: рывок за 0,15 с, сжатие к 100 %
-        return if (u < 0.3f) bylo + (pik - bylo) * (u / 0.3f)
-        else { val v = (u - 0.3f) / 0.7f; pik + (1f - pik) * (1f - (1f - v) * (1f - v)) }
+        return if (u < 0.3f) bylo + (pik - bylo) * (u / 0.3f)          // рывок за 0,15 с, потом сжатие
+        else { val v = (u - 0.3f) / 0.7f; pik + (stanet - pik) * (1f - (1f - v) * (1f - v)) }
     }
 
     // слой "sp" — живой Плюс на сценах и в итогах (2.8.5, Александр 05.11: «в итогах — анимация разговора и моргания»):

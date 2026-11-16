@@ -106,6 +106,7 @@ class Efir(
     private val mic = Mikrofon()
     private val vstavka = Vstavka()                      // голос только в эфир (ответ донатеру)
     private val vstavkaGolos = Vstavka()                 // Ава «вслух» прямо в эфир (2.3.9, «oba»)
+    private val vstavkaZvuki = Vstavka(30)               // 2.8.8: звуки оповещений прямо в эфир
     private val fonLenta = Lenta()                       // фоновая музыка (2.5.6, Fon)
     private val otpravka = Ploshchadki({ _, url, key ->
         val r = Rtmp(url, key)
@@ -228,6 +229,8 @@ class Efir(
         Hub.micTap = null
         if (Hub.vstavka === vstavka) Hub.vstavka = null
         if (Hub.vstavkaGolos === vstavkaGolos) Hub.vstavkaGolos = null
+        if (Hub.vstavkaZvuki === vstavkaZvuki) Hub.vstavkaZvuki = null
+        vstavkaZvuki.ochistit()
         if (Hub.fonLenta === fonLenta) Hub.fonLenta = null
         fonLenta.ochistit()
         vstavka.ochistit()
@@ -401,6 +404,7 @@ class Efir(
         Hub.micTap = { b, n -> mic.add(b, n) }
         Hub.vstavka = vstavka
         Hub.vstavkaGolos = vstavkaGolos
+        Hub.vstavkaZvuki = vstavkaZvuki
         Hub.fonLenta = fonLenta
         zvuk = (if (rec != null) "игра + микрофон" else "микрофон (звук игры не дали: $zvukOshibka)")
         threads += thread(name = "efir-zvuk", isDaemon = true) { audioLoop(c) }
@@ -448,6 +452,7 @@ class Efir(
             val fr = got / 2
             if (r != null) igraVRech(buf, fr)                // звук игры — в субтитры (если демон слушает)
             fonLenta.mix(buf, fr)                            // музыка — после субтитров игры; гостям — вместе с игрой
+            vstavkaZvuki.mix(buf, fr)                        // 2.8.8: фоловер, донат, звуки чата — как музыка, гостям тоже
             val m = Hub.mikser
             if (m != null) {                                 // гостям — игра отдельно от голоса Плюса (2.5.3: «🔇 Только голоса»)
                 if (fon.size < fr) fon = ShortArray(fr)

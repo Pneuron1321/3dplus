@@ -30,9 +30,9 @@ fun kadryVizor(out: File) {
         VizVaryant("vizor-schet", ya, schet = true, niz = listOf(
             Triple("plus", "Rex, спасибо за донат!", "Rex, thanks for the donation!"))),
         VizVaryant("vizor-gosti-3", ya, gostey = 3),
-        // 2.8.8: пульс плашки ссылок (раз в 5 мин) — 3-й пульс (130 %) и пик рывка (155 %); Плюс в приседе, стоит на ней
-        VizVaryant("vizor-puls-3", ya, schet = true, pulsT = 1499L),
-        VizVaryant("vizor-puls-pik", ya, schet = true, pulsT = 1650L),
+        // 2.8.8: пульс плашки ссылок (раз в 377 с) — 7-я ступень (160 %) и финальный пик (180 %); Плюс в приседе, стоит на ней
+        VizVaryant("vizor-puls-3", ya, schet = true, pulsT = 3499L),
+        VizVaryant("vizor-puls-pik", ya, schet = true, pulsT = 3650L),
         VizVaryant("vizor-efir-bokom", bokom, muzyka = false, sotnya = true, niz = listOf(
             Triple("ya", "Макс, прикрой слева, я захожу на крышу, а ты держи вертолёт подальше от нас",
                 "Max, cover the left, I'm going up to the roof, keep the chopper away from us"))),
