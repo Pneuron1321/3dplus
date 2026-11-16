@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Карта захвата Elgato (vendor 0x0FD9 = 4057): мост в списке «Choose an app» при подключении (2.6.5) -->
+<resources>
+    <usb-device vendor-id="4057" />
+</resources>
