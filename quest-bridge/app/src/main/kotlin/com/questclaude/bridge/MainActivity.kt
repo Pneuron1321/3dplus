@@ -84,6 +84,18 @@ class MainActivity : Activity() {
                 fonK.text = fonNadpis()
             }
             addView(fonK)
+            // 2.8.11 (Александр 16.11: по краям окна видна комната — ткань не до края): четыре кнопки, каждая срезает
+            // свой край окна камеры: 0 → 5 → 10 … 40 % → 0. Работает с вырезанным фоном.
+            for ((i, imya) in listOf("СЛЕВА", "СВЕРХУ", "СПРАВА", "СНИЗУ").withIndex()) {
+                lateinit var k: Button
+                fun nadpis() = "КРАЙ ОКНА $imya: срезано ${Math.round(Oformlenie.fonObrez[i] * 100)} % (нажми — ещё 5)"
+                k = button(nadpis()) {
+                    val bylo = Math.round(Oformlenie.fonObrez[i] * 100)
+                    Oformlenie.fonUpr(mapOf(listOf("l", "v", "p", "n")[i] to (if (bylo >= 40) 0 else bylo + 5).toString()))
+                    k.text = nadpis()
+                }
+                addView(k)
+            }
             addView(button("КЛИП КАМЕРЫ: сохранить последние 2 минуты") { klipKnopka() })
             addView(button("КЛИПЫ: открыть на айфоне (15 минут)") { klipyKnopka() }.apply {
                 setOnLongClickListener { Hub.klipy?.zakrytVse(); klipyStatus = "Клипы: страница закрыта, ключ больше не работает."; true }

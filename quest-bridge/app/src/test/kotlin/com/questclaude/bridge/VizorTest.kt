@@ -242,4 +242,28 @@ class VizorTest {
         assertEquals(1f, polno[1], 0f)
         assertEquals(Vizor.titryX(Vizor.PRAVO, Vizor.PL.r), polno[0], 0f)
     }
+
+    /** 2.8.11: края окна камеры прочь (проценты, до 45), запоминаются; сила больше — порог ниже (вырез смелее). */
+    @Test fun fonObrezIPorog() {
+        val d = Files.createTempDirectory("vizor").toFile()
+        Oformlenie.zagruzit(d)
+        assertEquals(0.15f, Oformlenie.fonPorog(), 1e-4f)
+        assertTrue(Oformlenie.fonUpr(mapOf("v" to "zel", "obrez" to "12,0,8,0")).contains("\"obrez\":[12,0,8,0]"))
+        assertEquals(0.12f, Oformlenie.fonObrez[0], 1e-4f); assertEquals(0.08f, Oformlenie.fonObrez[2], 1e-4f)
+        assertTrue(Oformlenie.fonUpr(mapOf("n" to "1")).contains("\"obrez\":[12,0,8,1]"))     // 1 — это 1 %, не «целиком»
+        assertTrue(Oformlenie.fonUpr(mapOf("v" to "90")).contains("\"obrez\":[12,45,8,1]"))   // не больше 45 %
+        Oformlenie.fonUpr(mapOf("obrez" to "чепуха"))                                          // чужое — как было
+        assertEquals(0.12f, Oformlenie.fonObrez[0], 1e-4f)
+        Oformlenie.fonUpr(mapOf("sila" to "0.25"))
+        assertEquals(0.05f, Oformlenie.fonPorog(), 1e-4f)                                      // смелее
+        Oformlenie.fonUpr(mapOf("sila" to "0.05"))
+        assertEquals(0.25f, Oformlenie.fonPorog(), 1e-4f)                                      // бережнее
+        Oformlenie.zanovo(); Oformlenie.zagruzit(d)                                            // после перезапуска — запомненное
+        assertEquals("zel", Oformlenie.fon)
+        assertEquals(0.12f, Oformlenie.fonObrez[0], 1e-4f); assertEquals(0.45f, Oformlenie.fonObrez[1], 1e-4f)
+        File(d, "efir-fon").writeText("zel 0.15")                                              // файл от 2.8.10 — без краёв
+        Oformlenie.zanovo(); Oformlenie.zagruzit(d)
+        assertEquals(0f, Oformlenie.fonObrez.sum(), 0f)
+        d.deleteRecursively()
+    }
 }

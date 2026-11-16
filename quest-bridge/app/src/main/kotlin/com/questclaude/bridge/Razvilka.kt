@@ -144,6 +144,7 @@ class Razvilka(private val w: Int, private val h: Int) {
     private var shKamera = Sh(0, 0, 0, 0, 0, 0)               // окно камеры: уменьшение в 4 выборки (0 — не собралась)
     private var uShag = 0
     private var uFon = 0
+    private var uObrez = 0
     private var released = false
 
     /** Кадров от захвата — для статуса. */
@@ -422,6 +423,7 @@ class Razvilka(private val w: Int, private val h: Int) {
             shKamera = sh(program(VERTEX_KAMERA, FRAGMENT_KAMERA))
             uShag = GLES20.glGetUniformLocation(shKamera.p, "uShag")
             uFon = GLES20.glGetUniformLocation(shKamera.p, "uFon")
+            uObrez = GLES20.glGetUniformLocation(shKamera.p, "uObrez")
         } catch (e: Exception) { shKamera = Sh(0, 0, 0, 0, 0, 0) }
         tex = oesTexture()
         st = SurfaceTexture(tex)
@@ -881,7 +883,9 @@ class Razvilka(private val w: Int, private val h: Int) {
         val umen = maxOf(r[2], r[3]) < maxOf(kw, kh)      // кадр телефона больше окна — уменьшаем
         if (fon != "net") { GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA) }
         GLES20.glUseProgram(shKamera.p)
-        GLES20.glUniform2f(uFon, if (fon == "zel") 1f else if (fon == "sin") 2f else 0f, Oformlenie.fonSila)
+        GLES20.glUniform2f(uFon, if (fon == "zel") 1f else if (fon == "sin") 2f else 0f, Oformlenie.fonPorog())
+        val z = Oformlenie.fonObrez                       // 2.8.11: края окна прочь (только с вырезанным фоном)
+        if (fon != "net") GLES20.glUniform4f(uObrez, z[0], z[1], z[2], z[3]) else GLES20.glUniform4f(uObrez, 0f, 0f, 0f, 0f)
         val shag = umen || fon != "net"                   // 2.8.9: вырезу фона нужны соседи и без уменьшения
         kvadratKamery(kmtxPov, if (shag) 0.25f / r[2] else 0f, if (shag) 0.25f / r[3] else 0f)
         if (fon != "net") GLES20.glDisable(GLES20.GL_BLEND)
@@ -1022,8 +1026,10 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vTex;
             varying vec2 vDx;
             varying vec2 vDy;
+            varying vec2 vOkno;
             void main() {
                 gl_Position = aPos;
+                vOkno = aPos.xy * 0.5 + 0.5;                 // место в окне: (0;0) — левый низ, (1;1) — правый верх
                 vTex = (uMtx * aTex).xy;
                 vDx = (uMtx * vec4(uShag.x, 0.0, 0.0, 0.0)).xy;
                 vDy = (uMtx * vec4(0.0, uShag.y, 0.0, 0.0)).xy;
@@ -1041,25 +1047,35 @@ class Razvilka(private val w: Int, private val h: Int) {
             varying vec2 vDx;
             varying vec2 vDy;
             uniform samplerExternalOES sTex;
-            uniform vec2 uFon;      // 2.8.7: x — 0 нет, 1 зелёный, 2 синий фон прочь; y — порог (0,05…0,5)
-            // 2.8.9 (Александр 16.11: «зелёный разных оттенков, неровный — вырезай лучше»): «насколько это фон» — доля
-            // от яркости (тень складки и пятно света одинаково), бирюза — тоже фон (второй цвет весит 0,75), жёлтое и
-            // белое — нет. Прозрачность — среднее по точке и четырём соседям в ~1,5 точки окна: крапины сжатия не мигают.
+            varying vec2 vOkno;
+            uniform vec2 uFon;      // 2.8.7: x — 0 нет, 1 зелёный, 2 синий фон прочь; y — порог «фонности» (меньше — смелее)
+            uniform vec4 uObrez;    // 2.8.11: края окна прочь — доли слева, сверху, справа, снизу
+            // 2.8.10 (Александр 16.11: «зелёный разных оттенков, неровный»): «насколько это фон» — доля от яркости
+            // (тень складки и пятно света одинаково). 2.8.11 (его снимок: бирюзовое пятно ткани под холодным светом,
+            // тёмная кайма по краям, зеленца на волосах): бирюза — фон, только когда красного почти нет (голубая одежда
+            // остаётся); край поджат на ~1 точку; прозрачность — по точке и восьми соседям; зелёный отсвет на
+            // волосах и плечах гасится к среднему красного и синего.
             float fonnost(vec3 c) {
                 float f = uFon.x < 1.5 ? c.g : c.b;
-                float d = uFon.x < 1.5 ? max(c.r, c.b * 0.75) : max(c.r, c.g * 0.75);
-                return (f - d) / max(f, 0.12);
+                float o = uFon.x < 1.5 ? c.b : c.g;
+                float n = max(f, 0.12);
+                float sosed = mix(0.75, 0.55, smoothstep(0.5, 0.7, (f - c.r) / n));
+                return (f - max(c.r, o * sosed)) / n;
             }
-            float alfa(vec3 c) { return 1.0 - smoothstep(uFon.y, uFon.y + 0.15, fonnost(c)); }
+            float alfa(vec2 p) { return 1.0 - smoothstep(uFon.y, uFon.y + 0.15, fonnost(texture2D(sTex, p).rgb)); }
             void main() {
                 vec4 c = 0.25 * (texture2D(sTex, vTex - vDx - vDy) + texture2D(sTex, vTex + vDx - vDy)
                     + texture2D(sTex, vTex - vDx + vDy) + texture2D(sTex, vTex + vDx + vDy));
                 if (uFon.x > 0.5) {
                     vec2 sx = vDx * 6.0, sy = vDy * 6.0;
-                    float a = 0.4 * alfa(c.rgb) + 0.15 * (alfa(texture2D(sTex, vTex + sx).rgb) + alfa(texture2D(sTex, vTex - sx).rgb)
-                        + alfa(texture2D(sTex, vTex + sy).rgb) + alfa(texture2D(sTex, vTex - sy).rgb));
-                    a = smoothstep(0.1, 0.9, a);                                            // край чёткий, без серой каймы
-                    if (uFon.x < 1.5) c.g = min(c.g, max(c.r, c.b) + 0.02); else c.b = min(c.b, max(c.r, c.g) + 0.02);   // ореол прочь
+                    float a = 0.28 * (1.0 - smoothstep(uFon.y, uFon.y + 0.15, fonnost(c.rgb)))
+                        + 0.09 * (alfa(vTex + sx) + alfa(vTex - sx) + alfa(vTex + sy) + alfa(vTex - sy)
+                        + alfa(vTex + sx + sy) + alfa(vTex - sx + sy) + alfa(vTex + sx - sy) + alfa(vTex - sx - sy));
+                    a = smoothstep(0.4, 0.95, a);                                           // край поджат: тёмной каймы нет
+                    a *= step(uObrez.x, vOkno.x) * step(uObrez.z, 1.0 - vOkno.x)            // края окна прочь
+                        * step(uObrez.w, vOkno.y) * step(uObrez.y, 1.0 - vOkno.y);
+                    if (uFon.x < 1.5) c.g = min(c.g, 0.5 * max(c.r, c.b) + 0.25 * (c.r + c.b) + 0.02);   // отсвет фона прочь
+                    else c.b = min(c.b, 0.5 * max(c.r, c.g) + 0.25 * (c.r + c.g) + 0.02);
                     c = vec4(c.rgb * a, a);                                                 // с умноженной альфой
                 }
                 gl_FragColor = c;

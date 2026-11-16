@@ -361,6 +361,16 @@ object Oformlenie {
         private set
     @Volatile var fonSila = 0.15f
         private set
+    /** 2.8.11: края окна камеры прочь при вырезанном фоне — доли окна: слева, сверху, справа, снизу (0…0,45). */
+    @Volatile var fonObrez = floatArrayOf(0f, 0f, 0f, 0f)
+        private set
+    /** Порог «фонности» для шейдера: сила больше — вырез смелее (0,15 → 0,15; 0,25 → 0,05; 0,05 → 0,25). */
+    fun fonPorog(): Float = (0.30f - fonSila).coerceIn(0.02f, 0.28f)
+    /** Четыре числа → доли окна; [procenty] — пришли проценты (запрос), иначе доли (файл). */
+    private fun obrezIz(l: List<String>, procenty: Boolean): FloatArray? = l.takeIf { it.size == 4 }
+        ?.map { it.replace(',', '.').toFloatOrNull() }?.takeIf { z -> z.all { it != null && !it.isNaN() } }
+        ?.map { (if (procenty) it!! / 100f else it!!).coerceIn(0f, OBREZ_MAKS) }?.toFloatArray()
+    const val OBREZ_MAKS = 0.45f
     /** Сцена: "" — нет, skoro, otoshyol, konec. */
     @Volatile var scena = ""
         private set
@@ -382,7 +392,8 @@ object Oformlenie {
         plusMesto = try { File(d, FAJL_PLUS).readText().trim().split(' ').map { it.toFloat() }.takeIf { it.size == 2 }?.toFloatArray() }
             catch (e: Exception) { null }
         try { File(d, FAJL_FON).readText().trim().split(' ').let { f ->
-            fon = f[0].takeIf { it in FONY } ?: "net"; f.getOrNull(1)?.toFloatOrNull()?.let { fonSila = it.coerceIn(0.05f, 0.5f) } }
+            fon = f[0].takeIf { it in FONY } ?: "net"; f.getOrNull(1)?.toFloatOrNull()?.let { fonSila = it.coerceIn(0.05f, 0.5f) }
+            obrezIz(f.drop(2), false)?.let { fonObrez = it } }
         } catch (e: Exception) { }
         versiya++
     }
@@ -442,8 +453,14 @@ object Oformlenie {
     fun fonUpr(q: Map<String, String>): String {
         q["v"]?.takeIf { it in FONY }?.let { fon = it }
         q["sila"]?.replace(',', '.')?.toFloatOrNull()?.takeIf { !it.isNaN() }?.let { fonSila = it.coerceIn(0.05f, 0.5f) }
-        if (q.isNotEmpty()) { versiya++; dir?.let { try { File(it, FAJL_FON).writeText("$fon $fonSila") } catch (e: Exception) { } } }
-        return String.format(Locale.ROOT, "{\"fon\":\"%s\",\"sila\":%.2f}", fon, fonSila)
+        // obrez=Л,В,П,Н — проценты окна; одна сторона — l= v= p= n=
+        q["obrez"]?.let { o -> obrezIz(o.split(',', ' ').filter { it.isNotEmpty() }, true)?.let { fonObrez = it } }
+        for ((i, k) in listOf("l", "v", "p", "n").withIndex()) q[k]?.replace(',', '.')?.toFloatOrNull()?.takeIf { !it.isNaN() }?.let { z ->
+            fonObrez = fonObrez.copyOf().also { it[i] = (z / 100f).coerceIn(0f, OBREZ_MAKS) } }
+        val z = fonObrez
+        if (q.isNotEmpty()) { versiya++; dir?.let { try { File(it, FAJL_FON).writeText("$fon $fonSila ${z[0]} ${z[1]} ${z[2]} ${z[3]}") } catch (e: Exception) { } } }
+        return String.format(Locale.ROOT, "{\"fon\":\"%s\",\"sila\":%.2f,\"obrez\":[%d,%d,%d,%d]}", fon, fonSila,
+            Math.round(z[0] * 100), Math.round(z[1] * 100), Math.round(z[2] * 100), Math.round(z[3] * 100))
     }
 
     /** /efir/scena?s=skoro|otoshyol|konec|net&min=5&t=фраза (без s — только состояние; чужое — oshibka). */
@@ -485,5 +502,5 @@ object Oformlenie {
     }
 
     /** Только для проверок: как после установки. */
-    internal fun zanovo() { stil = "viz"; scena = ""; doMs = 0L; fraza = ""; plusMesto = null; fon = "net"; fonSila = 0.15f; dir = null; versiya++ }
+    internal fun zanovo() { stil = "viz"; scena = ""; doMs = 0L; fraza = ""; plusMesto = null; fon = "net"; fonSila = 0.15f; fonObrez = floatArrayOf(0f, 0f, 0f, 0f); dir = null; versiya++ }
 }

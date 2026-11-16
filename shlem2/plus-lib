@@ -1197,12 +1197,21 @@ def vid_plus_fon(U, a):
         r = zapros(U, '/efir/plus' + ('?' + q if q else ''), 5)
     else:
         b = a[1] if len(a) > 1 else ''
-        if b not in ('zel', 'sin', 'vykl', ''):
+        if b == 'obrez':                                   # мост 2.8.11: края окна камеры прочь — % слева, сверху, справа, снизу
+            z = a[2:]
+            if z == ['vykl']:
+                z = ['0', '0', '0', '0']
+            if len(z) != 4 or not all(re.fullmatch(r'\d+(?:[.,]\d+)?', x) for x in z):
+                return 1, ['vid fon obrez 12 0 8 0 — срезать у окна камеры 12 % слева, 0 сверху, 8 справа, 0 снизу '
+                           '(до 45; работает с вырезанным фоном); vid fon obrez vykl — не срезать.'], None
+            q = 'obrez=' + ','.join(x.replace(',', '.') for x in z)
+        elif b not in ('zel', 'sin', 'vykl', ''):
             return 1, ['vid fon zel — вырезать зелёный фон камеры (sin — синий); vid fon zel 0.25 — смелее (0,05–0,5, '
-                       'обычно 0,15); vid fon vykl — выключить.'], None
-        q = ('v=' + ('net' if b == 'vykl' else b)) if b else ''
-        if len(a) > 2 and re.fullmatch(r'\d*[.,]?\d+', a[2]):
-            q += '&sila=' + a[2].replace(',', '.')
+                       'обычно 0,15); vid fon vykl — выключить; vid fon obrez Л В П Н — срезать края окна, %.'], None
+        else:
+            q = ('v=' + ('net' if b == 'vykl' else b)) if b else ''
+            if len(a) > 2 and re.fullmatch(r'\d*[.,]?\d+', a[2]):
+                q += '&sila=' + a[2].replace(',', '.')
         r = zapros(U, '/efir/fon' + ('?' + q if q else ''), 5)
     if r is None:
         return 1, [MOLCHIT], None
@@ -1216,8 +1225,10 @@ def vid_plus_fon(U, a):
                    'левый верхний угол в %s %% ширины и %s %% высоты' % (round(d.get('x', 0)), round(d.get('y', 0))))], None
     if d.get('fon') == 'net':
         return 0, ['Фон камеры не вырезаю (мост запомнил).'], None
-    return 0, ['Вырезаю %s фон камеры, сила %s (мост запомнил). Остаются пятна фона — vid fon %s 0.25; режет тебя — '
-               'vid fon %s 0.1.' % ('зелёный' if d.get('fon') == 'zel' else 'синий', d.get('sila'), d.get('fon'), d.get('fon'))], None
+    o = d.get('obrez') or [0, 0, 0, 0]
+    kraya = (' Края окна срезаны: слева %s %%, сверху %s %%, справа %s %%, снизу %s %%.' % tuple(o)) if any(o) else ''
+    return 0, ['Вырезаю %s фон камеры, сила %s (мост запомнил).%s Остаются пятна фона — vid fon %s 0.25; режет тебя — '
+               'vid fon %s 0.1.' % ('зелёный' if d.get('fon') == 'zel' else 'синий', d.get('sila'), kraya, d.get('fon'), d.get('fon'))], None
 
 
 INSTRUMENTY = {'kadr': kadr, 'efir': efir, 'kamera': kamera, 'karta': karta, 'most3': most3, 'klipy': klipy}
