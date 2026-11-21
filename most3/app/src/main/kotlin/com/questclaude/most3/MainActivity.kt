@@ -21,7 +21,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 
@@ -30,13 +32,15 @@ import android.widget.TextView
  * по кнопке «Ручки» — ползунки. Панель прячется через 5 с; коснулся картинки — вернулась.
  * 3.1.3 (Александр 22.10: полоска «режим, приём, показ, звук» попала в эфир): строка состояния прячется вместе с
  * панелью, пока видео идёт; нет видео или ошибка — строка видна.
+ * 3.2.2 (Александр 21.11: в маленьком окне не все кнопки видны — «Ручки» не нажать): ряд кнопок листается вбок,
+ * ползунки — вверх-вниз (не выше половины окна), полосы прокрутки видны всегда и толстые — их можно тянуть.
  */
 class MainActivity : Activity() {
     private lateinit var gl: GLSurfaceView
     private val pokaz = Pokaz(Most.polka)
     private lateinit var stroka: TextView
-    private lateinit var panel: LinearLayout
-    private lateinit var polzunki: LinearLayout
+    private lateinit var panel: HorizontalScrollView
+    private lateinit var polzunki: ScrollView
     private val ui = Handler(Looper.getMainLooper())
     private var panelVidna = true
     private val spryatat = Runnable {
@@ -142,8 +146,36 @@ class MainActivity : Activity() {
         text = t; textSize = 13f; isAllCaps = false; setOnClickListener { f(); pokazatPanel() }
     }
 
-    private fun sobratPanel() = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setBackgroundColor(0x99000000.toInt())
+    /** Полоса прокрутки, которую видно и можно тянуть: не гаснет, толстая, светлая на тёмной дорожке. */
+    private fun polosa(v: View, vbok: Boolean) {
+        v.isScrollbarFadingEnabled = false
+        v.scrollBarSize = 22
+        v.scrollBarStyle = View.SCROLLBARS_OUTSIDE_OVERLAY   // полоса — в отступе, кнопки не закрывает
+        if (vbok) v.isHorizontalScrollBarEnabled = true else v.isVerticalScrollBarEnabled = true
+        if (Build.VERSION.SDK_INT >= 29) {
+            fun d(c: Int) = android.graphics.drawable.GradientDrawable().apply { setColor(c); cornerRadius = 11f }
+            if (vbok) { v.horizontalScrollbarThumbDrawable = d(0xDDFFFFFF.toInt()); v.horizontalScrollbarTrackDrawable = d(0x55FFFFFF) }
+            else { v.verticalScrollbarThumbDrawable = d(0xDDFFFFFF.toInt()); v.verticalScrollbarTrackDrawable = d(0x55FFFFFF) }
+        }
+        v.setOnScrollChangeListener { _, _, _, _, _ -> pokazatPanel() }   // листает — панель не прячется
+    }
+
+    /** Ползунки: не выше половины окна — ниже всегда остаётся ряд кнопок. */
+    private class Polovina(c: Context) : ScrollView(c) {
+        override fun onMeasure(w: Int, h: Int) {
+            val okno = (parent?.parent as? View)?.height?.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+            super.onMeasure(w, MeasureSpec.makeMeasureSpec(okno / 2, MeasureSpec.AT_MOST))
+        }
+    }
+
+    private fun sobratPanel() = HorizontalScrollView(this).apply {
+        setBackgroundColor(0x99000000.toInt()); isFillViewport = true; setPadding(0, 0, 0, 26)
+        polosa(this, vbok = true)
+        addView(sobratKnopki())
+    }
+
+    private fun sobratKnopki() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
         for ((imya, nadpis) in listOf("obychno" to "Обычно", "monitor" to "Монитор", "noch" to "Ночь", "yarko" to "Ярко", "rezko" to "Резко", "hdr" to "HDR", "kino" to "Кино"))
             addView(knopka(nadpis) { NABORY[imya]?.let { Most.postavit(it); obnovitPolzunki() } })
         addView(knopka("Звук −") { Most.gromkost = Most.gromkost - 0.1f })
@@ -172,18 +204,40 @@ class MainActivity : Activity() {
     private val spisok = listOf(
         Polzunok("yarkost", "Яркость", -0.5f, 0.5f) { it.yarkost },
         Polzunok("kontrast", "Контраст", 0.5f, 2f) { it.kontrast },
-        Polzunok("nasyshch", "Насыщенность", 0f, 2f) { it.nasyshch },
+        Polzunok("nasyshch", "Насыщенность", 0f, 2.5f) { it.nasyshch },
         Polzunok("gamma", "Гамма", 0.5f, 2.5f) { it.gamma },
         Polzunok("teni", "Тени", 0f, 1f) { it.teni },
         Polzunok("rezkost", "Резкость", 0f, 2f) { it.rezkost },
-        Polzunok("avtonoch", "Авто-ночь", 0f, 1f) { it.avtoNoch })
+        Polzunok("avtonoch", "Авто-ночь", 0f, 1f) { it.avtoNoch },
+        // 3.2.2: цвет и уровни (просьба Александра 21.11)
+        Polzunok("temperatura", "Температура (холодно — тепло)", -100f, 100f) { it.temperatura },
+        Polzunok("balr", "Красный", 0.5f, 1.5f) { it.balR },
+        Polzunok("balg", "Зелёный", 0.5f, 1.5f) { it.balG },
+        Polzunok("balb", "Синий", 0.5f, 1.5f) { it.balB },
+        Polzunok("ton", "Тон (оттенок)", -30f, 30f) { it.ton },
+        Polzunok("sveta", "Света", -1f, 1f) { it.sveta },
+        Polzunok("chernyj", "Уровень чёрного", 0f, 0.3f) { it.chernyj },
+        Polzunok("belyj", "Уровень белого", 0.7f, 1f) { it.belyj },
+        Polzunok("zhivost", "Живость", -1f, 1f) { it.zhivost })
     private val bary = HashMap<String, SeekBar>()
 
-    private fun sobratPolzunki() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; setBackgroundColor(0x99000000.toInt()); setPadding(24, 8, 24, 8)
+    private fun sobratPolzunki() = Polovina(this).apply {
+        setBackgroundColor(0x99000000.toInt())
+        polosa(this, vbok = false)
+        addView(sobratRyadyPolzunkov())
+    }
+
+    private fun sobratRyadyPolzunkov() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; setPadding(24, 8, 56, 8)   // справа — место полосе прокрутки
+        addView(knopka("Цвет как было (температура, баланс, тон, света, уровни, живость)") {
+            var n = Most.nastrojki
+            for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost"))
+                n = n.izmenit(im, "def") ?: n
+            Most.postavit(n); obnovitPolzunki()
+        })
         for (p in spisok) addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            addView(TextView(context).apply { text = p.nadpis; setTextColor(Color.WHITE); width = 260 })
+            addView(TextView(context).apply { text = p.nadpis; setTextColor(Color.WHITE); width = 360 })
             addView(SeekBar(context).apply {
                 max = 1000; bary[p.imya] = this
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {

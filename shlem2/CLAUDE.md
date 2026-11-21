@@ -281,7 +281,11 @@
   (наборы, авто-ночь, резкость) и звук игры мимо микрофона. Вместе с HDMI Link не работает (карта одна) — что-то одно.
   `most3` — что показывает; `most3 zvuk 80|vkl|vykl`; `most3 zvuk shagi|rovno|bystro vkl|vykl` — шаги и перезарядка громче / тихое громче, громкое сжато / запас звука 40 мс вместо 120 (те же кнопки есть в панели Моста 3; запись и эфир получают звук без обработки); `most3 zvuk prostranstvo pryamo|okno` — звук игры прямо в уши (объём PS5, не привязан к окну) или от окна, как было (Мост 3 3.2.1); «картинка/ярче/сочнее/ночь/резче/как было» — тот же
   `karta kartinka …` (если Мост 3 показывает, команда сама идёт в него: наборы obychno monitor noch yarko rezko,
-  шаги yarche temnee sochnee blednee kontrastnee myagche rezche, gamma|teni|rezkost|avtonoch N). Чёрный экран или
+  шаги yarche temnee sochnee blednee kontrastnee myagche rezche, gamma|teni|rezkost|avtonoch N). Цвет (Мост 3 3.2.2):
+  «теплее / холоднее» — `karta kartinka teplee|holodnee [2]`; точно — `temperatura =-30` (−100..100), `ton =-10` (±30°),
+  `sveta 0.5` (света без теней, ±1), `zhivost 0.4` (блёклое сочнее, ±1), `balans 1.1 1 0.9` (R G B, 0.5–1.5),
+  `uroven 0.05 0.95` (чёрный и белый — против блёклой картинки); «цвет как было» — `karta kartinka cvet_def`.
+  Минус: «-N» — сдвиг вниз, «=-N» — задать. Те же ползунки — в панели Моста 3 («Ручки»). Чёрный экран или
   «не показывает» — `most3 diagnoz`, «сохрани клип игры» — `most3 klip` (2,5 мин; «за минуту» — `most3 klip 60`; картинка
   как в шлеме, со звуком игры; в галерею, папка Plus). Чёрный экран или первую строку скажи, весь ответ Александр пересылает Claude Code.
   Режим карты: «максимум / 2K / 4K / плавно / для эфира / HDR» — `most3 rezhim maks|4k|plavno|efir|hdr`

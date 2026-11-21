@@ -8,7 +8,8 @@ object Shader {
     // Общие uniform-ы всех вариантов (все float; сэмплеры — отдельно, по формату). Объявлены во всех вариантах,
     // uHdr/uPik/uBelyj работают только в P010, uPolnyj — во всех YUV.
     val UNIFORMY = listOf("uYarkost", "uKontrast", "uNasyshch", "uGamma", "uTeni", "uAvtoTeni", "uRezkost", "uPolnyj", "uSyroe",
-        "uLokalno", "uSuper", "uHdr", "uPik", "uBelyj")
+        "uLokalno", "uSuper", "uHdr", "uPik", "uBelyj",
+        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost")
     val SAMPLERY_YUY2 = listOf("uTekYuy2")          // блок 0: GL_RGBA8 W/2×H, (Y0,U,Y1,V)
     val SAMPLERY_NV12 = listOf("uTekY", "uTekUV")   // блок 0: GL_R8 W×H; блок 1: GL_RG8 W/2×H/2
     val SAMPLERY_RGBA = listOf("uTekRgba")          // блок 0: GL_RGBA8 W×H
@@ -36,7 +37,15 @@ object Shader {
         out vec4 fragColor;
         uniform float uYarkost;   // -0.5..0.5, прибавка
         uniform float uKontrast;  // 0.5..2, S-кривая вокруг 0.5
-        uniform float uNasyshch;  // 0..2, вокруг яркости Rec.709
+        uniform float uNasyshch;  // 0..2.5, вокруг яркости Rec.709
+        uniform float uMnR;       // 3.2.2: множители каналов — баланс × температура (KartinkaCpu.mnozhiteli)
+        uniform float uMnG;
+        uniform float uMnB;
+        uniform float uTon;       // поворот оттенка, градусы −30..30
+        uniform float uSveta;     // света −1..1
+        uniform float uUrChernyj; // уровень чёрного 0..0.3
+        uniform float uUrBelyj;   // уровень белого 0.7..1
+        uniform float uZhivost;   // живость −1..1
         uniform float uGamma;     // 0.5..2.5, pow(x, 1/g)
         uniform float uTeni;      // 0..1, подъём теней
         uniform float uAvtoTeni;  // 0..1, авто-ночь (считает CPU), складывается с uTeni
@@ -51,6 +60,8 @@ object Shader {
         uniform sampler2D uKarta; // блок 2: 32×18 RGBA8, сырой кадр (строки снизу вверх, как в FBO)
         const vec3 VES = vec3(0.2126, 0.7152, 0.0722);
         const float K_TENEJ = 3.0;
+        const float K_SVETOV = 0.8;
+        const float MIN_UROVNYA = 0.05;
         const float PREDEL_REZKOSTI = 0.1;
         const float SUPER_POROG = 1.2;
         const float LOK_CEL = 0.3;
@@ -202,19 +213,36 @@ object Shader {
     // ≤ 1 ячейки. Цена похожести: на 1–2 px переходе между очень разными областями порядок яркостей может
     // нарушиться (до ~0.09) — внутри однородной области монотонность строгая (см. выше).
     private val GLAVNAYA = """
+        vec3 povorotTona(vec3 c, float ugol) {
+            float a = radians(ugol);
+            float co = cos(a); float si = sin(a);
+            float k = (1.0 - co) / 3.0; float q = si * 0.57735026; float d = co + k;
+            return vec3(c.r * d + c.g * (k - q) + c.b * (k + q),
+                        c.r * (k + q) + c.g * d + c.b * (k - q),
+                        c.r * (k - q) + c.g * (k + q) + c.b * d);
+        }
         vec3 obrabotat(vec3 c) {
-            c = clamp(c + uYarkost, 0.0, 1.0);
+            // уровни, баланс и температура — до яркости (как KartinkaCpu.obrabotat)
+            c = clamp((c - uUrChernyj) / max(uUrBelyj - uUrChernyj, MIN_UROVNYA), 0.0, 1.0);
+            c = clamp(c * vec3(uMnR, uMnG, uMnB) + uYarkost, 0.0, 1.0);
             // контраст: S-кривая через 0.5 с наклоном uKontrast в середине; 0 и 1 на месте — тени не обрезаются
             vec3 niz = 0.5 * pow(max(2.0 * c, vec3(1e-7)), vec3(uKontrast));
             vec3 verh = 1.0 - 0.5 * pow(max(2.0 - 2.0 * c, vec3(1e-7)), vec3(uKontrast));
             c = mix(niz, verh, step(0.5, c));
             float l = dot(c, VES);
             c = l + (c - l) * uNasyshch;
+            c = povorotTona(c, uTon);
+            float mx = max(c.r, max(c.g, c.b)); float mn = min(c.r, min(c.g, c.b));
+            float zh = 1.0 + uZhivost * (1.0 - clamp((mx - mn) / max(mx, 1e-4), 0.0, 1.0));   // блёклое — сильнее
+            float l2 = dot(c, VES);
+            c = l2 + (c - l2) * zh;
             c = clamp(c, 0.0, 1.0);
             c = pow(max(c, vec3(1e-7)), vec3(1.0 / uGamma));
             float t = clamp(uTeni + uAvtoTeni, 0.0, 1.0);
             vec3 o = 1.0 - c; o *= o; o *= o;
-            return c + t * K_TENEJ * c * o;
+            c = c + t * K_TENEJ * c * o;
+            vec3 c2 = c * c;
+            return clamp(c + uSveta * K_SVETOV * (1.0 - c) * c2 * c2, 0.0, 1.0);
         }
         float kartaYa(ivec2 p, ivec2 r) { return dot(texelFetch(uKarta, clamp(p, ivec2(0), r - 1), 0).rgb, VES); }
         vec3 lokalno(vec3 c, vec2 uv) {

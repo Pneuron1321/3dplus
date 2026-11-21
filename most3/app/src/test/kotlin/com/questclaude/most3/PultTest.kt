@@ -33,4 +33,14 @@ class PultTest {
         assertNull(Pult.kartinka(n, mapOf("nabor" to "nety")))
         assertNull(Pult.kartinka(n, mapOf("gamma" to "много")))
     }
+
+    /** 3.2.2: цвет — минус «=-N» доходит до шейдера как «задать», не «сдвиг». */
+    @Test fun kartinkaCvet() {
+        val q = Pult.zapros("temperatura==-30&ton==-10&sveta=0.5&balr=1.1&chernyj=0.05&belyj=0.95&zhivost=+0.4")
+        val k = Pult.kartinka(Nastrojki(), q)!!
+        assertEquals(-30f, k.temperatura, 1e-4f); assertEquals(-10f, k.ton, 1e-4f); assertEquals(0.5f, k.sveta, 1e-6f)
+        assertEquals(1.1f, k.balR, 1e-6f); assertEquals(0.05f, k.chernyj, 1e-6f); assertEquals(0.95f, k.belyj, 1e-6f)
+        assertEquals(0.4f, k.zhivost, 1e-6f)
+        assertEquals(-40f, Pult.kartinka(k, mapOf("temperatura" to "-10"))!!.temperatura, 1e-4f)   // «-N» — сдвиг
+    }
 }

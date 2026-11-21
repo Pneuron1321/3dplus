@@ -10,7 +10,8 @@ import java.net.URLDecoder
  * Пульт Моста 3 для Плюса: HTTP на 127.0.0.1:8767 (мост 2 — 8766). Только шлем, наружу не слушает.
  *   GET /status                       — что идёт: режим, к/с, звук, картинка, авто-ночь
  *   GET /podklyuchit                  — открыть карту и пустить видео и звук
- *   GET /kartinka?yarkost=+0.1&…      — шейдер: yarkost kontrast nasyshch gamma teni rezkost avtonoch (N, +N, -N, def)
+ *   GET /kartinka?yarkost=+0.1&…      — шейдер: yarkost kontrast nasyshch gamma teni rezkost avtonoch (N, +N, -N, def);
+ *                                       3.2.2 — temperatura balr balg balb ton sveta chernyj belyj zhivost (=-N — задать минус)
  *   GET /kartinka?nabor=noch          — набор: obychno monitor noch yarko rezko
  *   GET /zvuk?vkl=0|1&g=80            — звук карты в шлем, громкость в %
  *   GET /karta/ruchki?yarkost=N&…     — ручки внутри карты (UVC): yarkost kontrast ton nasyshchennost

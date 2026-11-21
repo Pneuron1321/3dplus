@@ -13,7 +13,7 @@ import kotlin.math.pow
 data class Nastrojki(
     val yarkost: Float = 0f,     // -0.5..0.5
     val kontrast: Float = 1f,    // 0.5..2
-    val nasyshch: Float = 1f,    // 0..2
+    val nasyshch: Float = 1f,    // 0..2.5 (3.2.2: было до 2)
     val gamma: Float = 1f,       // 0.5..2.5
     val teni: Float = 0f,        // 0..1
     val rezkost: Float = 0f,     // 0..2
@@ -21,11 +21,24 @@ data class Nastrojki(
     val polnyjDiapazon: Boolean = false,
     val lokalno: Float = 0f,     // местная авто-ночь 0..1 (uLokalno)
     val hdrPik: Float = 1000f,   // пик мастеринга HDR, нит, 100..10000 (uPik)
+    // 3.2.2 (Александр 21.11): цвет и уровни. По умолчанию — ровно без изменений.
+    val temperatura: Float = 0f, // −100 холоднее .. +100 теплее
+    val balR: Float = 1f,        // баланс каналов 0.5..1.5
+    val balG: Float = 1f,
+    val balB: Float = 1f,
+    val ton: Float = 0f,         // поворот оттенка, градусы −30..30
+    val sveta: Float = 0f,       // света отдельно от теней −1..1
+    val chernyj: Float = 0f,     // уровень чёрного 0..0.3: всё темнее — в чёрное (против блёклой картинки карты)
+    val belyj: Float = 1f,       // уровень белого 0.7..1: всё светлее — в белое
+    val zhivost: Float = 0f,     // живость −1..1: насыщает блёклые цвета, яркие почти не трогает
 ) {
     fun ogranichit(): Nastrojki = Nastrojki(
-        ogr(yarkost, -0.5f, 0.5f, 0f), ogr(kontrast, 0.5f, 2f, 1f), ogr(nasyshch, 0f, 2f, 1f),
+        ogr(yarkost, -0.5f, 0.5f, 0f), ogr(kontrast, 0.5f, 2f, 1f), ogr(nasyshch, 0f, 2.5f, 1f),
         ogr(gamma, 0.5f, 2.5f, 1f), ogr(teni, 0f, 1f, 0f), ogr(rezkost, 0f, 2f, 0f), ogr(avtoNoch, 0f, 1f, 0f),
         polnyjDiapazon, ogr(lokalno, 0f, 1f, 0f), ogr(hdrPik, 100f, 10000f, 1000f),
+        ogr(temperatura, -100f, 100f, 0f), ogr(balR, 0.5f, 1.5f, 1f), ogr(balG, 0.5f, 1.5f, 1f), ogr(balB, 0.5f, 1.5f, 1f),
+        ogr(ton, -30f, 30f, 0f), ogr(sveta, -1f, 1f, 0f), ogr(chernyj, 0f, 0.3f, 0f), ogr(belyj, 0.7f, 1f, 1f),
+        ogr(zhivost, -1f, 1f, 0f),
     )
 
     fun poluchit(imya: String): Float? = when (imya) {
@@ -33,6 +46,8 @@ data class Nastrojki(
         "teni" -> teni; "rezkost" -> rezkost; "avtonoch" -> avtoNoch
         "polnyj" -> if (polnyjDiapazon) 1f else 0f
         "lokalno" -> lokalno; "hdrpik" -> hdrPik
+        "temperatura" -> temperatura; "balr" -> balR; "balg" -> balG; "balb" -> balB; "ton" -> ton; "sveta" -> sveta
+        "chernyj" -> chernyj; "belyj" -> belyj; "zhivost" -> zhivost
         else -> null
     }
 
@@ -40,11 +55,15 @@ data class Nastrojki(
         "yarkost" -> copy(yarkost = v); "kontrast" -> copy(kontrast = v); "nasyshch" -> copy(nasyshch = v)
         "gamma" -> copy(gamma = v); "teni" -> copy(teni = v); "rezkost" -> copy(rezkost = v)
         "avtonoch" -> copy(avtoNoch = v); "lokalno" -> copy(lokalno = v); "hdrpik" -> copy(hdrPik = v)
+        "temperatura" -> copy(temperatura = v); "balr" -> copy(balR = v); "balg" -> copy(balG = v); "balb" -> copy(balB = v)
+        "ton" -> copy(ton = v); "sveta" -> copy(sveta = v); "chernyj" -> copy(chernyj = v); "belyj" -> copy(belyj = v)
+        "zhivost" -> copy(zhivost = v)
         else -> copy(polnyjDiapazon = v >= 0.5f)
     }
 
     // znachenie: "N" (задать), "+N"/"-N" (сдвиг), "=N" / "=-N" (задать, можно отрицательное), "def" (по умолчанию).
-    // Имена: yarkost kontrast nasyshch gamma teni rezkost avtonoch polnyj lokalno hdrpik. Плохой ввод -> null.
+    // Имена: yarkost kontrast nasyshch gamma teni rezkost avtonoch polnyj lokalno hdrpik temperatura balr balg balb
+    // ton sveta chernyj belyj zhivost. Плохой ввод -> null.
     fun izmenit(imya: String, znachenie: String): Nastrojki? {
         val im = imya.trim().lowercase(Locale.ROOT)
         val tek = poluchit(im) ?: return null
@@ -66,7 +85,8 @@ data class Nastrojki(
     }
 
     companion object {
-        val IMENA = listOf("yarkost", "kontrast", "nasyshch", "gamma", "teni", "rezkost", "avtonoch", "polnyj", "lokalno", "hdrpik")
+        val IMENA = listOf("yarkost", "kontrast", "nasyshch", "gamma", "teni", "rezkost", "avtonoch", "polnyj", "lokalno", "hdrpik",
+            "temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost")
         private val CHISLO = Regex("""\d{1,6}(\.\d*)?|\.\d+""")
         private fun chislo(s: String): Float? = if (CHISLO.matches(s)) s.toFloatOrNull() else null
         private fun ogr(v: Float, a: Float, b: Float, def: Float) = if (v.isNaN()) def else min(b, max(a, v))
@@ -144,6 +164,9 @@ object KartinkaCpu {
     const val VES_G = 0.7152f
     const val VES_B = 0.0722f
     const val K_TENEJ = 3f
+    const val K_SVETOV = 0.8f        // света: x + s·0.8·(1−x)·x⁴ — монотонна при |s| ≤ 1
+    const val K_TEMPERATURY = 0.12f  // температура ±100 → красный и синий ×(1 ± 0.12)
+    const val MIN_UROVNYA = 0.05f    // белый − чёрный не меньше
     const val PREDEL_REZKOSTI = 0.1f
     const val SUPER_POROG = 1.2f
     const val BELYJ_NIT = 203f          // белый SDR в нитах (BT.2408), uBelyj
@@ -185,18 +208,47 @@ object KartinkaCpu {
     fun kontrastKrivaya(x: Float, k: Float): Float =
         if (x < 0.5f) 0.5f * max(2f * x, 1e-7f).pow(k) else 1f - 0.5f * max(2f - 2f * x, 1e-7f).pow(k)
 
-    // Конвейер без резкости и местной ночи. Вход — RGB 0..1.
+    // Света: прибавка x + s·K·(1−x)·x⁴ — тени (x < 0.3) почти не трогает, 0 и 1 на месте; наклон ≥ 1 − 0.8 > 0.
+    fun svetaKrivaya(x: Float, s: Float): Float { val x2 = x * x; return x + s * K_SVETOV * (1f - x) * x2 * x2 }
+
+    // Множители каналов: баланс × температура (тепло — красный вверх, синий вниз).
+    fun mnozhiteli(n: Nastrojki): FloatArray {
+        val t = n.temperatura / 100f
+        return floatArrayOf(n.balR * (1f + K_TEMPERATURY * t), n.balG, n.balB * (1f - K_TEMPERATURY * t))
+    }
+
+    // Поворот оттенка вокруг серой оси на ugol градусов (Родриг): серое и яркость серого не меняются.
+    fun povorotTona(c: FloatArray, ugol: Float) {
+        val a = Math.toRadians(ugol.toDouble())
+        val co = kotlin.math.cos(a).toFloat(); val si = kotlin.math.sin(a).toFloat()
+        val k = (1f - co) / 3f; val q = si * 0.57735026f; val d = co + k
+        val r = c[0]; val g = c[1]; val b = c[2]
+        c[0] = r * d + g * (k - q) + b * (k + q)
+        c[1] = r * (k + q) + g * d + b * (k - q)
+        c[2] = r * (k - q) + g * (k + q) + b * d
+    }
+
+    // Конвейер без резкости и местной ночи. Вход — RGB 0..1. Порядок (как в шейдере): уровни → баланс/температура →
+    // яркость → контраст → насыщенность → тон → живость → гамма → тени → света.
     fun obrabotat(r: Float, g: Float, b: Float, n: Nastrojki, avtoTeni: Float): FloatArray {
-        val c = floatArrayOf(kl(r + n.yarkost), kl(g + n.yarkost), kl(b + n.yarkost))
+        val sh = max(n.belyj - n.chernyj, MIN_UROVNYA)
+        val m = mnozhiteli(n)
+        val vh = floatArrayOf(r, g, b)
+        val c = FloatArray(3) { kl(kl((vh[it] - n.chernyj) / sh) * m[it] + n.yarkost) }
         for (i in 0..2) c[i] = kontrastKrivaya(c[i], n.kontrast)
         val l = yarkost(c[0], c[1], c[2])
+        for (i in 0..2) c[i] = l + (c[i] - l) * n.nasyshch
+        povorotTona(c, n.ton)
+        val mx = max(c[0], max(c[1], c[2])); val mn = min(c[0], min(c[1], c[2]))
+        val zh = 1f + n.zhivost * (1f - min(1f, max(0f, (mx - mn) / max(mx, 1e-4f))))
+        val l2 = yarkost(c[0], c[1], c[2])
         val t = min(1f, max(0f, n.teni + avtoTeni))
         val pg = 1f / n.gamma
         for (i in 0..2) {
-            var x = l + (c[i] - l) * n.nasyshch
+            var x = l2 + (c[i] - l2) * zh
             x = min(1f, max(0f, x))
             x = max(x, 1e-7f).pow(pg)
-            c[i] = teniKrivaya(x, t)
+            c[i] = kl(svetaKrivaya(teniKrivaya(x, t), n.sveta))
         }
         return c
     }

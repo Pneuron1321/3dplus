@@ -257,4 +257,86 @@ class KartinkaTest {
         val f = Shader.FRAG_RGBA
         assertTrue(f.contains("K_TENEJ = ${KartinkaCpu.K_TENEJ}") && f.contains("PREDEL_REZKOSTI = ${KartinkaCpu.PREDEL_REZKOSTI}"))
     }
+
+    // --- 3.2.2: цвет и уровни ---
+    private fun o(r: Float, g: Float, b: Float, n: Nastrojki) = KartinkaCpu.obrabotat(r, g, b, n, 0f)
+
+    @Test fun cvetPoUmolchaniyuNichegoNeMenyaet() {
+        val rnd = java.util.Random(7)
+        repeat(200) {
+            val r = rnd.nextFloat(); val g = rnd.nextFloat(); val b = rnd.nextFloat()
+            val a = o(r, g, b, Nastrojki())
+            assertEquals(r, a[0], 2e-5f); assertEquals(g, a[1], 2e-5f); assertEquals(b, a[2], 2e-5f)
+        }
+    }
+
+    @Test fun temperaturaIBalans() {
+        val t = o(0.5f, 0.5f, 0.5f, Nastrojki(temperatura = 100f))
+        assertTrue("теплее: красный вверх, синий вниз", t[0] > 0.55f && t[2] < 0.45f && kotlin.math.abs(t[1] - 0.5f) < 1e-5f)
+        val h = o(0.5f, 0.5f, 0.5f, Nastrojki(temperatura = -100f))
+        assertTrue("холоднее", h[0] < 0.45f && h[2] > 0.55f)
+        val b = o(0.4f, 0.4f, 0.4f, Nastrojki(balG = 1.5f))
+        assertEquals(0.6f, b[1], 1e-4f); assertEquals(0.4f, b[0], 1e-5f)
+    }
+
+    @Test fun tonPovorachivaetOttenokNoNeSeroe() {
+        val sero = o(0.4f, 0.4f, 0.4f, Nastrojki(ton = 30f))
+        for (i in 0..2) assertEquals(0.4f, sero[i], 1e-4f)
+        val k = o(0.8f, 0.2f, 0.2f, Nastrojki(ton = 30f))     // красный → к жёлтому: зелёный растёт, синий падает
+        assertTrue(k[1] > 0.3f && k[2] < 0.2f)
+        val k2 = o(0.8f, 0.2f, 0.2f, Nastrojki(ton = -30f))   // → к пурпурному
+        assertTrue(k2[2] > 0.3f && k2[1] < 0.2f)
+    }
+
+    @Test fun svetaTrogayutSvetlyeNeTeni() {
+        val n = Nastrojki(sveta = 1f)
+        assertTrue(o(0.8f, 0.8f, 0.8f, n)[0] > 0.84f)                       // светлое — ярче
+        assertEquals(0.2f, o(0.2f, 0.2f, 0.2f, n)[0], 0.002f)               // тени не вымываются
+        assertEquals(1f, o(1f, 1f, 1f, n)[0], 1e-5f)
+        assertTrue(o(0.8f, 0.8f, 0.8f, Nastrojki(sveta = -1f))[0] < 0.76f)   // минус — света приглушены
+        for (s in listOf(-1f, 1f)) {                                           // монотонна
+            var pred = -1f
+            for (i in 0..100) { val v = KartinkaCpu.svetaKrivaya(i / 100f, s); assertTrue(v >= pred); pred = v }
+        }
+    }
+
+    @Test fun urovni() {
+        val n = Nastrojki(chernyj = 0.1f, belyj = 0.9f)
+        assertEquals(0f, o(0.1f, 0.1f, 0.1f, n)[0], 1e-5f)
+        assertEquals(1f, o(0.9f, 0.9f, 0.9f, n)[0], 1e-5f)
+        assertEquals(0.5f, o(0.5f, 0.5f, 0.5f, n)[0], 1e-5f)
+        assertTrue(o(0.3f, 0.3f, 0.3f, n)[0] < 0.3f)                          // блёклое тёмное — гуще
+    }
+
+    @Test fun zhivostBlyokloeSilnee() {
+        val n = Nastrojki(zhivost = 1f)
+        fun nas(c: FloatArray) = (c.max() - c.min()) / c.max()
+        val blek = floatArrayOf(0.5f, 0.45f, 0.4f); val yark = floatArrayOf(0.9f, 0.2f, 0.1f)
+        val b2 = o(blek[0], blek[1], blek[2], n); val y2 = o(yark[0], yark[1], yark[2], n)
+        val prirostB = nas(b2) / nas(blek); val prirostY = nas(y2) / nas(yark)
+        assertTrue("блёклое: $prirostB, яркое: $prirostY", prirostB > 1.6f && prirostY < 1.25f)
+        assertTrue(nas(o(blek[0], blek[1], blek[2], Nastrojki(zhivost = -1f))) < 0.4f * nas(blek))   // минус — блёклое к серому
+        assertTrue(nas(o(yark[0], yark[1], yark[2], Nastrojki(zhivost = -1f))) > 0.6f * nas(yark))   // яркое почти цело
+    }
+
+    @Test fun novyeRuchkiKomandyIZhim() {
+        val n = Nastrojki()
+        assertEquals(-40f, n.izmenit("temperatura", "=-40")!!.temperatura, 1e-4f)
+        assertEquals(100f, n.izmenit("temperatura", "500")!!.temperatura, 1e-4f)
+        assertEquals(1.5f, n.izmenit("balr", "9")!!.balR, 1e-6f)
+        assertEquals(-30f, n.izmenit("ton", "=-99")!!.ton, 1e-4f)
+        assertEquals(0.3f, n.izmenit("chernyj", "0.9")!!.chernyj, 1e-6f)
+        assertEquals(0.7f, n.izmenit("belyj", "0.1")!!.belyj, 1e-6f)
+        assertEquals(2.5f, n.izmenit("nasyshch", "9")!!.nasyshch, 1e-6f)                     // 3.2.2: до 2.5
+        assertEquals(0.5f, n.izmenit("zhivost", "+0.5")!!.zhivost, 1e-6f)
+        val v = Nastrojki(temperatura = -12f, balB = 1.2f, ton = 7f, sveta = 0.3f, chernyj = 0.05f, belyj = 0.95f, zhivost = 0.4f)
+        assertEquals(v, Nastrojki.izStroki(v.vStroku()))
+        assertEquals(Nastrojki(), Nastrojki.izStroki("yarkost=0\nkontrast=1"))                   // файл 3.2.1 — цвет как был
+    }
+
+    @Test fun shejderZnaetNovyeRuchki() {
+        val f = Shader.FRAG_NV12
+        assertTrue(f.contains("K_SVETOV = ${KartinkaCpu.K_SVETOV}") && f.contains("MIN_UROVNYA = ${KartinkaCpu.MIN_UROVNYA}"))
+        for (u in listOf("uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost")) assertTrue(u, u in Shader.UNIFORMY)
+    }
 }

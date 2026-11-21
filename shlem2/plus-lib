@@ -802,9 +802,17 @@ NABORY3_RU = {'obychno': 'обычно', 'monitor': 'как на монитор�
 SLOVA3 = {'yarche': {'gamma': 0.1}, 'temnee': {'gamma': -0.1},
           'sochnee': {'nasyshch': 0.1, 'kontrast': 0.05}, 'blednee': {'nasyshch': -0.1, 'kontrast': -0.05},
           'kontrastnee': {'kontrast': 0.1}, 'myagche': {'kontrast': -0.1}, 'rezche': {'rezkost': 0.5}}
-SHEJDER3 = ('gamma', 'teni', 'rezkost', 'avtonoch', 'lokalno')
+SHEJDER3 = ('gamma', 'teni', 'rezkost', 'avtonoch', 'lokalno',
+            # Мост 3 3.2.2 (Александр 21.11): цвет и уровни
+            'temperatura', 'ton', 'sveta', 'zhivost', 'chernyj', 'belyj', 'balr', 'balg', 'balb')
 SHEJDER3_RU = {'kontrast': 'контраст', 'nasyshch': 'насыщенность', 'gamma': 'гамма', 'teni': 'тени',
-               'rezkost': 'резкость', 'avtonoch': 'авто-ночь', 'yarkost': 'яркость', 'lokalno': 'местная ночь'}
+               'rezkost': 'резкость', 'avtonoch': 'авто-ночь', 'yarkost': 'яркость', 'lokalno': 'местная ночь',
+               'temperatura': 'температура', 'ton': 'тон', 'sveta': 'света', 'zhivost': 'живость',
+               'chernyj': 'уровень чёрного', 'belyj': 'уровень белого', 'balr': 'красный', 'balg': 'зелёный', 'balb': 'синий'}
+# цвет по умолчанию — в ответе не называем
+CVET3_DEF = {'temperatura': 0, 'ton': 0, 'sveta': 0, 'zhivost': 0, 'chernyj': 0, 'belyj': 1, 'balr': 1, 'balg': 1, 'balb': 1}
+CHISLO3 = r'[+=]?-?\d*\.?\d+'
+
 
 
 def most3_url():
@@ -822,6 +830,9 @@ def kartinka3_skazat(k, avto=None):
               if i in k]
     if k.get('lokalno'):
         chasti.append('местная ночь %s' % round(k['lokalno'], 2))
+    for i, d in CVET3_DEF.items():                       # 3.2.2: цвет — только то, что сдвинуто
+        if i in k and abs(k[i] - d) > 1e-3:
+            chasti.append('%s %s' % (SHEJDER3_RU[i], round(k[i], 2)))
     if k.get('yarkost'):
         chasti.insert(0, 'яркость %+.2f' % k['yarkost'])
     out = 'Мост 3, картинка: ' + ', '.join(chasti)
@@ -850,15 +861,33 @@ def kartinka3(a):
                 i += 1
             for k, d in SLOVA3[w].items():
                 shejder[k] = shejder.get(k, 0) + d * raz
-        elif w in SHEJDER3 and i + 1 < len(a) and re.fullmatch(r'[+-]?\d*\.?\d+|def', a[i + 1]):
+        elif w in SHEJDER3 and i + 1 < len(a) and re.fullmatch(CHISLO3 + '|def', a[i + 1]):
             shejder[w] = a[i + 1]
             i += 1
+        elif w == 'balans' and i + 3 < len(a) and all(re.fullmatch(CHISLO3 + '|def', x) for x in a[i + 1:i + 4]):
+            shejder['balr'], shejder['balg'], shejder['balb'] = a[i + 1:i + 4]          # balans 1.1 1 0.9
+            i += 3
+        elif w == 'uroven' and i + 2 < len(a) and all(re.fullmatch(CHISLO3 + '|def', x) for x in a[i + 1:i + 3]):
+            shejder['chernyj'], shejder['belyj'] = a[i + 1:i + 3]                         # uroven 0.05 0.95
+            i += 2
+        elif w in ('cvet_def', 'cvet_kak_bylo'):
+            for x in CVET3_DEF:
+                shejder[x] = 'def'
+        elif w in ('teplee', 'holodnee'):                  # «теплее» — +15 к температуре; «намного» — с числом
+            raz = 1
+            if i + 1 < len(a) and a[i + 1].isdigit():
+                raz = max(1, min(5, int(a[i + 1])))
+                i += 1
+            shejder['temperatura'] = shejder.get('temperatura', 0) + (15 if w == 'teplee' else -15) * raz
         elif w in RUCHKI and i + 1 < len(a) and re.fullmatch(r'[+-]?\d+|=-?\d+|def', a[i + 1]):
             ruchki.append(w + '=' + a[i + 1])                  # ручки внутри карты — сырые числа, как в мосте 2
             i += 1
         else:
-            return 1, ['karta kartinka (Мост 3) — как сейчас; yarche|temnee|sochnee|blednee|kontrastnee|myagche|rezche [2]; '
-                       'obychno|monitor|noch|yarko|rezko|hdr|kino; gamma|teni|rezkost|avtonoch|lokalno 1.2|+0.1|def; kak_bylo.'], None
+            return 1, ['karta kartinka (Мост 3) — как сейчас; yarche|temnee|sochnee|blednee|kontrastnee|myagche|rezche|teplee|holodnee; '
+                       'obychno|monitor|noch|yarko|rezko|hdr|kino; gamma|teni|rezkost|avtonoch|lokalno 1.2|+0.1|def; '
+                       'temperatura =-30 (−100..100); ton =-10 (±30°); sveta 0.5 (±1); zhivost 0.4 (±1); balans 1.1 1 0.9 '
+                       '(0.5–1.5); uroven 0.05 0.95 (чёрный 0–0.3, белый 0.7–1); cvet_def — цвет как было; kak_bylo. '
+                       'Минус: «-N» — сдвиг вниз, «=-N» — задать.'], None
         i += 1
     if ruchki:
         r = zapros(U, '/karta/ruchki?' + '&'.join(ruchki), 5)

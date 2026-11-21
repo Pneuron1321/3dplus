@@ -319,7 +319,9 @@ object Most {
 
     fun nastrojkiJson(): String = nastrojki.let {
         "{\"yarkost\":${it.yarkost},\"kontrast\":${it.kontrast},\"nasyshch\":${it.nasyshch},\"gamma\":${it.gamma}," +
-            "\"teni\":${it.teni},\"rezkost\":${it.rezkost},\"avtonoch\":${it.avtoNoch},\"lokalno\":${it.lokalno},\"hdrpik\":${it.hdrPik}}"
+            "\"teni\":${it.teni},\"rezkost\":${it.rezkost},\"avtonoch\":${it.avtoNoch},\"lokalno\":${it.lokalno},\"hdrpik\":${it.hdrPik}," +
+            "\"temperatura\":${it.temperatura},\"balr\":${it.balR},\"balg\":${it.balG},\"balb\":${it.balB},\"ton\":${it.ton}," +
+            "\"sveta\":${it.sveta},\"chernyj\":${it.chernyj},\"belyj\":${it.belyj},\"zhivost\":${it.zhivost}}"
     }
 
     private fun zagruzit() {

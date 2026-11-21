@@ -197,6 +197,9 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         fun u(imya: String, v: Float) = glUniform1f(glGetUniformLocation(prog, imya), v)
         u("uYarkost", n.yarkost); u("uKontrast", n.kontrast); u("uNasyshch", n.nasyshch); u("uGamma", n.gamma)
         u("uTeni", n.teni); u("uAvtoTeni", avto); u("uRezkost", n.rezkost)
+        val mn = KartinkaCpu.mnozhiteli(n)                    // 3.2.2: цвет и уровни
+        u("uMnR", mn[0]); u("uMnG", mn[1]); u("uMnB", mn[2]); u("uTon", n.ton); u("uSveta", n.sveta)
+        u("uUrChernyj", n.chernyj); u("uUrBelyj", n.belyj); u("uZhivost", n.zhivost)
         u("uPolnyj", if (n.polnyjDiapazon) 1f else 0f); u("uSyroe", if (syroe) 1f else 0f)
         u("uLokalno", if (kartaEst && !syroe) n.lokalno else 0f)
         u("uSuper", if (syroe || oknoW <= 0 || oknoH <= 0) 1f else maxOf(tekW / oknoW.toFloat(), tekH / oknoH.toFloat()))
