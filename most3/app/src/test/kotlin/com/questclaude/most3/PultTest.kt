@@ -43,4 +43,13 @@ class PultTest {
         assertEquals(0.4f, k.zhivost, 1e-6f)
         assertEquals(-40f, Pult.kartinka(k, mapOf("temperatura" to "-10"))!!.temperatura, 1e-4f)   // «-N» — сдвиг
     }
+
+    /** 3.2.3: игра в эфир — только пока окно Моста 3 активно (по умолчанию); «всегда» — как раньше; «шлем» — никогда. */
+    @Test fun igraVEfirPoFokusu() {
+        assertEquals(true, otdavatIgru("fokus", true))
+        assertEquals(false, otdavatIgru("fokus", false))       // свернул или перешёл к другому окну — вид шлема
+        assertEquals(true, otdavatIgru("vsegda", false))
+        assertEquals(false, otdavatIgru("shlem", true))
+        assertEquals(false, otdavatIgru("chepuha", false))     // незнакомое — как «по фокусу»
+    }
 }

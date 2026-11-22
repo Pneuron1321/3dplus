@@ -189,6 +189,20 @@ object Most {
     @Volatile var zvukRovno = false
         set(v) { field = v; zvuk?.rovno = v; sohranit() }
     @Volatile var zvukBystro = false; private set
+
+    /** 3.2.3: режим «игра в эфир» (Struny.rezhim); «shlem» — ещё и мосту 2: основа эфира — вид шлема, иначе — avto. */
+    fun efirRezhim(r: String): String {
+        if (r !in Struny.REZHIMY) return "не знаю режим «$r»"
+        Struny.rezhim = r; sohranit()
+        val v = if (r == "shlem") "shlem" else "avto"
+        return try {
+            java.net.URL("http://127.0.0.1:8766/efir/osnova?v=$v").openConnection().apply { connectTimeout = 2000; readTimeout = 3000 }
+                .getInputStream().use { it.readBytes() }
+            efirRezhimOpisanie()
+        } catch (e: Exception) { efirRezhimOpisanie() + " (мост 2 не ответил — режим сработает, когда он откроется)" }
+    }
+    fun efirRezhimOpisanie() = when (Struny.rezhim) {
+        "vsegda" -> "В эфир: игра всегда"; "shlem" -> "В эфир: вид шлема"; else -> "В эфир: игра, пока окно активно" }
     @Synchronized fun bystro(v: Boolean) {
         if (zvukBystro == v) return
         zvukBystro = v; sohranit()
@@ -312,7 +326,7 @@ object Most {
         return "{\"versiya\":\"$VERSIYA\",\"karta\":${k?.let { Json.str(it.ustr.productName.orEmpty()) } ?: "null"}," +
             "\"video\":${video?.status() ?: "null"},\"klip\":${klip?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: zvukOshibka?.let { "{\"idyot\":false,\"oshibka\":${Json.str(it)}}" } ?: "null"},\"zvuk_vkl\":$zvukVkl," +
             "\"usb2\":${k?.let { usb2(it) } ?: false},\"ruchnoj\":${ruchnoj != null},\"profil\":\"${profil.imya}\",\"pokaz_fps\":${Json.num(polka.pokazFps)},\"srednyaya\":${Json.num(polka.srednyaya, 3)}," +
-            "\"avto_teni\":${Json.num(polka.avtoTeni, 3)},\"mjpeg_ms\":${Json.num(polka.mjpegMs)},\"mjpeg_propuskov\":${polka.mjpegPropuskov},\"efir\":${Json.str(Struny.sostoyanie)},\"efir_kadrov\":${Struny.kadrov},\"kartinka\":${nastrojkiJson()}," +
+            "\"avto_teni\":${Json.num(polka.avtoTeni, 3)},\"mjpeg_ms\":${Json.num(polka.mjpegMs)},\"mjpeg_propuskov\":${polka.mjpegPropuskov},\"efir\":${Json.str(Struny.sostoyanie)},\"efir_rezhim\":\"${Struny.rezhim}\",\"okno_aktivno\":${Struny.oknoAktivno},\"efir_kadrov\":${Struny.kadrov},\"kartinka\":${nastrojkiJson()}," +
             "\"oshibka_pokaza\":${oshibkaPokaza?.let { Json.str(it) } ?: "null"}," +
             "\"oshibka\":${oshibka?.let { Json.str(it) } ?: "null"}}"
     }
@@ -338,17 +352,19 @@ object Most {
             zvukShagi = sh; zvukRovno = rv
             z.getOrNull(1)?.toFloatOrNull()?.let { gromkost = it }
         } catch (e: Exception) { }
+        try { File(d, "efir-rezhim").readText().trim().takeIf { it in Struny.REZHIMY }?.let { Struny.rezhim = it } } catch (e: Exception) { }
     }
 
     private fun sohranit() {
         val d = dir ?: return
         try { File(d, "kartinka").writeText(nastrojki.vStroku()) } catch (e: Exception) { }
+        try { File(d, "efir-rezhim").writeText(Struny.rezhim) } catch (e: Exception) { }
         try { File(d, "zvuk").writeText("${if (zvukVkl) 1 else 0} $gromkost ${if (klipVkl) 1 else 0} ${profil.imya} ${if (zvukPryamo) "pryamo" else "okno"} ${if (zvukShagi) 1 else 0} ${if (zvukRovno) 1 else 0} ${if (zvukBystro) 1 else 0}") } catch (e: Exception) { }
     }
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.2.2"
+    const val VERSIYA = "3.2.3"
 }
 
 /**

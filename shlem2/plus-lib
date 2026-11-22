@@ -992,6 +992,20 @@ def most3(a):
             return 0, ['Мост 3: звук игры выключен.' if d.get('vkl') is False else 'Мост 3: звука нет.'], None
         return 0, ['Мост 3: звук игры, громкость %d %%%s.' % (round((d.get('gromkost') or 0) * 100),
                                                              ' — это потолок, громче мост не делает' if potolok else '')], None
+    if c == 'efir':
+        # Мост 3 3.2.3 (Александр 21.11: «на стриме чисто Мост 3, не видно, куда я смотрю»): что берёт эфир
+        a2 = a[1] if len(a) > 1 else ''
+        if a2 not in ('', 'fokus', 'vsegda', 'shlem'):
+            return 1, ['most3 efir fokus — игра в эфир, пока окно Моста 3 активно (свернул или ушёл к другому окну — '
+                       'вид шлема); vsegda — игра всегда; shlem — всегда вид шлема.'], None
+        r = zapros(U, '/efir' + ('?rezhim=' + a2 if a2 else ''), 8)
+        if r is None:
+            return 1, [MOST3_MOLCHIT], None
+        if r[0] == 404:
+            return 1, ['Нужен Мост 3 версии 3.2.3. Пока можно `efir shlem` — эфир всегда показывает вид шлема.'], None
+        d = razobrat(r[1]) or {}
+        return 0, ['Мост 3: %s. Сейчас эфир %s.' % (d.get('otvet') or d.get('rezhim'),
+                   'берёт игру из Моста 3' if d.get('otdayu') else 'показывает вид шлема')], None
     if c == 'podklyuchit':
         r = zapros(U, '/podklyuchit', 15)
         if r is None:

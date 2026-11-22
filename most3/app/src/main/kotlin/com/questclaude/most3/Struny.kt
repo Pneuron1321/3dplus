@@ -14,6 +14,10 @@ import android.view.Surface
  * сменилось — забираем поверхность развилки (или узнаём, что её нет: эфир не идёт, основа «shlem»).
  * Показ (Pokaz) рисует в неё тот же кадр, что в шлеме, — 1920×1080 с суперсэмплингом из 1440p/4K.
  */
+/** Отдавать ли игру эфиру (3.2.3) — без Android, для проверки на столе. */
+fun otdavatIgru(rezhim: String, oknoAktivno: Boolean): Boolean = when (rezhim) {
+    "vsegda" -> true; "shlem" -> false; else -> oknoAktivno }
+
 object Struny {
     private const val PAKET = "com.questclaude.bridge2"
     private const val KOD_POVERHNOST = 1
@@ -26,6 +30,17 @@ object Struny {
     /** Для самоотчёта: что с дверью моста 2. */
     @Volatile var sostoyanie = "мост 2 не найден"; private set
     @Volatile var kadrov = 0L
+
+    /**
+     * 3.2.3 (Александр 21.11: «Мост 3 свёрнут, смотрю другое окно — а на стриме всё равно чисто Мост 3, не видно,
+     * куда я смотрю»): игра уходит в эфир только когда это решено режимом. «fokus» (по умолчанию) — пока окно Моста 3
+     * активно (последнее, что трогали) и не свёрнуто; перешёл к другому окну — через секунду мост 2 сам берёт вид шлема.
+     * «vsegda» — игра всегда, как было до 3.2.3. «shlem» — никогда (и мосту 2 сказано: основа — вид шлема).
+     */
+    @Volatile var rezhim = "fokus"
+    @Volatile var oknoAktivno = true
+    val REZHIMY = listOf("fokus", "vsegda", "shlem")
+    fun otdavat(): Boolean = otdavatIgru(rezhim, oknoAktivno)
 
     @Volatile private var privyazan = false
     @Volatile private var popytkaMs = 0L

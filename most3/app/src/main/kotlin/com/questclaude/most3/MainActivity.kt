@@ -196,6 +196,12 @@ class MainActivity : Activity() {
             val vse = Profil.values(); val sl = vse[(Most.profil.ordinal + 1) % vse.size]
             stroka.text = "Режим: ${sl.nadpis} — переподключаю…"; Most.smenitProfil(sl)
         })
+        lateinit var efK: Button                         // 3.2.3: что видят зрители
+        efK = knopka(Most.efirRezhimOpisanie()) {
+            val vse = Struny.REZHIMY; val sl = vse[(vse.indexOf(Struny.rezhim) + 1) % vse.size]
+            efK.text = "…"; Most.vFone { val o = Most.efirRezhim(sl); ui.post { efK.text = Most.efirRezhimOpisanie(); stroka.text = o } }
+        }
+        addView(efK)
         addView(knopka("Ручки") { polzunki.visibility = if (polzunki.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
     }
 
@@ -267,6 +273,10 @@ class MainActivity : Activity() {
 
     override fun onResume() { super.onResume(); gl.onResume(); ui.post(obnovit); obnovitPolzunki() }
     override fun onPause() { super.onPause(); gl.onPause(); ui.removeCallbacks(obnovit) }
+    // 3.2.3: эфир берёт игру, только пока окно Моста 3 активно (режим «fokus») — ушёл к другому окну или свернул —
+    // мост 2 через секунду показывает вид шлема
+    override fun onWindowFocusChanged(est: Boolean) { super.onWindowFocusChanged(est); Struny.oknoAktivno = est }
+    override fun onStop() { super.onStop(); Struny.oknoAktivno = false }
 
     override fun onDestroy() {
         super.onDestroy()

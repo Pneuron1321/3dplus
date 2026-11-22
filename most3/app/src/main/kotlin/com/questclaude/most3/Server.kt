@@ -13,6 +13,7 @@ import java.net.URLDecoder
  *   GET /kartinka?yarkost=+0.1&…      — шейдер: yarkost kontrast nasyshch gamma teni rezkost avtonoch (N, +N, -N, def);
  *                                       3.2.2 — temperatura balr balg balb ton sveta chernyj belyj zhivost (=-N — задать минус)
  *   GET /kartinka?nabor=noch          — набор: obychno monitor noch yarko rezko
+ *   GET /efir?rezhim=fokus|vsegda|shlem — 3.2.3: игра в эфир, пока окно активно / всегда / никогда (вид шлема)
  *   GET /zvuk?vkl=0|1&g=80            — звук карты в шлем, громкость в %
  *   GET /karta/ruchki?yarkost=N&…     — ручки внутри карты (UVC): yarkost kontrast ton nasyshchennost
  *   GET /rezhimy                      — что умеет карта (текст)
@@ -63,6 +64,10 @@ class Server(private val port: Int) {
             200 to (Most.zvuk?.status() ?: "{\"idyot\":false,\"vkl\":${Most.zvukVkl}}")
         }
         "/karta/ruchki" -> 200 to ruchki(q)
+        "/efir" -> {                                        // 3.2.3: что берёт эфир — fokus | vsegda | shlem
+            val o = q["rezhim"]?.let { Most.efirRezhim(it) } ?: Most.efirRezhimOpisanie()
+            200 to "{\"rezhim\":\"${Struny.rezhim}\",\"okno_aktivno\":${Struny.oknoAktivno},\"otdayu\":${Struny.otdavat()},\"otvet\":${Json.str(o)}}"
+        }
         "/klip" -> {
             q["vkl"]?.let { Most.klip(it == "1" || it == "vkl") }
             if (q.containsKey("sek") || q.isEmpty()) 200 to Most.sohranitKlip(q["sek"]?.toIntOrNull() ?: 150)

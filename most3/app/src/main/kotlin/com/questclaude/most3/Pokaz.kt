@@ -154,6 +154,7 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
      * Не вышло нарисовать (эфир кончился, развилку закрыли) — поверхность прочь, Struny спросит новую.
      */
     private fun vEfir(prog: Int, n: Nastrojki) {
+        if (!Struny.otdavat()) return                        // 3.2.3: окно не активно — эфир сам вернётся к виду шлема
         val s = Struny.poverhnost
         if (s !== efSurface) {
             efPov?.let { EGL14.eglDestroySurface(eglD, it) }
