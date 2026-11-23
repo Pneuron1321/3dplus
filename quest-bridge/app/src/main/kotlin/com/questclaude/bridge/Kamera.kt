@@ -228,6 +228,22 @@ class Kamera(
 
     // ---------- управление ----------
 
+    /**
+     * 2.8.12 (Александр 23.11: «Плюс не видит, что окно камеры стоит не вплотную к краю»): настоящие края окна —
+     * сколько % кадра от каждого края, посчитано так же, как рисует развилка (Okno.mesto, кадр 1920×1080 с
+     * пропорциями картинки телефона и поворотом). Нарисованное в последнем кадре — точнее: оно и идёт, если есть.
+     */
+    private fun kraya(v: Okno.Vid): String {
+        val r: FloatArray = Oformlenie.vidno["kamera"] ?: run {
+            if (w <= 0 || h <= 0 || v.rezhim == "skryt") return ""
+            val m = Okno.mesto(1920, 1080, Okno.proporcii(w, h, v.povorot), v)
+            floatArrayOf(m[0].toFloat(), (1080 - m[1] - m[3]).toFloat(), m[2].toFloat(), m[3].toFloat())
+        }
+        fun p(x: Float, n: Float) = String.format(java.util.Locale.ROOT, "%.1f", x / n * 100f)
+        return "\"kraya\":{\"sleva\":${p(r[0], 1920f)},\"sverhu\":${p(r[1], 1080f)},\"sprava\":${p(1920f - r[0] - r[2], 1920f)}," +
+            "\"snizu\":${p(1080f - r[1] - r[3], 1080f)},\"shirina\":${p(r[2], 1920f)},\"vysota\":${p(r[3], 1080f)}},"
+    }
+
     override fun status(): String {
         val v = vid
         val ip = ip()
@@ -236,7 +252,8 @@ class Kamera(
             "\"pokazano\":$pokazano,\"klip_sek\":${klip.sekund},\"propushcheno\":$propushcheno,\"v_efire\":${dec != null}," +
             "\"vid\":\"${v.rezhim}\",\"gde\":\"${v.gde}\",\"dolya\":${v.dolya}," +
             "\"povorot\":${v.povorot},\"vplotnuyu\":${v.vplotnuyu},\"sboku\":${v.sboku}," +
-            "\"ramka\":[${v.ramka.joinToString(",") { "%.1f".format(java.util.Locale.ROOT, it) }}]," +
+            "\"ramka\":[${v.ramka.joinToString(",") { "%.1f".format(java.util.Locale.ROOT, it) }}]," + kraya(v) +
+            "\"zerkalo\":${Oformlenie.zerkalo}," +
             "\"slushaet\":${priyom.slushaet},\"popytok\":${priyom.popytok},\"perezapuskov\":${priyom.perezapuskov}," +
             "\"adres\":${ip?.let { FrameServer.json("rtmp://$it:${RtmpPriyom.PORT}/kamera") } ?: "null"}," +
             "\"oshibka\":${(oshibka ?: priyom.oshibka ?: klip.oshibka)?.let { FrameServer.json(it) } ?: "null"}}"

@@ -9,7 +9,7 @@ object Shader {
     // uHdr/uPik/uBelyj работают только в P010, uPolnyj — во всех YUV.
     val UNIFORMY = listOf("uYarkost", "uKontrast", "uNasyshch", "uGamma", "uTeni", "uAvtoTeni", "uRezkost", "uPolnyj", "uSyroe",
         "uLokalno", "uSuper", "uHdr", "uPik", "uBelyj",
-        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost")
+        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila")
     val SAMPLERY_YUY2 = listOf("uTekYuy2")          // блок 0: GL_RGBA8 W/2×H, (Y0,U,Y1,V)
     val SAMPLERY_NV12 = listOf("uTekY", "uTekUV")   // блок 0: GL_R8 W×H; блок 1: GL_RG8 W/2×H/2
     val SAMPLERY_RGBA = listOf("uTekRgba")          // блок 0: GL_RGBA8 W×H
@@ -43,9 +43,11 @@ object Shader {
         uniform float uMnB;
         uniform float uTon;       // поворот оттенка, градусы −30..30
         uniform float uSveta;     // света −1..1
-        uniform float uUrChernyj; // уровень чёрного 0..0.3
+        uniform float uUrChernyj; // точка чёрного −0.2..0.3 (минус — чёрный приподнят)
         uniform float uUrBelyj;   // уровень белого 0.7..1
         uniform float uZhivost;   // живость −1..1
+        uniform float uVyderzhka; // 3.2.4: множитель выдержки 2^(ступени/2.2) (KartinkaCpu.mnozhitelVyderzhki)
+        uniform float uSila;      // 3.2.4: сила всех ручек 0..2 — mix(вход, обработанное, uSila)
         uniform float uGamma;     // 0.5..2.5, pow(x, 1/g)
         uniform float uTeni;      // 0..1, подъём теней
         uniform float uAvtoTeni;  // 0..1, авто-ночь (считает CPU), складывается с uTeni
@@ -222,7 +224,8 @@ object Shader {
                         c.r * (k - q) + c.g * (k + q) + c.b * d);
         }
         vec3 obrabotat(vec3 c) {
-            // уровни, баланс и температура — до яркости (как KartinkaCpu.obrabotat)
+            // выдержка, уровни, баланс и температура — до яркости (как KartinkaCpu.obrabotatBezSily)
+            c = clamp(c * uVyderzhka, 0.0, 1.0);
             c = clamp((c - uUrChernyj) / max(uUrBelyj - uUrChernyj, MIN_UROVNYA), 0.0, 1.0);
             c = clamp(c * vec3(uMnR, uMnG, uMnB) + uYarkost, 0.0, 1.0);
             // контраст: S-кривая через 0.5 с наклоном uKontrast в середине; 0 и 1 на месте — тени не обрезаются
@@ -276,6 +279,7 @@ object Shader {
         void main() {
             if (uSyroe > 0.5) { fragColor = vec4(rgbVzyat(vUv), 1.0); return; }
             vec3 c = rgbSuper(vUv);
+            vec3 vhod = c;
             float d = 0.0;
             if (uRezkost > 0.0) {
                 vec2 s = shag() * max(1.0, uSuper);   // резкость в пикселях окна
@@ -284,7 +288,8 @@ object Shader {
                 d = clamp(uRezkost * (dot(c, VES) - sr), -PREDEL_REZKOSTI, PREDEL_REZKOSTI);
             }
             if (uLokalno > 0.0) c = lokalno(c, vUv);
-            fragColor = vec4(clamp(obrabotat(c) + d, 0.0, 1.0), 1.0);
+            vec3 obr = clamp(obrabotat(c) + d, 0.0, 1.0);
+            fragColor = vec4(clamp(mix(vhod, obr, uSila), 0.0, 1.0), 1.0);   // сила всех ручек (KartinkaCpu.sila)
         }
     """.trimIndent() + "\n"
 

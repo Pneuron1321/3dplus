@@ -84,6 +84,11 @@ class MainActivity : Activity() {
                 fonK.text = fonNadpis()
             }
             addView(fonK)
+            // 2.8.12 (Александр 23.11): камера зеркально — одним нажатием
+            lateinit var zk: Button
+            fun zNadpis() = "ЗЕРКАЛО КАМЕРЫ: " + (if (Oformlenie.zerkalo) "вкл" else "выкл") + " (нажми — " + (if (Oformlenie.zerkalo) "выключить" else "включить") + ")"
+            zk = button(zNadpis()) { Oformlenie.zerkaloUpr("pereklyuchit"); zk.text = zNadpis() }
+            addView(zk)
             // 2.8.11 (Александр 16.11: по краям окна видна комната — ткань не до края): четыре кнопки, каждая срезает
             // свой край окна камеры: 0 → 5 → 10 … 40 % → 0. Работает с вырезанным фоном.
             for ((i, imya) in listOf("СЛЕВА", "СВЕРХУ", "СПРАВА", "СНИЗУ").withIndex()) {

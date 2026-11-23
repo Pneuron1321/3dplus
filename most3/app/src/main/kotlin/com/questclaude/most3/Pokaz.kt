@@ -201,6 +201,7 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         val mn = KartinkaCpu.mnozhiteli(n)                    // 3.2.2: цвет и уровни
         u("uMnR", mn[0]); u("uMnG", mn[1]); u("uMnB", mn[2]); u("uTon", n.ton); u("uSveta", n.sveta)
         u("uUrChernyj", n.chernyj); u("uUrBelyj", n.belyj); u("uZhivost", n.zhivost)
+        u("uVyderzhka", KartinkaCpu.mnozhitelVyderzhki(n)); u("uSila", n.sila)   // 3.2.4
         u("uPolnyj", if (n.polnyjDiapazon) 1f else 0f); u("uSyroe", if (syroe) 1f else 0f)
         u("uLokalno", if (kartaEst && !syroe) n.lokalno else 0f)
         u("uSuper", if (syroe || oknoW <= 0 || oknoH <= 0) 1f else maxOf(tekW / oknoW.toFloat(), tekH / oknoH.toFloat()))

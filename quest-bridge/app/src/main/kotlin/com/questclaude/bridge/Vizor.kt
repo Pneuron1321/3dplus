@@ -337,6 +337,27 @@ object Oformlenie {
     private const val FAJL_LICO = "efir-lico"
     private const val FAJL_PLUS = "efir-plus-mesto"
     private const val FAJL_FON = "efir-fon"
+    private const val FAJL_MESTA = "efir-mesta"
+    private const val FAJL_ZERKALO = "efir-zerkalo"
+
+    /**
+     * 2.8.12 (Александр 23.11: «чтобы я мог в любом месте поставить окно камеры и другие элементы — голосом через Плюса»):
+     * свои места слоёв. Ключ — имя для Плюса, значение — слой развилки. Место — левый верхний угол слоя, % кадра;
+     * нет записи — слой на своём месте, как раньше. Окно камеры двигает `kamera ramka|sdvin`, Плюса — `vid plus`.
+     */
+    val SLOI_MEST = linkedMapOf("chat" to "pc", "schet" to "sv", "ssylki" to "nk", "donat" to "dn", "muzyka" to "mz",
+        "cel" to "lv", "balans" to "pv", "opoveshchenie" to "al", "titry" to "nc")
+    private val mesta = java.util.concurrent.ConcurrentHashMap<String, FloatArray>()
+    /** Своё место слоя развилки [sloy] — (x, y) левого верхнего угла в точках 1080p, или null. */
+    fun mestoSloya(sloy: String): FloatArray? = mesta[sloy]?.let { floatArrayOf(it[0] * W / 100f, it[1] * H / 100f) }
+    /** Где слои на самом деле (последний кадр): x, y, ширина, высота в точках 1080p — пишет развилка. */
+    val vidno = java.util.concurrent.ConcurrentHashMap<String, FloatArray>()
+    private const val W = 1920f
+    private const val H = 1080f
+
+    /** 2.8.12: картинка камеры зеркально (слева направо). */
+    @Volatile var zerkalo = false
+        private set
     /** 2.8.7: вырезать фон камеры — net, zel (зелёный), sin (синий). */
     val FONY = setOf("net", "zel", "sin")
     val STILI = setOf("viz", "staryj")
@@ -395,7 +416,56 @@ object Oformlenie {
             fon = f[0].takeIf { it in FONY } ?: "net"; f.getOrNull(1)?.toFloatOrNull()?.let { fonSila = it.coerceIn(0.05f, 0.5f) }
             obrezIz(f.drop(2), false)?.let { fonObrez = it } }
         } catch (e: Exception) { }
+        mesta.clear()
+        try { File(d, FAJL_MESTA).readLines().forEach { l -> val p = l.trim().split(' ')
+            if (p.size == 3 && p[0] in SLOI_MEST.values) { val x = p[1].toFloatOrNull(); val y = p[2].toFloatOrNull()
+                if (x != null && y != null && !x.isNaN() && !y.isNaN()) mesta[p[0]] = floatArrayOf(x.coerceIn(0f, 98f), y.coerceIn(0f, 98f)) } }
+        } catch (e: Exception) { }
+        zerkalo = try { File(d, FAJL_ZERKALO).readText().trim() == "1" } catch (e: Exception) { false }
         versiya++
+    }
+
+    /**
+     * /efir/mesto: chto=chat|schet|ssylki|donat|muzyka|cel|balans|opoveshchenie|titry (или имя слоя) и x=, y= (% кадра,
+     * левый верхний угол) | dx=, dy= (сдвиг, %) | domoy=1; vse=domoy — все на свои места. Без chto — где что сейчас.
+     */
+    fun mestoUpr(q: Map<String, String>): String {
+        if (q["vse"] == "domoy") { mesta.clear(); sohranitMesta(); versiya++; return mestaJson("") }
+        val chto = q["chto"] ?: return mestaJson("")
+        val sloy = SLOI_MEST[chto] ?: chto.takeIf { it in SLOI_MEST.values }
+            ?: return mestaJson(",\"oshibka\":\"что двигать: ${SLOI_MEST.keys.joinToString(", ")}\"")
+        val f = { k: String -> q[k]?.replace(',', '.')?.toFloatOrNull()?.takeIf { !it.isNaN() } }
+        val tek = mesta[sloy] ?: vidno[sloy]?.let { floatArrayOf(it[0] / W * 100f, it[1] / H * 100f) } ?: floatArrayOf(50f, 50f)
+        when {
+            q["domoy"] != null -> mesta.remove(sloy)
+            f("x") != null || f("y") != null -> mesta[sloy] = floatArrayOf((f("x") ?: tek[0]).coerceIn(0f, 98f), (f("y") ?: tek[1]).coerceIn(0f, 98f))
+            f("dx") != null || f("dy") != null -> mesta[sloy] = floatArrayOf((tek[0] + (f("dx") ?: 0f)).coerceIn(0f, 98f), (tek[1] + (f("dy") ?: 0f)).coerceIn(0f, 98f))
+            else -> return mestaJson(",\"oshibka\":\"нужно x и y (% кадра), dx/dy или domoy=1\"")
+        }
+        sohranitMesta(); versiya++
+        return mestaJson(",\"izmeneno\":\"$chto\"")
+    }
+
+    private fun sohranitMesta() {
+        dir?.let { d -> try { File(d, FAJL_MESTA).writeText(mesta.entries.joinToString("\n") { "${it.key} ${it.value[0]} ${it.value[1]}" }) } catch (e: Exception) { } }
+    }
+
+    /** Где что: для каждого видимого слоя — x, y, ширина, высота в % кадра, до правого и нижнего края, своё ли место. */
+    fun mestaJson(dop: String): String {
+        val imena = SLOI_MEST.entries.associate { (k, v) -> v to k } + mapOf("pl" to "plus", "kamera" to "kamera")
+        val sloi = vidno.entries.filter { it.key in imena }.sortedBy { it.key }.joinToString(",") { (k, r) ->
+            fun p(v: Float, n: Float) = String.format(java.util.Locale.ROOT, "%.1f", v / n * 100f)
+            "\"${imena[k]}\":{\"x\":${p(r[0], W)},\"y\":${p(r[1], H)},\"w\":${p(r[2], W)},\"h\":${p(r[3], H)}," +
+                "\"do_pravogo\":${p(W - r[0] - r[2], W)},\"do_nizhnego\":${p(H - r[1] - r[3], H)},\"svoyo\":${mesta.containsKey(k)}}"
+        }
+        return "{\"sloi\":{$sloi},\"mozhno\":[${SLOI_MEST.keys.joinToString(",") { "\"$it\"" }}]$dop}"
+    }
+
+    /** /efir/zerkalo?v=1|0|pereklyuchit (без v — состояние). */
+    fun zerkaloUpr(v: String?): String {
+        val nov = when (v) { "1", "vkl" -> true; "0", "vykl" -> false; "pereklyuchit" -> !zerkalo; else -> zerkalo }
+        if (nov != zerkalo) { zerkalo = nov; versiya++; dir?.let { try { File(it, FAJL_ZERKALO).writeText(if (nov) "1" else "0") } catch (e: Exception) { } } }
+        return "{\"zerkalo\":$zerkalo}"
     }
 
     /** /efir/stil?v=viz|staryj (без v — только состояние). */
@@ -502,5 +572,5 @@ object Oformlenie {
     }
 
     /** Только для проверок: как после установки. */
-    internal fun zanovo() { stil = "viz"; scena = ""; doMs = 0L; fraza = ""; plusMesto = null; fon = "net"; fonSila = 0.15f; fonObrez = floatArrayOf(0f, 0f, 0f, 0f); dir = null; versiya++ }
+    internal fun zanovo() { stil = "viz"; scena = ""; doMs = 0L; fraza = ""; plusMesto = null; fon = "net"; fonSila = 0.15f; fonObrez = floatArrayOf(0f, 0f, 0f, 0f); mesta.clear(); vidno.clear(); zerkalo = false; dir = null; versiya++ }
 }

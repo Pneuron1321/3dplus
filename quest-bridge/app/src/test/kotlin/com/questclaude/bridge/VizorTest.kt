@@ -266,4 +266,36 @@ class VizorTest {
         assertEquals(0f, Oformlenie.fonObrez.sum(), 0f)
         d.deleteRecursively()
     }
+
+    /** 2.8.12: любой слой визора — в любое место (% кадра), запоминается; домой — как было; зеркало камеры. */
+    @Test fun mestaSloevIZerkalo() {
+        val d = Files.createTempDirectory("vizor").toFile()
+        Oformlenie.zagruzit(d)
+        assertEquals(null, Oformlenie.mestoSloya("sv"))
+        assertTrue(Oformlenie.mestoUpr(mapOf("chto" to "schet", "x" to "10", "y" to "50")).contains("\"izmeneno\":\"schet\""))
+        assertEquals(192f, Oformlenie.mestoSloya("sv")!![0], 0.01f); assertEquals(540f, Oformlenie.mestoSloya("sv")!![1], 0.01f)
+        Oformlenie.mestoUpr(mapOf("chto" to "schet", "dx" to "5", "dy" to "-60"))                  // сдвиг, не за край
+        assertEquals(15f * 19.2f, Oformlenie.mestoSloya("sv")!![0], 0.01f); assertEquals(0f, Oformlenie.mestoSloya("sv")!![1], 0.01f)
+        Oformlenie.mestoUpr(mapOf("chto" to "chat", "x" to "200", "y" to "3"))                     // зажим 98 %
+        assertEquals(0.98f * 1920f, Oformlenie.mestoSloya("pc")!![0], 0.01f)
+        assertTrue(Oformlenie.mestoUpr(mapOf("chto" to "chepuha", "x" to "1")).contains("oshibka"))
+        assertTrue(Oformlenie.mestoUpr(mapOf("chto" to "titry")).contains("oshibka"))           // без чисел — не трогаем
+        Oformlenie.zanovo(); Oformlenie.zagruzit(d)                                              // после перезапуска — те же
+        assertEquals(0f, Oformlenie.mestoSloya("sv")!![1], 0.01f); assertTrue(Oformlenie.mestoSloya("pc") != null)
+        Oformlenie.mestoUpr(mapOf("chto" to "schet", "domoy" to "1"))
+        assertEquals(null, Oformlenie.mestoSloya("sv"))
+        Oformlenie.mestoUpr(mapOf("vse" to "domoy"))
+        assertEquals(null, Oformlenie.mestoSloya("pc"))
+        // где что — по тому, что нарисовано
+        Oformlenie.vidno["kamera"] = floatArrayOf(96f, 540f, 480f, 480f)
+        val j = Oformlenie.mestoUpr(emptyMap())
+        assertTrue(j, j.contains("\"kamera\":{\"x\":5.0,\"y\":50.0,\"w\":25.0,\"h\":44.4,\"do_pravogo\":70.0,\"do_nizhnego\":5.6"))
+        // зеркало
+        assertFalse(Oformlenie.zerkalo)
+        assertTrue(Oformlenie.zerkaloUpr("pereklyuchit").contains("true"))
+        Oformlenie.zanovo(); Oformlenie.zagruzit(d)
+        assertTrue(Oformlenie.zerkalo)
+        Oformlenie.zerkaloUpr("0"); assertFalse(Oformlenie.zerkalo)
+        d.deleteRecursively()
+    }
 }

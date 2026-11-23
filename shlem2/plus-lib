@@ -469,7 +469,8 @@ def kamera_skazat(telo):
     g = d.get('gde') or 'pn'
     mesto = {'krupno': 'во весь кадр', 'skryt': 'окно скрыто'}.get(d.get('vid'))
     rm = d.get('ramka')
-    if d.get('vid') == 'svoe' and isinstance(rm, list) and len(rm) == 4:     # 2.8.1: своё окно, края в % кадра
+    if d.get('vid') == 'svoe' and isinstance(rm, list) and len(rm) == 4 and not isinstance(d.get('kraya'), dict):
+        # 2.8.1: своё окно, края в % кадра (с 2.8.12 настоящие края — ниже)
         mesto = 'своё окно: от левого края %g %%, от верхнего %g %%, от правого %g %%, от нижнего %g %% кадра' % (
             round(rm[0]), round(rm[1]), round(100 - rm[2]), round(100 - rm[3]))
     if mesto is None:
@@ -478,7 +479,19 @@ def kamera_skazat(telo):
     if d.get('povorot'):
         mesto += ', повёрнута на %s° по часовой' % d['povorot']
     b = d.get('sboku')
-    if d.get('vid') not in ('krupno', 'skryt', 'svoe'):
+    kr = d.get('kraya')
+    if isinstance(kr, dict) and d.get('vid') != 'skryt':
+        # мост 2.8.12 (Александр 23.11: «Плюс не видит, что окно стоит не вплотную к краю»): настоящие края окна,
+        # как нарисовано в кадре, — вместо догадки по настройкам
+        def kray(k):
+            v = kr.get(k) or 0
+            return 'вплотную' if v < 0.5 else '%g %%' % round(v, 1)
+        mesto += '; от краёв кадра: слева %s, сверху %s, справа %s, снизу %s; окно %g %% ширины × %g %% высоты' % (
+            kray('sleva'), kray('sverhu'), kray('sprava'), kray('snizu'), round(kr.get('shirina') or 0, 1),
+            round(kr.get('vysota') or 0, 1))
+    if d.get('zerkalo'):
+        mesto += ', зеркально'
+    if not isinstance(kr, dict) and d.get('vid') not in ('krupno', 'skryt', 'svoe'):   # мост до 2.8.12 — по настройкам
         if b is None:                                  # приложение до 2.3.8: отступ сбоку как снизу
             if d.get('vplotnuyu'):
                 mesto += ', вплотную к углу'
@@ -536,6 +549,16 @@ def kamera(a):
         if r is None:
             return 1, [MOLCHIT], None
         return kamera_skazat(r[1]) + (None,)
+    if c == 'zerkalo':                                    # мост 2.8.12: картинка камеры зеркально
+        if a2 not in ('vkl', 'vykl', ''):
+            return 1, ['kamera zerkalo vkl — картинка камеры зеркально; kamera zerkalo vykl — как есть.'], None
+        r = zapros(U, '/efir/zerkalo' + ('?v=' + ('1' if a2 == 'vkl' else '0') if a2 else '?v=pereklyuchit'), 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        if r[0] == 404:
+            return 1, ['Зеркало камеры: нужен мост 2.8.12 (обнови приложение).'], None
+        z = (razobrat(r[1]) or {}).get('zerkalo')
+        return 0, ['Камера %s (мост запомнил).' % ('зеркально' if z else 'как есть, без зеркала')], None
     if c in ('klip', 'clip'):
         # 2.5.9: последние N секунд видео телефона как пришли (полное качество) — MP4 в «Фильмы/Plus»
         if a2 and not a2.isdigit():
@@ -804,13 +827,17 @@ SLOVA3 = {'yarche': {'gamma': 0.1}, 'temnee': {'gamma': -0.1},
           'kontrastnee': {'kontrast': 0.1}, 'myagche': {'kontrast': -0.1}, 'rezche': {'rezkost': 0.5}}
 SHEJDER3 = ('gamma', 'teni', 'rezkost', 'avtonoch', 'lokalno',
             # Мост 3 3.2.2 (Александр 21.11): цвет и уровни
-            'temperatura', 'ton', 'sveta', 'zhivost', 'chernyj', 'belyj', 'balr', 'balg', 'balb')
+            'temperatura', 'ton', 'sveta', 'zhivost', 'chernyj', 'belyj', 'balr', 'balg', 'balb',
+            # 3.2.4 (Александр 23.11): выдержка и сила всех ручек
+            'vyderzhka', 'sila')
 SHEJDER3_RU = {'kontrast': 'контраст', 'nasyshch': 'насыщенность', 'gamma': 'гамма', 'teni': 'тени',
                'rezkost': 'резкость', 'avtonoch': 'авто-ночь', 'yarkost': 'яркость', 'lokalno': 'местная ночь',
                'temperatura': 'температура', 'ton': 'тон', 'sveta': 'света', 'zhivost': 'живость',
-               'chernyj': 'уровень чёрного', 'belyj': 'уровень белого', 'balr': 'красный', 'balg': 'зелёный', 'balb': 'синий'}
+               'chernyj': 'точка чёрного', 'belyj': 'уровень белого', 'balr': 'красный', 'balg': 'зелёный', 'balb': 'синий',
+               'vyderzhka': 'выдержка', 'sila': 'сила всех ручек'}
 # цвет по умолчанию — в ответе не называем
-CVET3_DEF = {'temperatura': 0, 'ton': 0, 'sveta': 0, 'zhivost': 0, 'chernyj': 0, 'belyj': 1, 'balr': 1, 'balg': 1, 'balb': 1}
+CVET3_DEF = {'temperatura': 0, 'ton': 0, 'sveta': 0, 'zhivost': 0, 'chernyj': 0, 'belyj': 1, 'balr': 1, 'balg': 1, 'balb': 1,
+             'vyderzhka': 0, 'sila': 1}
 CHISLO3 = r'[+=]?-?\d*\.?\d+'
 
 
@@ -886,7 +913,9 @@ def kartinka3(a):
             return 1, ['karta kartinka (Мост 3) — как сейчас; yarche|temnee|sochnee|blednee|kontrastnee|myagche|rezche|teplee|holodnee; '
                        'obychno|monitor|noch|yarko|rezko|hdr|kino; gamma|teni|rezkost|avtonoch|lokalno 1.2|+0.1|def; '
                        'temperatura =-30 (−100..100); ton =-10 (±30°); sveta 0.5 (±1); zhivost 0.4 (±1); balans 1.1 1 0.9 '
-                       '(0.5–1.5); uroven 0.05 0.95 (чёрный 0–0.3, белый 0.7–1); cvet_def — цвет как было; kak_bylo. '
+                       '(0.5–1.5); uroven 0.05 0.95 (чёрный −0.2–0.3, белый 0.7–1); chernyj =-0.1 (минус — чёрный приподнят); '
+                       'vyderzhka 0.5 (±2 ступени); sila 1.5 (0–2: сила всех ручек сразу, 1 — как настроено); '
+                       'cvet_def — цвет как было; kak_bylo. '
                        'Минус: «-N» — сдвиг вниз, «=-N» — задать.'], None
         i += 1
     if ruchki:
@@ -1182,6 +1211,8 @@ def vid(a):
     U = os.environ.get('VIZOR_URL') or APP
     if a and a[0] in ('plus', 'fon'):
         return vid_plus_fon(U, a)
+    if a and (a[0] in MESTA_RU or a[0] in ('mesta', 'gde')):
+        return vid_mesto(U, a)
     if not a or a[0] in ('status', 's') or a == ['stil']:
         put = '/efir/stil'
     elif a[0] == 'stil' and len(a) > 1 and a[1] in ('viz', 'staryj'):
@@ -1216,6 +1247,81 @@ def vid(a):
 
 
 SDVIG = {'vverh': ('dy', -5), 'vniz': ('dy', 5), 'vlevo': ('dx', -5), 'vpravo': ('dx', 5)}
+
+# мост 2.8.12 (Александр 23.11: «в любое место поставить окно камеры и другие элементы — голосом»)
+def vid_kamera(a):
+    """vid kamera X Y — окно камеры левым верхним углом в X %, Y % кадра (размер тот же); vid kamera vverh|… [N] —
+    сдвиг; vid kamera domoy — угол справа внизу, как обычно."""
+    U = os.environ.get('KAMERA_URL') or APP
+    b = a[1] if len(a) > 1 else ''
+    n = a[2] if len(a) > 2 and re.fullmatch(r'\d+(?:[.,]\d+)?', a[2]) else '5'
+    if b == 'domoy':
+        return kamera(['ugol', 'pn'])
+    if b in SDVIG:
+        return kamera(['sdvin', b, n])
+    if len(a) == 3 and all(re.fullmatch(r'\d+(?:[.,]\d+)?', x) for x in a[1:]):
+        r = zapros(U, '/kamera', 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        kr = (razobrat(r[1]) or {}).get('kraya') or {}
+        w, h = kr.get('shirina') or 25, kr.get('vysota') or 30
+        x, y = float(a[1].replace(',', '.')), float(a[2].replace(',', '.'))
+        x, y = min(x, 100 - w), min(y, 100 - h)
+        return kamera(['ramka', '%g' % round(x, 1), '%g' % round(y, 1), '%g' % round(x + w, 1), '%g' % round(y + h, 1)])
+    return 1, ['vid kamera 5 50 — окно камеры левым верхним углом в 5 % ширины и 50 % высоты; vid kamera vniz [N]; '
+               'vid kamera domoy.'], None
+
+
+MESTA_RU = {'chat': 'чат', 'schet': 'счётчики зрителей и фолловеров', 'ssylki': 'плашка ссылок (ник, значки, донат)',
+            'donat': 'строка доната', 'muzyka': '«сейчас играет»', 'cel': 'цель доната (слева вверху)',
+            'balans': 'баллы канала (справа вверху)', 'opoveshchenie': 'оповещение (новый фолловер)', 'titry': 'субтитры',
+            'plus': 'Fiercy Joy (Плюс)', 'kamera': 'окно камеры'}
+
+
+def vid_mesto(U, a):
+    """vid mesta — где что стоит в кадре (% от краёв); vid ЭЛЕМЕНТ X Y — левый верхний угол в % кадра;
+    vid ЭЛЕМЕНТ vverh|vniz|vlevo|vpravo [N] — сдвиг на N % (5); vid ЭЛЕМЕНТ domoy; vid mesta domoy — всё на места."""
+    chto = a[0]
+    if chto == 'kamera':                                   # окно камеры — своим способом: «своё окно» с краями в % кадра
+        return vid_kamera(a)
+    if chto in ('mesta', 'gde'):
+        if len(a) > 1 and a[1] == 'domoy':
+            r = zapros(U, '/efir/mesto?vse=domoy', 5)
+        else:
+            r = zapros(U, '/efir/mesto', 5)
+    else:
+        b = a[1] if len(a) > 1 else ''
+        n = a[2] if len(a) > 2 and re.fullmatch(r'\d+(?:[.,]\d+)?', a[2]) else None
+        if b == 'domoy':
+            q = 'domoy=1'
+        elif b in SDVIG:
+            k, d = SDVIG[b]
+            q = '%s=%s' % (k, (('-' if d < 0 else '') + n.replace(',', '.')) if n else d)
+        elif len(a) == 3 and all(re.fullmatch(r'\d+(?:[.,]\d+)?', x) for x in a[1:]):
+            q = 'x=%s&y=%s' % (a[1].replace(',', '.'), a[2].replace(',', '.'))
+        else:
+            return 1, ['vid %s 70 40 — левый верхний угол в 70 %% ширины и 40 %% высоты кадра; vid %s vverh|vniz|vlevo|vpravo '
+                       '[N] — сдвиг на N %% (5); vid %s domoy — на своё место; vid mesta — где что стоит.' % (chto, chto, chto)], None
+        r = zapros(U, '/efir/mesto?chto=%s&%s' % (chto, q), 5)
+    if r is None:
+        return 1, [MOLCHIT], None
+    if r[0] == 404:
+        return 1, ['Расстановка элементов: нужен мост 2.8.12 (обнови приложение).'], None
+    d = razobrat(r[1]) or {}
+    if d.get('oshibka'):
+        return 1, [d['oshibka']], None
+    sloi = d.get('sloi') or {}
+    def opis(k, s):
+        return '%s: слева %s %%, сверху %s %%, справа %s %%, снизу %s %%%s' % (
+            MESTA_RU.get(k, k), s.get('x'), s.get('y'), s.get('do_pravogo'), s.get('do_nizhnego'),
+            ' (своё место)' if s.get('svoyo') else '')
+    if chto not in ('mesta', 'gde'):
+        s = sloi.get(chto)
+        return 0, ['Готово (мост запомнил). ' + (opis(chto, s) if s else
+                   '%s сейчас не на экране — встанет туда, когда появится.' % MESTA_RU.get(chto, chto))], None
+    if not sloi:
+        return 0, ['На экране эфира сейчас нет элементов (эфир не идёт?).'], None
+    return 0, ['Где что в кадре (от краёв, % кадра): ' + '; '.join(opis(k, s) for k, s in sloi.items()) + '.'], None
 
 
 def vid_plus_fon(U, a):

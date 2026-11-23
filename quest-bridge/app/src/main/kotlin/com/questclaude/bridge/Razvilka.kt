@@ -548,12 +548,17 @@ class Razvilka(private val w: Int, private val h: Int) {
             val k = Vizor.nkPuls(Vizor.nkPulsT(System.currentTimeMillis()))
             if (k != 1f) { w = (w * k).toInt(); h = (h * k).toInt() }
         }
-        if (ugol == "nc" && Oformlenie.viz) {                           // 2.8.10: субтитры не влезли меж плашкой и камерой — меньше
+        if (ugol == "nc" && Oformlenie.viz && Oformlenie.mestoSloya("nc") == null) {   // 2.8.10: не влезли меж плашкой и камерой — меньше
             val k = titryLevo(o)[1]
             if (k < 1f) { w = (w * k).toInt(); h = (h * k).toInt() }
         }
         if (ugol == "sc") { x = 0; y = 0; w = o.w; h = o.h }
-        else if (Oformlenie.viz) { if (!mestoViz(o, ugol, sl, w, h)) return; return risovatSloy(x0Viz, y0Viz, w, h, sl) }
+        else if (Oformlenie.viz) {
+            if (!mestoViz(o, ugol, sl, w, h)) { Oformlenie.vidno.remove(ugol); return }
+            val k = 1080f / o.h                                // 2.8.12: где слой на самом деле — Плюсу (/efir/mesto)
+            Oformlenie.vidno[ugol] = floatArrayOf(x0Viz * k, (o.h - y0Viz - h) * k, w * k, h * k)
+            return risovatSloy(x0Viz, y0Viz, w, h, sl)
+        }
         when (ugol) {
             "nc" -> { x = nizCentr(o, w) - w / 2; y = o.h * 5 / 100 }
             "lg", "lb" -> { x = 0; y = o.h - ((Raskladka.SLOY_Y + sl.h) * s).toInt() }   // слои гостей: от точки (0; SLOY_Y) 1080p
@@ -593,6 +598,13 @@ class Razvilka(private val w: Int, private val h: Int) {
         fun gl(verh: Float) = o.h - (verh * s).toInt() - h            // верх слоя (1080p) → низ в GL
         var x = (Vizor.STOLB_X * s).toInt()
         var y: Int
+        // 2.8.12: своё место слоя (голосом через Плюса) — левый верхний угол из настроек, вместо обычного
+        Oformlenie.mestoSloya(ugol)?.let { m ->
+            x = (m[0] * s).toInt().coerceIn(0, maxOf(0, o.w - w)); y = gl(m[1]).coerceIn(0, maxOf(0, o.h - h))
+            if (ugol == "pc") chatMesto = Vizor.CH                     // чат на своём месте — без поиска просвета
+            x0Viz = x; y0Viz = y
+            return true
+        }
         when (ugol) {
             "vv" -> { x = 0; y = gl(0f) }
             "vn" -> { x = 0; y = 0 }
@@ -650,7 +662,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         }
         // слева — плашка ника под Плюсом и сам Плюс, если он внизу слева. 2.8.10 (Александр 16.11): в пульс плашки
         // субтитры стоят на месте — не ездят за ней и не наезжают на окно камеры
-        var levo = maxOf(Vizor.PL.r, Vizor.NK_X + nkShirina)
+        var levo = maxOf(Vizor.PL.r, if (Oformlenie.mestoSloya("nk") == null) Vizor.NK_X + nkShirina else 0f)   // 2.8.12: плашку унесли — не мешает
         val p = plusMesto()
         if (sloi["pl"]?.let { it.w > 0 } == true && p[1] + Vizor.PL_H > Vizor.TITRY_VERH && p[0] < Vizor.W / 2f)
             levo = maxOf(levo, p[0] + Vizor.PL_W)
@@ -851,7 +863,7 @@ class Razvilka(private val w: Int, private val h: Int) {
 
     /** Окно камеры поверх кадра эфира (начало координат GL — внизу слева). */
     private fun okno(o: Out) {
-        if (!kameraVidna()) return
+        if (!kameraVidna()) { Oformlenie.vidno.remove("kamera"); return }
         val v = vid
         val ar = Okno.proporcii(kw, kh, v.povorot)
         val r = Okno.mesto(o.w, o.h, ar, v)
@@ -879,6 +891,12 @@ class Razvilka(private val w: Int, private val h: Int) {
             System.arraycopy(kmtxPov, 0, kmtxTmp, 0, 16)
             android.opengl.Matrix.multiplyMM(kmtxPov, 0, kmtxTmp, 0, Okno.obrezka(r[2].toFloat() / r[3], ar), 0)
         }
+        if (Oformlenie.zerkalo) {                            // 2.8.12: зеркально — x окна → 1 − x
+            System.arraycopy(kmtxPov, 0, kmtxTmp, 0, 16)
+            android.opengl.Matrix.multiplyMM(kmtxPov, 0, kmtxTmp, 0, ZERKALO, 0)
+        }
+        val kk = 1080f / o.h                                 // 2.8.12: где окно камеры на самом деле — Плюсу
+        Oformlenie.vidno["kamera"] = floatArrayOf(r[0] * kk, (o.h - r[1] - r[3]) * kk, r[2] * kk, r[3] * kk)
         if (shKamera.p == 0) return kvadrat(ktex, kmtxPov)
         val umen = maxOf(r[2], r[3]) < maxOf(kw, kh)      // кадр телефона больше окна — уменьшаем
         if (fon != "net") { GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA) }
@@ -1018,6 +1036,9 @@ class Razvilka(private val w: Int, private val h: Int) {
          * Окно камеры: шаг на четверть точки окна, переведённый в координаты текстуры той же матрицей
          * (с поворотом окна), — 4 выборки вокруг середины точки (каждая ещё и сглаженная, LINEAR).
          */
+        /** 2.8.12: зеркало окна камеры — координата текстуры окна x → 1 − x (по столбцам). */
+        private val ZERKALO = floatArrayOf(-1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 1f, 0f, 0f, 1f)
+
         private val VERTEX_KAMERA = """
             attribute vec4 aPos;
             attribute vec4 aTex;

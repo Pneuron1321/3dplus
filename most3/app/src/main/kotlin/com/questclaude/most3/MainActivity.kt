@@ -208,6 +208,9 @@ class MainActivity : Activity() {
     /** Ползунок: имя настройки, подпись, диапазон, как взять и как поставить. */
     private class Polzunok(val imya: String, val nadpis: String, val min: Float, val max: Float, val vzyat: (Nastrojki) -> Float)
     private val spisok = listOf(
+        // 3.2.4 (Александр 23.11): сила всего, что настроено, и выдержка
+        Polzunok("sila", "СИЛА ВСЕХ РУЧЕК (0 — как пришло, 1 — как настроено, 2 — вдвое)", 0f, 2f) { it.sila },
+        Polzunok("vyderzhka", "Выдержка (ступени)", -2f, 2f) { it.vyderzhka },
         Polzunok("yarkost", "Яркость", -0.5f, 0.5f) { it.yarkost },
         Polzunok("kontrast", "Контраст", 0.5f, 2f) { it.kontrast },
         Polzunok("nasyshch", "Насыщенность", 0f, 2.5f) { it.nasyshch },
@@ -222,7 +225,7 @@ class MainActivity : Activity() {
         Polzunok("balb", "Синий", 0.5f, 1.5f) { it.balB },
         Polzunok("ton", "Тон (оттенок)", -30f, 30f) { it.ton },
         Polzunok("sveta", "Света", -1f, 1f) { it.sveta },
-        Polzunok("chernyj", "Уровень чёрного", 0f, 0.3f) { it.chernyj },
+        Polzunok("chernyj", "Точка чёрного (минус — приподнять)", -0.2f, 0.3f) { it.chernyj },
         Polzunok("belyj", "Уровень белого", 0.7f, 1f) { it.belyj },
         Polzunok("zhivost", "Живость", -1f, 1f) { it.zhivost })
     private val bary = HashMap<String, SeekBar>()
@@ -235,9 +238,9 @@ class MainActivity : Activity() {
 
     private fun sobratRyadyPolzunkov() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; setPadding(24, 8, 56, 8)   // справа — место полосе прокрутки
-        addView(knopka("Цвет как было (температура, баланс, тон, света, уровни, живость)") {
+        addView(knopka("Цвет как было (температура, баланс, тон, света, уровни, живость, выдержка, сила)") {
             var n = Most.nastrojki
-            for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost"))
+            for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila"))
                 n = n.izmenit(im, "def") ?: n
             Most.postavit(n); obnovitPolzunki()
         })

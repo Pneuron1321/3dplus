@@ -28,17 +28,21 @@ data class Nastrojki(
     val balB: Float = 1f,
     val ton: Float = 0f,         // поворот оттенка, градусы −30..30
     val sveta: Float = 0f,       // света отдельно от теней −1..1
-    val chernyj: Float = 0f,     // уровень чёрного 0..0.3: всё темнее — в чёрное (против блёклой картинки карты)
+    val chernyj: Float = 0f,     // точка чёрного −0.2..0.3: плюс — всё темнее в чёрное (против блёклой картинки карты),
+                                 // 3.2.4: минус — чёрный приподнят (−0.2 → чёрное становится 0.17)
     val belyj: Float = 1f,       // уровень белого 0.7..1: всё светлее — в белое
     val zhivost: Float = 0f,     // живость −1..1: насыщает блёклые цвета, яркие почти не трогает
+    // 3.2.4 (Александр 23.11): выдержка и общая сила ручек.
+    val vyderzhka: Float = 0f,   // выдержка −2..+2 ступени: свет ×2 на ступень (линейный свет, гамма 2.2), как у камеры
+    val sila: Float = 1f,        // сила всех ручек 0..2: 0 — кадр как пришёл, 1 — как настроено, 2 — всё вдвое сильнее
 ) {
     fun ogranichit(): Nastrojki = Nastrojki(
         ogr(yarkost, -0.5f, 0.5f, 0f), ogr(kontrast, 0.5f, 2f, 1f), ogr(nasyshch, 0f, 2.5f, 1f),
         ogr(gamma, 0.5f, 2.5f, 1f), ogr(teni, 0f, 1f, 0f), ogr(rezkost, 0f, 2f, 0f), ogr(avtoNoch, 0f, 1f, 0f),
         polnyjDiapazon, ogr(lokalno, 0f, 1f, 0f), ogr(hdrPik, 100f, 10000f, 1000f),
         ogr(temperatura, -100f, 100f, 0f), ogr(balR, 0.5f, 1.5f, 1f), ogr(balG, 0.5f, 1.5f, 1f), ogr(balB, 0.5f, 1.5f, 1f),
-        ogr(ton, -30f, 30f, 0f), ogr(sveta, -1f, 1f, 0f), ogr(chernyj, 0f, 0.3f, 0f), ogr(belyj, 0.7f, 1f, 1f),
-        ogr(zhivost, -1f, 1f, 0f),
+        ogr(ton, -30f, 30f, 0f), ogr(sveta, -1f, 1f, 0f), ogr(chernyj, -0.2f, 0.3f, 0f), ogr(belyj, 0.7f, 1f, 1f),
+        ogr(zhivost, -1f, 1f, 0f), ogr(vyderzhka, -2f, 2f, 0f), ogr(sila, 0f, 2f, 1f),
     )
 
     fun poluchit(imya: String): Float? = when (imya) {
@@ -47,7 +51,7 @@ data class Nastrojki(
         "polnyj" -> if (polnyjDiapazon) 1f else 0f
         "lokalno" -> lokalno; "hdrpik" -> hdrPik
         "temperatura" -> temperatura; "balr" -> balR; "balg" -> balG; "balb" -> balB; "ton" -> ton; "sveta" -> sveta
-        "chernyj" -> chernyj; "belyj" -> belyj; "zhivost" -> zhivost
+        "chernyj" -> chernyj; "belyj" -> belyj; "zhivost" -> zhivost; "vyderzhka" -> vyderzhka; "sila" -> sila
         else -> null
     }
 
@@ -57,13 +61,13 @@ data class Nastrojki(
         "avtonoch" -> copy(avtoNoch = v); "lokalno" -> copy(lokalno = v); "hdrpik" -> copy(hdrPik = v)
         "temperatura" -> copy(temperatura = v); "balr" -> copy(balR = v); "balg" -> copy(balG = v); "balb" -> copy(balB = v)
         "ton" -> copy(ton = v); "sveta" -> copy(sveta = v); "chernyj" -> copy(chernyj = v); "belyj" -> copy(belyj = v)
-        "zhivost" -> copy(zhivost = v)
+        "zhivost" -> copy(zhivost = v); "vyderzhka" -> copy(vyderzhka = v); "sila" -> copy(sila = v)
         else -> copy(polnyjDiapazon = v >= 0.5f)
     }
 
     // znachenie: "N" (задать), "+N"/"-N" (сдвиг), "=N" / "=-N" (задать, можно отрицательное), "def" (по умолчанию).
     // Имена: yarkost kontrast nasyshch gamma teni rezkost avtonoch polnyj lokalno hdrpik temperatura balr balg balb
-    // ton sveta chernyj belyj zhivost. Плохой ввод -> null.
+    // ton sveta chernyj belyj zhivost vyderzhka sila. Плохой ввод -> null.
     fun izmenit(imya: String, znachenie: String): Nastrojki? {
         val im = imya.trim().lowercase(Locale.ROOT)
         val tek = poluchit(im) ?: return null
@@ -86,7 +90,7 @@ data class Nastrojki(
 
     companion object {
         val IMENA = listOf("yarkost", "kontrast", "nasyshch", "gamma", "teni", "rezkost", "avtonoch", "polnyj", "lokalno", "hdrpik",
-            "temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost")
+            "temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila")
         private val CHISLO = Regex("""\d{1,6}(\.\d*)?|\.\d+""")
         private fun chislo(s: String): Float? = if (CHISLO.matches(s)) s.toFloatOrNull() else null
         private fun ogr(v: Float, a: Float, b: Float, def: Float) = if (v.isNaN()) def else min(b, max(a, v))
@@ -167,6 +171,7 @@ object KartinkaCpu {
     const val K_SVETOV = 0.8f        // света: x + s·0.8·(1−x)·x⁴ — монотонна при |s| ≤ 1
     const val K_TEMPERATURY = 0.12f  // температура ±100 → красный и синий ×(1 ± 0.12)
     const val MIN_UROVNYA = 0.05f    // белый − чёрный не меньше
+    const val GAMMA_VYDERZHKI = 2.2f // выдержка в гамма-кодированном: ×2^(ступени/2.2) = ×2^ступени в линейном свете
     const val PREDEL_REZKOSTI = 0.1f
     const val SUPER_POROG = 1.2f
     const val BELYJ_NIT = 203f          // белый SDR в нитах (BT.2408), uBelyj
@@ -228,12 +233,23 @@ object KartinkaCpu {
         c[2] = r * (k - q) + g * (k + q) + b * d
     }
 
-    // Конвейер без резкости и местной ночи. Вход — RGB 0..1. Порядок (как в шейдере): уровни → баланс/температура →
-    // яркость → контраст → насыщенность → тон → живость → гамма → тени → света.
-    fun obrabotat(r: Float, g: Float, b: Float, n: Nastrojki, avtoTeni: Float): FloatArray {
+    fun mnozhitelVyderzhki(n: Nastrojki): Float = 2f.pow(n.vyderzhka / GAMMA_VYDERZHKI)
+
+    // Сила всех ручек: выход = вход + (обработанное − вход)·сила (как mix в шейдере), 0..1.
+    fun sila(vhod: FloatArray, obr: FloatArray, sila: Float): FloatArray =
+        FloatArray(3) { kl(vhod[it] + (obr[it] - vhod[it]) * sila) }
+
+    // Конвейер без резкости и местной ночи, с силой ручек. Вход — RGB 0..1.
+    fun obrabotat(r: Float, g: Float, b: Float, n: Nastrojki, avtoTeni: Float): FloatArray =
+        sila(floatArrayOf(kl(r), kl(g), kl(b)), obrabotatBezSily(r, g, b, n, avtoTeni), n.sila)
+
+    // Порядок (как в шейдере): выдержка → уровни → баланс/температура → яркость → контраст → насыщенность → тон →
+    // живость → гамма → тени → света.
+    fun obrabotatBezSily(r: Float, g: Float, b: Float, n: Nastrojki, avtoTeni: Float): FloatArray {
         val sh = max(n.belyj - n.chernyj, MIN_UROVNYA)
         val m = mnozhiteli(n)
-        val vh = floatArrayOf(r, g, b)
+        val vy = mnozhitelVyderzhki(n)
+        val vh = floatArrayOf(kl(r * vy), kl(g * vy), kl(b * vy))
         val c = FloatArray(3) { kl(kl((vh[it] - n.chernyj) / sh) * m[it] + n.yarkost) }
         for (i in 0..2) c[i] = kontrastKrivaya(c[i], n.kontrast)
         val l = yarkost(c[0], c[1], c[2])
@@ -265,6 +281,7 @@ object KartinkaCpu {
         for (y in 0 until h) for (x in 0 until w) {
             val o = (y * w + x) * 3
             var r = kl(rgb[o]); var g = kl(rgb[o + 1]); var b = kl(rgb[o + 2])
+            val vhod = floatArrayOf(r, g, b)
             var d = 0f
             if (n.rezkost > 0f) {
                 val sr = 0.25f * (ya(x + 1, y) + ya(x - 1, y) + ya(x, y + 1) + ya(x, y - 1))
@@ -274,8 +291,9 @@ object KartinkaCpu {
                 val lc = lokalno(r, g, b, k, KARTA_W, KARTA_H, (x + 0.5f) / w, (y + 0.5f) / h, n.lokalno)
                 r = lc[0]; g = lc[1]; b = lc[2]
             }
-            val c = obrabotat(r, g, b, n, avtoTeni)
-            for (i in 0..2) out[o + i] = kl(c[i] + d)
+            val c = obrabotatBezSily(r, g, b, n, avtoTeni)
+            for (i in 0..2) c[i] = kl(c[i] + d)
+            sila(vhod, c, n.sila).copyInto(out, o)
         }
         return out
     }

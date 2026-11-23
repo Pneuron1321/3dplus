@@ -925,7 +925,7 @@ class Nalozhenie(
 
     /** Имя голоса в субтитрах: ALEXANDER, PLUS, GAME, гость — его имя большими буквами. */
     private fun imyaGolosa(kto: String): String = when (kto) {
-        "plus" -> "PLUS"
+        "plus" -> "FIERCY JOY"               // 2.8.12 (Александр 23.11): у Плюса имя — Fiercy Joy
         "igra" -> "GAME"
         "ya" -> "ALEXANDER"
         else -> gosti?.komnata?.imyaGolosa(kto)?.uppercase() ?: "GUEST"

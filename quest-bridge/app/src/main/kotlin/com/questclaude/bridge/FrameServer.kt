@@ -66,7 +66,7 @@ import kotlin.concurrent.thread
  *   GET /zvuk?imya=soobshchenie|otvet|novyy|vazhno|narushenie[&efir=1] -> короткий звук чата Splus (2.8.6; без efir — шлем)
  *   GET /schet, /schet/upr?zr_tw=N&pod_kick=N&nik=…&zr=0|1&pod=0|1&niki=0|1 -> счётчики и ник внизу (2.8.2, Schet)
  *   GET /klip/upr[?rezhim=otdelno|efir|vykl] -> клип шлема: свой кодировщик без окна камеры (уступает игре) | сам эфир | нет
- *   GET /klip[?sek=300]      -> «клип клип клип» (2.7.8): клипы камеры и эфира на одно время (2.8.6: 5 минут, sek — меньше) в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
+ *   GET /klip[?sek=150]      -> «клип клип клип» (2.7.8): клипы камеры и эфира на одно время (2.8.12: 2,5 минуты, sek — до 300) в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
  *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 150) с видео телефона — MP4 в «Фильмы/Plus»
  *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}
  *   GET /karta/upr?vkl=0|1&g=100 -> звук карты в шлем и эфир вкл/выкл, громкость %
@@ -394,6 +394,10 @@ class FrameServer(
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.stilUpr(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir/plus" ->                        // 2.8.7: Плюс в любое место кадра
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.plusUpr(query).toByteArray(Charsets.UTF_8))
+            "/efir/mesto" ->                       // 2.8.12: любой слой визора в любое место кадра; без chto — где что
+                reply(out, 200, "application/json; charset=utf-8", Oformlenie.mestoUpr(query).toByteArray(Charsets.UTF_8))
+            "/efir/zerkalo" ->                     // 2.8.12: камера зеркально
+                reply(out, 200, "application/json; charset=utf-8", Oformlenie.zerkaloUpr(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir/fon" ->                         // 2.8.7: вырезать зелёный/синий фон камеры
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.fonUpr(query).toByteArray(Charsets.UTF_8))
             "/efir/lico" ->                        // лицо в эфире: plus | zver (живой рисунок зверя)

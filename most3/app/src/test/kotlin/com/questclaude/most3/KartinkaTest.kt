@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.pow
 
 class KartinkaTest {
     private val E = 1f / 255f
@@ -337,6 +338,52 @@ class KartinkaTest {
     @Test fun shejderZnaetNovyeRuchki() {
         val f = Shader.FRAG_NV12
         assertTrue(f.contains("K_SVETOV = ${KartinkaCpu.K_SVETOV}") && f.contains("MIN_UROVNYA = ${KartinkaCpu.MIN_UROVNYA}"))
-        for (u in listOf("uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost")) assertTrue(u, u in Shader.UNIFORMY)
+        for (u in listOf("uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila"))
+            assertTrue(u, u in Shader.UNIFORMY)
+        assertTrue(f.contains("mix(vhod, obr, uSila)") && f.contains("c * uVyderzhka"))
+    }
+
+    // 3.2.4: выдержка — ступень = свет ×2 в линейном (гамма 2.2); белое не темнеет от плюса, ноль на месте.
+    @Test fun vyderzhkaStupeni() {
+        val lin = { x: Float -> x.toDouble().pow(2.2).toFloat() }
+        val plus1 = o(0.4f, 0.4f, 0.4f, Nastrojki(vyderzhka = 1f))[0]
+        assertEquals(2f * lin(0.4f), lin(plus1), 0.002f)
+        val minus2 = o(0.8f, 0.8f, 0.8f, Nastrojki(vyderzhka = -2f))[0]
+        assertEquals(lin(0.8f) / 4f, lin(minus2), 0.002f)
+        assertEquals(1f, o(0.9f, 0.9f, 0.9f, Nastrojki(vyderzhka = 1f))[0], 1e-5f)        // светлое упирается в белое
+        assertEquals(0f, o(0f, 0f, 0f, Nastrojki(vyderzhka = 2f))[0], 1e-6f)
+        assertEquals(2f, Nastrojki().izmenit("vyderzhka", "7")!!.vyderzhka, 1e-6f)
+        assertEquals(-2f, Nastrojki().izmenit("vyderzhka", "=-7")!!.vyderzhka, 1e-6f)
+    }
+
+    // 3.2.4: точка чёрного в минус — чёрное приподнято (−0.2 → 0.2/1.2), в плюс — как уровень чёрного.
+    @Test fun tochkaChernogoVObeStorony() {
+        assertEquals(0.2f / 1.2f, o(0f, 0f, 0f, Nastrojki(chernyj = -0.2f))[0], 1e-5f)
+        assertEquals(1f, o(1f, 1f, 1f, Nastrojki(chernyj = -0.2f))[0], 1e-5f)
+        assertEquals(-0.2f, Nastrojki().izmenit("chernyj", "=-0.9")!!.chernyj, 1e-6f)
+        assertEquals(0f, o(0.1f, 0.1f, 0.1f, Nastrojki(chernyj = 0.1f))[0], 1e-5f)
+    }
+
+    // 3.2.4: сила всех ручек — 0: кадр как пришёл; 1: как настроено; 2: отклонение от входа вдвое (до 0..1).
+    @Test fun silaVsehRuchek() {
+        val nastr = NABORY["yarko"]!!.copy(temperatura = 30f, vyderzhka = 0.5f, zhivost = 0.4f)
+        val vh = floatArrayOf(0.35f, 0.3f, 0.25f)
+        val odin = o(vh[0], vh[1], vh[2], nastr)
+        val nol = o(vh[0], vh[1], vh[2], nastr.copy(sila = 0f))
+        val dva = o(vh[0], vh[1], vh[2], nastr.copy(sila = 2f))
+        val pol = o(vh[0], vh[1], vh[2], nastr.copy(sila = 0.5f))
+        for (i in 0..2) {
+            assertEquals(vh[i], nol[i], 1e-6f)
+            assertEquals(vh[i] + 2f * (odin[i] - vh[i]), dva[i], 1e-5f)
+            assertEquals(vh[i] + 0.5f * (odin[i] - vh[i]), pol[i], 1e-5f)
+        }
+        assertEquals(1f, o(0.9f, 0.9f, 0.9f, NABORY["yarko"]!!.copy(vyderzhka = 2f, sila = 2f))[0], 1e-6f)   // не выше белого
+        val v = Nastrojki(vyderzhka = -0.7f, sila = 1.4f, chernyj = -0.1f)
+        assertEquals(v, Nastrojki.izStroki(v.vStroku()))
+        assertEquals(1f, Nastrojki.izStroki("yarkost=0").sila, 0f)                                  // файл 3.2.3 — сила 1
+        // весь кадр: сила 0 при резкости и местной ночи — ровно вход
+        val w = 8; val h = 6; val rgb = FloatArray(w * h * 3) { ((it * 37) % 100) / 100f }
+        val k = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(rezkost = 1f, lokalno = 0.6f, kontrast = 1.4f, sila = 0f), 0.2f)
+        for (i in rgb.indices) assertEquals(rgb[i], k[i], 1e-6f)
     }
 }

@@ -11,7 +11,8 @@ import java.net.URLDecoder
  *   GET /status                       — что идёт: режим, к/с, звук, картинка, авто-ночь
  *   GET /podklyuchit                  — открыть карту и пустить видео и звук
  *   GET /kartinka?yarkost=+0.1&…      — шейдер: yarkost kontrast nasyshch gamma teni rezkost avtonoch (N, +N, -N, def);
- *                                       3.2.2 — temperatura balr balg balb ton sveta chernyj belyj zhivost (=-N — задать минус)
+ *                                       3.2.2 — temperatura balr balg balb ton sveta chernyj belyj zhivost (=-N — задать минус);
+ *                                       3.2.4 — vyderzhka (−2..2 ступени), sila (0..2: сила всех ручек), chernyj −0.2..0.3
  *   GET /kartinka?nabor=noch          — набор: obychno monitor noch yarko rezko
  *   GET /efir?rezhim=fokus|vsegda|shlem — 3.2.3: игра в эфир, пока окно активно / всегда / никогда (вид шлема)
  *   GET /zvuk?vkl=0|1&g=80            — звук карты в шлем, громкость в %

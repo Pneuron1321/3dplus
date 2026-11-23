@@ -46,8 +46,9 @@ class CaptureService : Service() {
 
     companion object {
         private const val KLIP_REZHIM = "klip-rezhim"
-        /** 2.8.6: «клип клип клип» и /klip — 5 минут (Александр 05.11). */
-        const val KLIP_SEK = 300
+        /** «клип клип клип» и /klip без sek — 2,5 минуты (Александр 23.11; с 2.8.6 было 5). По запросу (/klip?sek=300)
+         *  — до 5 минут: круг эфира держит 320 с. */
+        const val KLIP_SEK = 150
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"
         const val ACTION_STOP = "com.questclaude.bridge.STOP"

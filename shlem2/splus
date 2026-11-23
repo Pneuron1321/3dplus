@@ -71,12 +71,12 @@ ZVUK_RAZ = {'soobshchenie': 10, 'otvet': 20, 'novyy': 5, 'vazhno': 3, 'narusheni
 
 INSTRUKCIYA = ("Hi! I'm Splus, the AI of this stream. I chat with everyone in any language and remember you between "
                "streams, so we can actually become friends. How to use: just write @Splus (any language) · "
-               "!idea your idea for the show or for Plus · !lesson your tip to teach Plus · !forget erases what I remember "
+               "!idea your idea for the show or for Fiercy Joy · !lesson your tip to teach Fiercy Joy · !forget erases what I remember "
                "about you · channel points = rewards "
                "under the chat. Have fun!")
-ZNANIYA_SVOI = """Шоу: Саша (3xsks_fu_gun) стримит прямо из шлема Meta Quest 3 — без ПК и студии. Рядом ИИ-соведущий Плюс —
+ZNANIYA_SVOI = """Шоу: Саша (3xsks_fu_gun) стримит прямо из шлема Meta Quest 3 — без ПК и студии. Рядом ИИ-соведущий Fiercy Joy (позывной «Плюс») —
 кирпичный робот (красный визор, фиолетовый гребень, зелёные тапки): слышит Сашу, видит игру, разговаривает, благодарит
-фолловеров. Соведущая-ученица делает догадки о Саше и шоу и в конце эфира оценивает их 1–21. Зрители учат Плюса:
+фолловеров. Соведущая-ученица делает догадки о Саше и шоу и в конце эфира оценивает их 1–21. Зрители учат Fiercy Joy:
 «!lesson совет» — урок дня. Сезон-эксперимент: вопрос сезона, итог с данными в конце.
 Игры: VRChat, VR-бокс, GTA, VR-шутеры и другое. Площадки: Twitch, Kick, YouTube (3xsks_fu_gun).
 Поддержать: streamelements.com/3xsksks/tip. Баллы канала — награды под чатом.
