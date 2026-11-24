@@ -120,5 +120,5 @@ class Klip3(dir: File, val shirina: Int, val vysota: Int) {
     fun status(): String = "{\"idyot\":$rabotaet,\"sekund\":${zapis.sekund}," +
         "\"oshibka\":${(oshibka ?: zapis.oshibka)?.let { Json.str(it) } ?: "null"}}"
 
-    companion object { const val BITRATE = 16_000_000 }      // 1080p60: ~2 МБ/с, круг ~2 мин ≈ 260 МБ на диске
+    companion object { const val BITRATE = 16_000_000 }      // 1080p60: ~2 МБ/с, круг 320 с ≈ 640 МБ на диске (3.2.5)
 }

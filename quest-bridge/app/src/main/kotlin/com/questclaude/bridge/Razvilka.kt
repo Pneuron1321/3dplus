@@ -657,7 +657,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         val k = 1080f / o.h
         var pravo = Vizor.PRAVO
         if (kameraVidna() && v.rezhim != "krupno") {      // 2.8.8: окно в любом виде, если доходит до полосы субтитров
-            val r = Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v)
+            val r = vidnoOkna(o)
             if (r[1] * k < Vizor.TH + 4f && r[0] * k > Vizor.W / 2f) pravo = minOf(pravo, r[0] * k)
         }
         // слева — плашка ника под Плюсом и сам Плюс, если он внизу слева. 2.8.10 (Александр 16.11): в пульс плашки
@@ -699,7 +699,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         var pravo = o.w - m
         val v = vid
         if (kameraVidna() && v.rezhim == "ugol" && v.gde.endsWith("n")) {
-            val r = Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v)
+            val r = vidnoOkna(o)
             if (v.gde.startsWith("p")) pravo = minOf(pravo, r[0] - m) else levo = maxOf(levo, r[0] + r[2] + m)
         }
         return Raskladka.centrNiza(o.w, levo, pravo, shir)
@@ -841,7 +841,7 @@ class Razvilka(private val w: Int, private val h: Int) {
     private fun pomehiStolba(o: Out): List<IntArray> {
         val s = o.h / 1080f
         val L = ArrayList<IntArray>()
-        if (kameraVidna()) L += Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, vid.povorot), vid)
+        if (kameraVidna()) L += vidnoOkna(o)
         if (sloi["pl"]?.let { it.w > 0 } == true) {
             val p = plusMesto()
             val ph = (Vizor.PL_H * s).toInt()
@@ -853,9 +853,22 @@ class Razvilka(private val w: Int, private val h: Int) {
     private fun kameraVerh(o: Out): Int? {
         val v = vid
         if (!kameraVidna() || v.rezhim != "ugol" || v.gde != "pn") return null
-        val r = Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v)
+        val r = vidnoOkna(o)
         return r[1] + r[3] + maxOf(2, o.h / 360)
     }
+
+    /** 2.8.13: срезанные края окна (с вырезанным фоном и без), доли окна; null — нет (или шейдер камеры не собран). */
+    private fun obrezOkna(): FloatArray? =
+        if (shKamera.p != 0) Oformlenie.fonObrez.takeIf { z -> z.any { it > 0f } } else null
+
+    /** Где рисуется окно камеры (GL, от низа) — со сдвигом за край на срезанное (Okno.sdvigObrezki). */
+    private fun mestoOkna(o: Out): IntArray {
+        val v = vid
+        return Okno.sdvigObrezki(Okno.mesto(o.w, o.h, Okno.proporcii(kw, kh, v.povorot), v), o.w, o.h, v, obrezOkna())
+    }
+
+    /** Видимая часть окна камеры (GL, от низа): то, что видят зрители. */
+    private fun vidnoOkna(o: Out): IntArray = Okno.vidimoe(mestoOkna(o), obrezOkna())
 
     /** Камера шлёт кадры (не молчит дольше секунды) и окно не скрыто. */
     private fun kameraVidna() = kst != null && kw > 0 && vid.rezhim != "skryt" &&
@@ -866,13 +879,15 @@ class Razvilka(private val w: Int, private val h: Int) {
         if (!kameraVidna()) { Oformlenie.vidno.remove("kamera"); return }
         val v = vid
         val ar = Okno.proporcii(kw, kh, v.povorot)
-        val r = Okno.mesto(o.w, o.h, ar, v)
+        val r = mestoOkna(o)                              // 2.8.13: со срезанными краями — сдвинуто за край кадра
         val fon = if (shKamera.p == 0) "net" else Oformlenie.fon      // 2.8.7: вырезанный фон — без скоб и рамки
+        val z = obrezOkna()
+        val vi = Okno.vidimoe(r, z)                          // 2.8.13: скобы и рамка — вокруг видимой части
         if (fon != "net") Unit
         else if (v.rezhim != "krupno" && Oformlenie.viz) {        // визор: золотые скобы по углам окна
             GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
             GLES20.glClearColor(0xF2 / 255f, 0xC2 / 255f, 0x30 / 255f, 1f)
-            for (p in Vizor.skobyKamery(r[0], r[1], r[2], r[3], o.h / 1080f)) {
+            for (p in Vizor.skobyKamery(vi[0], vi[1], vi[2], vi[3], o.h / 1080f)) {
                 GLES20.glScissor(p[0], p[1], p[2], p[3])
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             }
@@ -880,7 +895,7 @@ class Razvilka(private val w: Int, private val h: Int) {
         } else if (v.rezhim != "krupno") {
             val b = maxOf(2, o.h / 360)                     // рамка
             GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
-            GLES20.glScissor(r[0] - b, r[1] - b, r[2] + 2 * b, r[3] + 2 * b)
+            GLES20.glScissor(vi[0] - b, vi[1] - b, vi[2] + 2 * b, vi[3] + 2 * b)
             GLES20.glClearColor(0.93f, 0.93f, 0.93f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
@@ -896,17 +911,17 @@ class Razvilka(private val w: Int, private val h: Int) {
             android.opengl.Matrix.multiplyMM(kmtxPov, 0, kmtxTmp, 0, ZERKALO, 0)
         }
         val kk = 1080f / o.h                                 // 2.8.12: где окно камеры на самом деле — Плюсу
-        Oformlenie.vidno["kamera"] = floatArrayOf(r[0] * kk, (o.h - r[1] - r[3]) * kk, r[2] * kk, r[3] * kk)
+        Oformlenie.vidno["kamera"] = floatArrayOf(vi[0] * kk, (o.h - vi[1] - vi[3]) * kk, vi[2] * kk, vi[3] * kk)
         if (shKamera.p == 0) return kvadrat(ktex, kmtxPov)
         val umen = maxOf(r[2], r[3]) < maxOf(kw, kh)      // кадр телефона больше окна — уменьшаем
-        if (fon != "net") { GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA) }
+        val smes = fon != "net" || z != null              // 2.8.13: срезанные края прозрачны и без вырезанного фона
+        if (smes) { GLES20.glEnable(GLES20.GL_BLEND); GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA) }
         GLES20.glUseProgram(shKamera.p)
         GLES20.glUniform2f(uFon, if (fon == "zel") 1f else if (fon == "sin") 2f else 0f, Oformlenie.fonPorog())
-        val z = Oformlenie.fonObrez                       // 2.8.11: края окна прочь (только с вырезанным фоном)
-        if (fon != "net") GLES20.glUniform4f(uObrez, z[0], z[1], z[2], z[3]) else GLES20.glUniform4f(uObrez, 0f, 0f, 0f, 0f)
+        if (z != null) GLES20.glUniform4f(uObrez, z[0], z[1], z[2], z[3]) else GLES20.glUniform4f(uObrez, 0f, 0f, 0f, 0f)
         val shag = umen || fon != "net"                   // 2.8.9: вырезу фона нужны соседи и без уменьшения
         kvadratKamery(kmtxPov, if (shag) 0.25f / r[2] else 0f, if (shag) 0.25f / r[3] else 0f)
-        if (fon != "net") GLES20.glDisable(GLES20.GL_BLEND)
+        if (smes) GLES20.glDisable(GLES20.GL_BLEND)
     }
 
     /**
@@ -1093,12 +1108,12 @@ class Razvilka(private val w: Int, private val h: Int) {
                         + 0.09 * (alfa(vTex + sx) + alfa(vTex - sx) + alfa(vTex + sy) + alfa(vTex - sy)
                         + alfa(vTex + sx + sy) + alfa(vTex - sx + sy) + alfa(vTex + sx - sy) + alfa(vTex - sx - sy));
                     a = smoothstep(0.4, 0.95, a);                                           // край поджат: тёмной каймы нет
-                    a *= step(uObrez.x, vOkno.x) * step(uObrez.z, 1.0 - vOkno.x)            // края окна прочь
-                        * step(uObrez.w, vOkno.y) * step(uObrez.y, 1.0 - vOkno.y);
                     if (uFon.x < 1.5) c.g = min(c.g, 0.5 * max(c.r, c.b) + 0.25 * (c.r + c.b) + 0.02);   // отсвет фона прочь
                     else c.b = min(c.b, 0.5 * max(c.r, c.g) + 0.25 * (c.r + c.g) + 0.02);
                     c = vec4(c.rgb * a, a);                                                 // с умноженной альфой
                 }
+                // 2.8.13: края окна прочь — и с вырезанным фоном, и без (альфа умножена: смешение ONE, 1 − альфа)
+                c *= step(uObrez.x, vOkno.x) * step(uObrez.z, 1.0 - vOkno.x) * step(uObrez.w, vOkno.y) * step(uObrez.y, 1.0 - vOkno.y);
                 gl_FragColor = c;
             }
         """.trimIndent()

@@ -36,6 +36,8 @@ class MainActivity : Activity() {
     @Volatile private var klipyStatus = ""
     private var klipyPokazDo = 0L              // клипы во время эфира: адрес с ключом показан до этого времени
     private lateinit var efirShtorka: EfirShtorka
+    private lateinit var oknoShtorka: OknoShtorka
+    private lateinit var klipShtorka: KlipShtorka
     private lateinit var status: TextView
     private val ui = Handler(Looper.getMainLooper())
     private val refresh = object : Runnable {
@@ -45,6 +47,8 @@ class MainActivity : Activity() {
             status.text = listOf(klipyEkran(), kameraStatus, efirStatus, Hub.karta?.kratko().orEmpty(), CaptureService.status, EarService.status, sleepStatus, plusStatus, Shlem.termuxReply)
                 .filter { it.isNotEmpty() }.joinToString("\n\n")
             efirShtorka.obnovit()
+            oknoShtorka.narisovat()
+            klipShtorka.narisovat()
             ui.postDelayed(this, 1000)
         }
     }
@@ -89,18 +93,12 @@ class MainActivity : Activity() {
             fun zNadpis() = "ЗЕРКАЛО КАМЕРЫ: " + (if (Oformlenie.zerkalo) "вкл" else "выкл") + " (нажми — " + (if (Oformlenie.zerkalo) "выключить" else "включить") + ")"
             zk = button(zNadpis()) { Oformlenie.zerkaloUpr("pereklyuchit"); zk.text = zNadpis() }
             addView(zk)
-            // 2.8.11 (Александр 16.11: по краям окна видна комната — ткань не до края): четыре кнопки, каждая срезает
-            // свой край окна камеры: 0 → 5 → 10 … 40 % → 0. Работает с вырезанным фоном.
-            for ((i, imya) in listOf("СЛЕВА", "СВЕРХУ", "СПРАВА", "СНИЗУ").withIndex()) {
-                lateinit var k: Button
-                fun nadpis() = "КРАЙ ОКНА $imya: срезано ${Math.round(Oformlenie.fonObrez[i] * 100)} % (нажми — ещё 5)"
-                k = button(nadpis()) {
-                    val bylo = Math.round(Oformlenie.fonObrez[i] * 100)
-                    Oformlenie.fonUpr(mapOf(listOf("l", "v", "p", "n")[i] to (if (bylo >= 40) 0 else bylo + 5).toString()))
-                    k.text = nadpis()
-                }
-                addView(k)
-            }
+            // 2.8.13 (Александр 24.11, скетч): вместо четырёх кнопок «КРАЙ ОКНА» — шторка: края срезать и вернуть
+            // стрелками внутрь/наружу, всё окно двигать ◀ ▲ ▼ ▶
+            oknoShtorka = OknoShtorka(this@MainActivity) { t -> kameraStatus = t }.also { it.vstavit(this) }
+            // 2.8.13 (Александр 24.11): что сохраняет «клип клип клип» — галочками
+            KlipNastroyki.zagruzit(filesDir)
+            klipShtorka = KlipShtorka(this@MainActivity) { t -> klipyStatus = t }.also { it.vstavit(this) }
             addView(button("КЛИП КАМЕРЫ: сохранить последние 2 минуты") { klipKnopka() })
             addView(button("КЛИПЫ: открыть на айфоне (15 минут)") { klipyKnopka() }.apply {
                 setOnLongClickListener { Hub.klipy?.zakrytVse(); klipyStatus = "Клипы: страница закрыта, ключ больше не работает."; true }

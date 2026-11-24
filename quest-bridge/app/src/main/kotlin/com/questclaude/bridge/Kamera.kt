@@ -236,7 +236,8 @@ class Kamera(
     private fun kraya(v: Okno.Vid): String {
         val r: FloatArray = Oformlenie.vidno["kamera"] ?: run {
             if (w <= 0 || h <= 0 || v.rezhim == "skryt") return ""
-            val m = Okno.mesto(1920, 1080, Okno.proporcii(w, h, v.povorot), v)
+            val z = Oformlenie.fonObrez.takeIf { o -> o.any { it > 0f } }          // 2.8.13: срезанные края — как в эфире
+            val m = Okno.vidimoe(Okno.sdvigObrezki(Okno.mesto(1920, 1080, Okno.proporcii(w, h, v.povorot), v), 1920, 1080, v, z), z)
             floatArrayOf(m[0].toFloat(), (1080 - m[1] - m[3]).toFloat(), m[2].toFloat(), m[3].toFloat())
         }
         fun p(x: Float, n: Float) = String.format(java.util.Locale.ROOT, "%.1f", x / n * 100f)

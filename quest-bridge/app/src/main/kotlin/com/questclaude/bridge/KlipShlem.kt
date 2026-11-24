@@ -18,7 +18,16 @@ import kotlin.concurrent.thread
  *  - совсем выключить отдельную запись — `efir klip efir`: тогда клип шлема — это сам эфир (с окном камеры, ноль
  *    нагрузки: те же байты, что уходят на Twitch).
  */
-class KlipShlem(private val rz: Razvilka, private val klip: KlipZapis, private val w: Int, private val h: Int) {
+class KlipShlem(private val rz: Razvilka, private val klip: KlipZapis, private val w: Int, private val h: Int,
+                private val fps: Int = FPS, private val kbps: Int = KBPS, private val bezKamery: Boolean = true,
+                private val fpsEkonom: Int = FPS_EKONOM) {
+    val kachestvo: Boolean get() = !bezKamery
+    /** 2.8.13: «высокое качество» (KlipNastroyki.kachestvo) — тот же кадр, что в эфире, с окном камеры, 60 к/с,
+     *  20 Мбит/с; тесно игре — 30 к/с (не 5: клип должен оставаться смотрибельным). */
+    constructor(rz: Razvilka, klip: KlipZapis, w: Int, h: Int, kachestvo: Boolean) :
+        this(rz, klip, w, h, if (kachestvo) FPS_KACHESTVO else FPS, if (kachestvo) KBPS_KACHESTVO else KBPS,
+            bezKamery = !kachestvo, fpsEkonom = if (kachestvo) FPS_EKONOM_KACHESTVO else FPS_EKONOM)
+
     private var enc: MediaCodec? = null
     private var surf: Surface? = null
     private var potok: Thread? = null
@@ -31,15 +40,16 @@ class KlipShlem(private val rz: Razvilka, private val klip: KlipZapis, private v
         val c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
         fun format(high: Boolean) = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, KBPS * 1000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
+            setInteger(MediaFormat.KEY_BIT_RATE, kbps * 1000)
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)                  // клип режется по ключевым — раз в секунду
             setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
             setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
             setInteger(MediaFormat.KEY_PRIORITY, 1)                           // фоновый: эфир кодируется первым
             if (high) {
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
-                setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel41)
+                setInteger(MediaFormat.KEY_LEVEL, if (fps > 30 || kbps > 20000) MediaCodecInfo.CodecProfileLevel.AVCLevel42
+                    else MediaCodecInfo.CodecProfileLevel.AVCLevel41)   // 1080p60 — уровень 4.2
             }
         }
         try { c.configure(format(true), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE) } catch (e: Exception) {
@@ -50,7 +60,7 @@ class KlipShlem(private val rz: Razvilka, private val klip: KlipZapis, private v
         c.start()
         enc = c; surf = s
         rabotaet = true
-        rz.add(s, FPS, stamp = true, ow = w, oh = h, sloi = true, bezKamery = true)
+        rz.add(s, fps, stamp = true, ow = w, oh = h, sloi = true, bezKamery = bezKamery)
         potok = thread(name = "klip-shlem", isDaemon = true) { petlya(c) }
         thread(name = "klip-shlem-storozh", isDaemon = true) { storozh(s) }
     }
@@ -66,10 +76,10 @@ class KlipShlem(private val rz: Razvilka, private val klip: KlipZapis, private v
             val tesno = Hub.dispetcher.igre || Hub.teplo >= Dispetcher.TEPLO || tesnoEfiru()
             if (tesno) {
                 spokoyno = 0
-                if (!ekonom) { ekonom = true; ekonomRaz++; try { rz.fps(s, FPS_EKONOM) } catch (e: Exception) { } }
+                if (!ekonom) { ekonom = true; ekonomRaz++; try { rz.fps(s, fpsEkonom) } catch (e: Exception) { } }
             } else if (ekonom && ++spokoyno >= SPOKOYNO_SEK) {
                 ekonom = false
-                try { rz.fps(s, FPS) } catch (e: Exception) { }
+                try { rz.fps(s, fps) } catch (e: Exception) { }
             }
         }
     }
@@ -130,5 +140,9 @@ class KlipShlem(private val rz: Razvilka, private val klip: KlipZapis, private v
         const val SPOKOYNO_SEK = 30
         /** «Полное качество»: 1080p30 — 12 Мбит/с, выше эфира (поток не идёт в сеть — только на диск). */
         const val KBPS = 12000
+        /** 2.8.13: высокое качество — 1080p60 H.264 High 20 Мбит/с: ~2,5 МБ/с, клип 2,5 мин ≈ 375 МБ, круг 320 с ≈ 800 МБ. */
+        const val FPS_KACHESTVO = 60
+        const val KBPS_KACHESTVO = 20000
+        const val FPS_EKONOM_KACHESTVO = 30
     }
 }

@@ -122,39 +122,61 @@ class CaptureService : Service() {
 
     private fun klipUpr(q: Map<String, String>): String {
         q["rezhim"]?.takeIf { it in setOf("otdelno", "efir", "vykl") }?.let { File(filesDir, KLIP_REZHIM).writeText(it) }
+        val primeneno = if (KlipNastroyki.upr(q)) primenitKlip() else ""     // 2.8.13: kachestvo= most3= kamera=
         val k = klipShlem
-        return "{\"rezhim\":\"${klipRezhim()}\",\"sejchas\":\"${when { k != null -> "otdelno"; efir?.klipVideo == true -> "efir"; else -> "net" }}\"," +
+        return "{${KlipNastroyki.json()},\"primeneno\":${FrameServer.json(primeneno)}," +
+            "\"rezhim\":\"${klipRezhim()}\",\"sejchas\":\"${when { k != null && k.kachestvo -> "kachestvo"; k != null -> "otdelno"; efir?.klipVideo == true -> "efir"; else -> "net" }}\"," +
             "\"ekonom\":${k?.ekonom ?: false},\"ekonom_raz\":${k?.ekonomRaz ?: 0},\"kadrov\":${k?.kadrov ?: 0}," +
             "\"sekund\":${efirKlip.sekund},\"so_sleduyushchego_efira\":${q.containsKey("rezhim")}}"
     }
 
-    /** «Клип клип клип»: камера и шлем (эфир; в режиме otdelno — без окна камеры) по [sekZapros] с (2.8.6: 5 минут; по
-     *  запросу — меньше) в «Фильмы/Plus», на одно
-     *  и то же время; ответ — {"kamera":{…},"efir":{…},"sinhron":…,"rashozhdenie_ms":…}. */
+    /** «Клип клип клип» по [sekZapros] с (2.8.12: 2,5 мин; до 5) в «Фильмы/Plus», на одно и то же время. 2.8.13 — что
+     *  сохранять, решает KlipNastroyki: клип шлема (высокое качество или копия эфира), чистая игра из Моста 3 (его круг),
+     *  камера телефона (по умолчанию выкл). Ответ — {"efir":{…},"most3":{…},"kamera":{…},"sinhron":…}; выключенного нет. */
     private fun klipKlip(sekZapros: Int = KLIP_SEK): String {
         val sek = sekZapros.coerceIn(10, KlipMp4.MAKS_SEK - 5)
         val vremya = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
-        val kz = kamera?.klip
-        val shlemNet = klipRezhim() == "vykl"
+        // Мост 3 сохраняет свой круг сам (отдельное приложение) — параллельно, пока мы собираем свои
+        var most3: String? = null
+        val m3 = if (KlipNastroyki.most3) kotlin.concurrent.thread(name = "klip-most3", isDaemon = true) { most3 = klipMost3(sek) } else null
+        val chasti = linkedMapOf<String, String>()
+        val kz = if (KlipNastroyki.kamera) kamera?.klip else null
+        val shlemNet = klipRezhim() == "vykl" && klipShlem == null
+        var sinhron = false
         // 2.7.9: оба круга есть — два клипа на одно и то же время (KlipSinhron): начало — пара ключевых кадров около
-        // «3 минуты назад», конец — одно мгновение; имена с одним временем — пара видна в галерее
+        // «N секунд назад», конец — одно мгновение; имена с одним временем — пара видна в галерее
         if (kz != null && !shlemNet) {
             val t1 = listOfNotNull(kz.konecVremya(), efirKlip.konecVremya()).takeIf { it.size == 2 }?.minOrNull()
             val para = t1?.let { KlipSinhron.vybrat(kz.klyuchevyeVremya(), efirKlip.klyuchevyeVremya(), it - sek * 1_000_000L) }
             if (t1 != null && para != null) {
                 // 2.8.0 (Александр 29.10): у камеры звука не надо — звук общий, в клипе эфира (два видео на одно время)
-                val k = KlipMp4.sohranitSnimok(this, { kz.snimokVremya(para.kamera, t1) }, "plus-klip-kamera", vremya, zvuk = false)
-                val e = KlipMp4.sohranitSnimok(this, { efirKlip.snimokVremya(para.efir, t1) }, "plus-klip-shlem", vremya)
-                return "{\"kamera\":$k,\"efir\":$e,\"sinhron\":true,\"rashozhdenie_ms\":${para.rashozhdenieMs}}"
+                chasti["kamera"] = KlipMp4.sohranitSnimok(this, { kz.snimokVremya(para.kamera, t1) }, "plus-klip-kamera", vremya, zvuk = false)
+                chasti["efir"] = KlipMp4.sohranitSnimok(this, { efirKlip.snimokVremya(para.efir, t1) }, "plus-klip-shlem", vremya)
+                chasti["rashozhdenie_ms"] = para.rashozhdenieMs.toString()
+                sinhron = true
             }
         }
-        val efirEst = !shlemNet && efirKlip.sekund > 0                // звук — в клипе эфира; эфира нет — у камеры свой звук
-        val k = kz?.let { KlipMp4.sohranit(this, it, sek, "plus-klip-kamera", zvuk = !efirEst) }
-            ?: "{\"oshibka\":\"камера не подключена\"}"
-        val e = if (shlemNet) "{\"oshibka\":\"клип шлема выключен (efir klip efir — включить)\"}"
-            else KlipMp4.sohranit(this, efirKlip, sek, "plus-klip-shlem")
-        return "{\"kamera\":$k,\"efir\":$e,\"sinhron\":false}"
+        if (!sinhron) {
+            val efirEst = !shlemNet && efirKlip.sekund > 0                // звук — в клипе эфира; эфира нет — у камеры свой звук
+            chasti["efir"] = if (shlemNet) "{\"oshibka\":\"клип шлема выключен (efir klip efir — включить)\"}"
+                else KlipMp4.sohranit(this, efirKlip, sek, "plus-klip-shlem")
+            if (KlipNastroyki.kamera) chasti["kamera"] = kz?.let { KlipMp4.sohranit(this, it, sek, "plus-klip-kamera", zvuk = !efirEst) }
+                ?: "{\"oshibka\":\"камера не подключена\"}"
+        }
+        m3?.join(90_000)
+        most3?.let { chasti["most3"] = it }
+        chasti["sinhron"] = sinhron.toString()
+        return chasti.entries.joinToString(",", "{", "}") { "\"${it.key}\":${it.value}" }
     }
+
+    /** Клип чистой игры из Моста 3 (его HTTP на 127.0.0.1:8767). Мост 3 не запущен — null (не мешаем ответу). */
+    private fun klipMost3(sek: Int): String? = try {
+        val c = java.net.URL("http://127.0.0.1:8767/klip?sek=$sek").openConnection() as java.net.HttpURLConnection
+        c.connectTimeout = 1500; c.readTimeout = 85_000
+        try { c.inputStream.bufferedReader().readText().trim().takeIf { it.startsWith("{") } ?: "{\"oshibka\":\"Мост 3: непонятный ответ\"}" }
+        finally { c.disconnect() }
+    } catch (e: java.net.ConnectException) { null
+    } catch (e: Exception) { "{\"oshibka\":${FrameServer.json("Мост 3 не ответил: ${e.message}")}}" }
 
     private lateinit var nalet: Nalet
     private lateinit var cel: Cel
@@ -245,6 +267,7 @@ class CaptureService : Service() {
         val gruppa = wifi?.createMulticastLock("plus-kamera")?.apply { setReferenceCounted(false) }
         Struny.zagruzit(filesDir)                       // основа эфира: игра (Мост 3) или вид шлема
         Oformlenie.zagruzit(filesDir)                   // стиль плашек эфира: viz | staryj (2.7.0)
+        KlipNastroyki.zagruzit(filesDir)                // 2.8.13: что сохраняет «клип клип клип»
         kamera = Kamera(filesDir, { on -> if (on) gruppa?.acquire() else if (gruppa?.isHeld == true) gruppa.release() },
             File(cacheDir, "klip"))
             .also { k ->
@@ -263,6 +286,7 @@ class CaptureService : Service() {
         // 2.7.8: «клип клип клип» — два клипа по 3 минуты: камера телефона и эфир (что в очках, со слоями), без пережатия
         Hub.klipKlip = { sek -> klipKlip(sek) }
         Hub.klipUpr = { q -> klipUpr(q) }
+        Hub.klipPrimenit = { primenitKlip() }
         Hub.opoveshchenie = Opoveshchenie(this) { razvilka }
         Hub.donatStroka = DonatStroka(this) { razvilka }
         schet = Schet({ try { File(filesDir, SCHET).readText() } catch (e: Exception) { SCHET_PERVYJ } },
@@ -567,7 +591,7 @@ class CaptureService : Service() {
         razvilka = rz
         Hub.dispetcher = Dispetcher()                    // «тесно» — заново на каждый эфир
         val e = Efir(p, rz, opts, nastroyki, efirKlip)
-        e.klipVideo = klipRezhim() == "efir"
+        e.klipVideo = rezhimKlipa() == "efir"
         try {
             e.start()
         } catch (ex: Exception) {
@@ -577,12 +601,8 @@ class CaptureService : Service() {
         }
         efir = e
         Hub.klyuchevoyEfira = { e.klyuchevoyKlipa(); klipShlem?.klyuchevoy() }
-        // 2.7.9: клип шлема — свой кодировщик, слои эфира без окна камеры (не вышло — эфир идёт и без него)
-        klipShlem = if (klipRezhim() != "otdelno") null else try {
-            KlipShlem(rz, efirKlip, opts.w, opts.h).also { k -> k.tesnoEfiru = { efir?.avto30 == true }; k.start() }
-        } catch (x: Exception) {
-            Pamyat.zapis("клип шлема не запустился: ${x.message} — клип шлема будет из эфира"); e.klipVideo = true; null
-        }
+        efirW = opts.w; efirH = opts.h
+        zapustitKlip(e, rz)
         kamera?.podklyuchit(rz)
         Struny.podklyuchit(rz)
         gosti?.tesno = { efir?.tesnoSet == true || Hub.dispetcher.igre }
@@ -603,6 +623,35 @@ class CaptureService : Service() {
             (if ("kick" in vybor && adresKick() == null) " (для Kick — и адрес: kluch kick с адресом в буфере)" else "") + ", потом `efir`"
 
     private var efirRazmer = ""
+    private var efirW = 1920
+    private var efirH = 1080
+
+    /** Как пишется клип шлема сейчас: kachestvo (2.8.13, по умолчанию) | otdelno | efir | vykl. */
+    private fun rezhimKlipa(): String = klipRezhim().let { r -> if (KlipNastroyki.kachestvo && r != "vykl") "kachestvo" else r }
+
+    /** Свой кодировщик клипа шлема (kachestvo — с окном камеры, 60 к/с, 20 Мбит/с; otdelno — 2.7.9, без окна камеры);
+     *  не вышло — клип из самого эфира, эфир идёт в любом случае. */
+    private fun zapustitKlip(e: Efir, rz: Razvilka) {
+        val r = rezhimKlipa()
+        klipShlem = if (r != "otdelno" && r != "kachestvo") null else try {
+            KlipShlem(rz, efirKlip, efirW, efirH, kachestvo = r == "kachestvo").also { k -> k.tesnoEfiru = { efir?.avto30 == true }; k.start() }
+        } catch (x: Exception) {
+            Pamyat.zapis("клип шлема не запустился: ${x.message} — клип шлема будет из эфира"); null
+        }
+        e.klipIzEfira(klipShlem == null && r != "vykl")
+    }
+
+    /** 2.8.13: галочку клипа переключили — во время эфира сразу (круг клипа начнётся заново), иначе со следующего. */
+    @Synchronized private fun primenitKlip(): String {
+        val e = efir; val rz = razvilka
+        if (e == null || rz == null) return "со следующего эфира"
+        val nado = rezhimKlipa()
+        val est = when { klipShlem?.kachestvo == true -> "kachestvo"; klipShlem != null -> "otdelno"; e.klipVideo -> "efir"; else -> "vykl" }
+        if (nado == est) return "уже так"
+        klipShlem?.stop(); klipShlem = null
+        zapustitKlip(e, rz)
+        return "сразу (запись клипа началась заново)"
+    }
 
     private fun notifyEfir(vybor: List<String>, opts: Efir.Opts?) {
         if (opts != null) efirRazmer = "${opts.w}×${opts.h}"
@@ -760,6 +809,7 @@ class CaptureService : Service() {
         Hub.gosti = null
         Hub.klipKlip = null
         Hub.klipUpr = null
+        Hub.klipPrimenit = null
         Hub.opoveshchenie = null
         Hub.donatStroka = null
         Hub.schet = null

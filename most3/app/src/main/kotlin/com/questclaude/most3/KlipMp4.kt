@@ -32,7 +32,7 @@ object KlipMp4 {
 
     private fun odinRaz(ctx: Context, z: KlipZapis, sek: Int, sZvukom: Boolean): String {
         run {
-            val s = z.snimok(sek.coerceIn(5, 155)) ?: return "{\"oshibka\":\"игра ещё не записана — клипа нет (карта показывает? запись включена?)\"}"
+            val s = z.snimok(sek.coerceIn(5, 305)) ?: return "{\"oshibka\":\"игра ещё не записана — клипа нет (карта показывает? запись включена?)\"}"   // 3.2.5: до 5 минут (круг 320 с)
             val imya = "most3-igra-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".mp4"
             val r = ctx.contentResolver
             val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {

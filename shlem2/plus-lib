@@ -343,7 +343,11 @@ def efir(a):
         k, out = efir_skazat(U)
     elif c == 'klip':                                   # 2.7.9: клип шлема — otdelno (без окна камеры) | efir | vykl
         r = a[1] if len(a) > 1 and a[1] in ('otdelno', 'efir', 'vykl') else None
-        kod, telo = zapros(U, '/klip/upr' + ('?rezhim=' + r if r else ''), 5) or (None, None)
+        q = '?rezhim=' + r if r else ''
+        # 2.8.13: галочки «клип клип клип» — kachestvo (высокое качество) | most3 (чистая игра) | kamera
+        if len(a) > 2 and a[1] in ('kachestvo', 'most3', 'kamera') and a[2] in ('vkl', 'vykl'):
+            q = '?%s=%s' % (a[1], '1' if a[2] == 'vkl' else '0')
+        kod, telo = zapros(U, '/klip/upr' + q, 15) or (None, None)
         try:
             d = json.loads(telo or '{}')
         except ValueError:
@@ -354,6 +358,14 @@ def efir(a):
             imya = {'otdelno': 'отдельная запись со всеми плашками, без окна камеры (сама уступает игре)',
                     'efir': 'сам эфир (с окном камеры, без лишней нагрузки)', 'vykl': 'выключен'}
             out = 'Клип шлема: %s.' % imya.get(d.get('rezhim'), d.get('rezhim'))
+            if 'kachestvo' in d:                          # мост 2.8.13+
+                chto = ['шлем в высоком качестве (1080p60, 20 Мбит/с)' if d.get('kachestvo') else 'шлем — копия эфира']
+                if d.get('most3'):
+                    chto.append('чистая игра из Моста 3')
+                if d.get('kamera'):
+                    chto.append('камера телефона')
+                out = '«Клип клип клип» сохраняет: %s.' % ', '.join(chto) + (
+                    ' Применено: %s.' % d['primeneno'] if d.get('primeneno') else '')
             if r:
                 out += ' Со следующего эфира.'
             elif d.get('ekonom'):

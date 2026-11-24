@@ -66,6 +66,7 @@ import kotlin.concurrent.thread
  *   GET /zvuk?imya=soobshchenie|otvet|novyy|vazhno|narushenie[&efir=1] -> короткий звук чата Splus (2.8.6; без efir — шлем)
  *   GET /schet, /schet/upr?zr_tw=N&pod_kick=N&nik=…&zr=0|1&pod=0|1&niki=0|1 -> счётчики и ник внизу (2.8.2, Schet)
  *   GET /klip/upr[?rezhim=otdelno|efir|vykl] -> клип шлема: свой кодировщик без окна камеры (уступает игре) | сам эфир | нет
+ *                            2.8.13: &kachestvo=1|0 (1080p60 20 Мбит/с со всем оформлением) &most3=1|0 (чистая игра Моста 3) &kamera=1|0
  *   GET /klip[?sek=150]      -> «клип клип клип» (2.7.8): клипы камеры и эфира на одно время (2.8.12: 2,5 минуты, sek — до 300) в «Фильмы/Plus»: {"kamera":{…},"efir":{…}}
  *   GET /kamera/klip[?sek=60] -> клип камеры (2.5.9): последние sek (до 150) с видео телефона — MP4 в «Фильмы/Plus»
  *   GET /karta               -> звук карты захвата (2.6.0): {"vkl","idyot","karta","hz","db","gromkost","vhody":[…]}

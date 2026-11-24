@@ -21,7 +21,7 @@ import java.io.InputStream
  */
 class KlipZapis(
     private val dir: File,
-    private val derzhatMs: Long = 160_000,
+    private val derzhatMs: Long = 320_000,                 // 3.2.5: клип игры до 5 минут (мост 2 берёт его в «клип клип клип»)
     private val kuskomMs: Long = 10_000,
 ) {
     class Golova(val sps: ByteArray, val pps: ByteArray, val w: Int, val h: Int)

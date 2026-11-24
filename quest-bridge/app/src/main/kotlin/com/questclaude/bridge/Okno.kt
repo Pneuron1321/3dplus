@@ -102,6 +102,37 @@ object Okno {
         return intArrayOf(x, y, cw, ch)
     }
 
+    /**
+     * 2.8.13 (Александр 24.11: «окно камеры не вплотную к левому нижнему углу, а Плюс думает, что вплотную»): при
+     * вырезанном фоне края окна срезаются (Oformlenie.fonObrez, доли окна Л, В, П, Н) — срезанное прозрачно, и видимая
+     * картинка отходит от края кадра. Окно сдвигается за край на срезанное: у угла «ugol» — к своему углу (отступы
+     * vplotnuyu/sboku считаются от видимого края), у «svoe» — у тех краёв, которых окно касается. r — [x, y от низа, w, h].
+     */
+    fun sdvigObrezki(r: IntArray, w: Int, h: Int, v: Vid, z: FloatArray?): IntArray {
+        if (z == null || z.all { it <= 0f } || v.rezhim == "krupno") return r
+        val zl = (r[2] * z[0]).roundToInt(); val zp = (r[2] * z[2]).roundToInt()
+        val zv = (r[3] * z[1]).roundToInt(); val zn = (r[3] * z[3]).roundToInt()
+        var x = r[0]; var y = r[1]
+        if (v.rezhim == "svoe") {
+            val levo = r[0] <= 0; val pravo = r[0] + r[2] >= w - 1
+            val niz = r[1] <= 0; val verh = r[1] + r[3] >= h - 1
+            if (levo && !pravo) x -= zl else if (pravo && !levo) x += zp
+            if (niz && !verh) y -= zn else if (verh && !niz) y += zv
+        } else {
+            x += if (v.gde.startsWith("l")) -zl else zp
+            y += if (v.gde.endsWith("n")) -zn else zv
+        }
+        return intArrayOf(x, y, r[2], r[3])
+    }
+
+    /** Видимая часть окна (без срезанных краёв), [x, y от низа, w, h]. */
+    fun vidimoe(r: IntArray, z: FloatArray?): IntArray {
+        if (z == null || z.all { it <= 0f }) return r
+        val zl = (r[2] * z[0]).roundToInt(); val zp = (r[2] * z[2]).roundToInt()
+        val zv = (r[3] * z[1]).roundToInt(); val zn = (r[3] * z[3]).roundToInt()
+        return intArrayOf(r[0] + zl, r[1] + zn, maxOf(1, r[2] - zl - zp), maxOf(1, r[3] - zv - zn))
+    }
+
     /** Пропорции окна для картинки камеры kw×kh, повёрнутой на [povorot]. */
     fun proporcii(kw: Int, kh: Int, povorot: Int): Float =
         if (povorot == 90 || povorot == 270) kh.toFloat() / kw else kw.toFloat() / kh

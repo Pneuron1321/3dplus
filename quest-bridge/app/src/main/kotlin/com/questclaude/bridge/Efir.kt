@@ -80,6 +80,16 @@ class Efir(
 
     /** Клип шлема — сам эфир (режим «efir klip efir»: ноль лишней нагрузки, но с окном камеры). */
     @Volatile var klipVideo = false
+    @Volatile private var golovaKlipa: Pair<ByteArray, ByteArray>? = null
+
+    /** 2.8.13: клип шлема на ходу переключили на «сам эфир» — дать кругу заголовок эфира (круг начнётся заново) и
+     *  ключевой кадр, чтобы клип не ждал до 2 с. */
+    fun klipIzEfira(da: Boolean) {
+        klipVideo = da
+        if (!da) return
+        golovaKlipa?.let { (sps, pps) -> try { klip?.golova(sps, pps, o.w, o.h) } catch (e: Exception) { } }
+        klyuchevoyKlipa()
+    }
 
     /** Частота и поток, которые выбрал Александр (меняются на ходу: `efir 60`, `efir potok 10`). */
     @Volatile var celFps = o.fps
@@ -366,6 +376,7 @@ class Efir(
         val (sps, pps) = Flv.spsPps(annexB)
         if (sps != null && pps != null) {
             otpravka.videoConfig = Flv.video(Flv.avcConfig(sps, pps), key = true, config = true)
+            golovaKlipa = sps to pps
             if (klipVideo) try { klip?.golova(sps, pps, o.w, o.h) } catch (e: Exception) { }
         }
     }

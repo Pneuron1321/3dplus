@@ -47,6 +47,7 @@ object Hub {
     @Volatile var klyuchevoyEfira: (() -> Unit)? = null
     /** Режим клипа шлема (2.7.9): otdelno | efir | vykl; ставит служба глаз. */
     @Volatile var klipUpr: ((Map<String, String>) -> String)? = null
+    @Volatile var klipPrimenit: (() -> String)? = null      // 2.8.13: галочки клипов — применить на ходу
     /** Оповещение в эфире (2.7.8): новый фоловер, подписка, рейд — плашка сверху; ставит служба глаз. */
     @Volatile var opoveshchenie: Opoveshchenie? = null
     /** Строка доната в эфире (2.8.2): /donat. */

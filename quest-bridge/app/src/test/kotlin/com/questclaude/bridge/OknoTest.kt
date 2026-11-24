@@ -85,4 +85,33 @@ class OknoTest {
         assertEquals(listOf(1f, 0f), tochka(Okno.povorot(270), 1f, 1f)) // против часовой: верх — у левого края
         assertEquals(listOf(0.25f, 0.75f), tochka(Okno.povorot(0), 0.25f, 0.75f))
     }
+
+    // 2.8.13 (Александр 24.11): срезанные края окна (вырезанный фон) — видимая картинка встаёт вплотную к краю кадра
+    @Test fun srezannyeKrayaVplotnuyu() {
+        val z = floatArrayOf(0.1f, 0f, 0.2f, 0.15f)          // слева 10 %, справа 20 %, снизу 15 % окна
+        // угол слева внизу, вплотную, без отступа сбоку: окно 480×270 в (0, 0)
+        val v = Okno.Vid.iz(mapOf("v" to "ugol", "gde" to "ln", "kray" to "0", "bok" to "0"), Okno.Vid())
+        val r = Okno.mesto(1920, 1080, 16f / 9, v)
+        assertArrayEquals(intArrayOf(0, 0, 480, 270), r)
+        val s = Okno.sdvigObrezki(r, 1920, 1080, v, z)
+        assertArrayEquals(intArrayOf(-48, -41, 480, 270), s)                    // окно ушло за край на срезанное
+        assertArrayEquals(intArrayOf(0, 0, 336, 229), Okno.vidimoe(s, z))     // видимое — ровно в углу
+        // справа внизу с отступом сбоку 4 %: отступ — от видимого края
+        val vp = Okno.Vid()
+        val rp = Okno.mesto(1920, 1080, 16f / 9, vp)
+        val vi = Okno.vidimoe(Okno.sdvigObrezki(rp, 1920, 1080, vp, z), z)
+        assertEquals(1920 - 77, vi[0] + vi[2])
+        assertEquals(32, vi[1])
+        // своё окно у левого и нижнего края — так же; не у края — не двигается
+        val sv = Okno.Vid("svoe", ramka = floatArrayOf(0f, 60f, 30f, 100f))
+        val rs = Okno.mesto(1920, 1080, 16f / 9, sv)
+        val vs = Okno.vidimoe(Okno.sdvigObrezki(rs, 1920, 1080, sv, z), z)
+        assertEquals(0, vs[0]); assertEquals(0, vs[1])
+        val sv2 = Okno.Vid("svoe", ramka = floatArrayOf(10f, 30f, 40f, 70f))
+        val rs2 = Okno.mesto(1920, 1080, 16f / 9, sv2)
+        assertArrayEquals(rs2, Okno.sdvigObrezki(rs2, 1920, 1080, sv2, z))
+        // без среза — как было
+        assertArrayEquals(r, Okno.sdvigObrezki(r, 1920, 1080, v, null))
+        assertArrayEquals(r, Okno.vidimoe(r, floatArrayOf(0f, 0f, 0f, 0f)))
+    }
 }
