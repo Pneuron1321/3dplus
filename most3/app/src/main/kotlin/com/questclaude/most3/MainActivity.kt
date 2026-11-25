@@ -203,6 +203,9 @@ class MainActivity : Activity() {
         // 3.2.4 (Александр 23.11): сила всего, что настроено, и выдержка
         Polzunok("sila", "СИЛА ВСЕХ РУЧЕК (0 — как пришло, 1 — как настроено, 2 — вдвое)", 0f, 2f) { it.sila },
         Polzunok("vyderzhka", "Выдержка (ступени)", -2f, 2f) { it.vyderzhka },
+        // 3.2.8 (Александр 25.11: «насыщеннее и мультяшнее, весь свет ярче — не обелевшая»)
+        Polzunok("svet", "Свет цвета (ярче, не белеет)", 0f, 1f) { it.svet },
+        Polzunok("multyashno", "Мультяшность", 0f, 1f) { it.multyashno },
         Polzunok("yarkost", "Яркость", -0.5f, 0.5f) { it.yarkost },
         Polzunok("kontrast", "Контраст", 0.5f, 2f) { it.kontrast },
         Polzunok("nasyshch", "Насыщенность", 0f, 2.5f) { it.nasyshch },
@@ -228,7 +231,8 @@ class MainActivity : Activity() {
     private val KOROTKO = mapOf("sila" to "Сила", "vyderzhka" to "Выдержка", "yarkost" to "Яркость", "kontrast" to "Контраст",
         "nasyshch" to "Насыщ.", "gamma" to "Гамма", "teni" to "Тени", "rezkost" to "Резкость", "avtonoch" to "Авто-ночь",
         "temperatura" to "Темп.", "balr" to "Красный", "balg" to "Зелёный", "balb" to "Синий", "ton" to "Тон", "sveta" to "Света",
-        "chernyj" to "Чёрный", "belyj" to "Белый", "zhivost" to "Живость", "chistka" to "Чистка эфира")
+        "chernyj" to "Чёрный", "belyj" to "Белый", "zhivost" to "Живость", "chistka" to "Чистка эфира",
+        "svet" to "Свет цвета", "multyashno" to "Мульт")
     private var vybrana = "sila"                       // что крутим; "yachejki" — ряд ячеек вместо ползунка
     private val fishki = HashMap<String, Button>()
     private lateinit var ryadRuchki: LinearLayout
@@ -261,7 +265,7 @@ class MainActivity : Activity() {
                 addView(sr)
                 addView(fishka("↺ Цвет как было") {
                     var n = Most.nastrojki
-                    for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila"))
+                    for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila", "svet", "multyashno"))
                         n = n.izmenit(im, "def") ?: n
                     Most.postavit(n); obnovitPolzunki()
                 })

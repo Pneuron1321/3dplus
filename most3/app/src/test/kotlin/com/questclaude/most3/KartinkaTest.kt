@@ -411,4 +411,64 @@ class KartinkaTest {
         assertEquals(0f, Nastrojki.izStroki("yarkost=0").chistka, 0f)       // файл 3.2.6 — без чистки
         assertTrue("uChistka" in Shader.UNIFORMY)
     }
+
+    // --- 3.2.8: свет цвета и мультяшность (Александр 25.11: «насыщеннее и мультяшнее, весь свет ярче — не обелевшая») ---
+    private fun hsv(c: FloatArray): FloatArray {
+        val mx = maxOf(c[0], c[1], c[2]); val mn = minOf(c[0], c[1], c[2]); val d = mx - mn
+        val h = when { d < 1e-6f -> 0f; mx == c[0] -> ((c[1] - c[2]) / d).mod(6f); mx == c[1] -> (c[2] - c[0]) / d + 2f
+            else -> (c[0] - c[1]) / d + 4f }
+        return floatArrayOf(h, if (mx > 0f) d / mx else 0f, mx)
+    }
+
+    @Test fun svetTotZheTonINasyshchennost() {
+        val r = kotlin.random.Random(8)
+        repeat(500) {
+            val c = floatArrayOf(r.nextFloat(), r.nextFloat(), r.nextFloat())
+            val o = c.copyOf(); KartinkaCpu.svet(o, 0.6f)
+            val a = hsv(c); val b = hsv(o)
+            if (a[2] > 0.01f && a[1] > 0.01f) assertEquals(a[0], b[0], 1e-3f)   // оттенок тот же
+            if (a[2] > 0.01f) assertEquals(a[1], b[1], 1e-4f)                     // насыщенность та же — не белеет
+            assertTrue(b[2] >= a[2] - 1e-6f && b[2] <= 1f)                        // ярче, но не выше 1
+        }
+        val ch = floatArrayOf(0f, 0f, 0f); KartinkaCpu.svet(ch, 1f); assertEquals(0f, ch[0], 0f)
+        val bel = floatArrayOf(1f, 1f, 1f); KartinkaCpu.svet(bel, 1f); assertEquals(1f, bel[0], 1e-6f)
+        val nol = floatArrayOf(0.3f, 0.5f, 0.2f); KartinkaCpu.svet(nol, 0f); assertEquals(0.5f, nol[1], 0f)
+        // середина: 0,5 → 1 − 0,5^2,2 ≈ 0,782 при 0,6; монотонно по яркости
+        val sr = floatArrayOf(0.5f, 0.25f, 0.1f); KartinkaCpu.svet(sr, 0.6f)
+        assertEquals(1f - 0.5f.pow(2.2f), sr[0], 1e-5f)
+        var pred = 0f
+        for (k in 1..100) { val x = floatArrayOf(k / 100f, 0f, 0f); KartinkaCpu.svet(x, 0.8f); assertTrue(x[0] >= pred); pred = x[0] }
+        // в конвейере: свет цвета — после всего остального
+        val v = KartinkaCpu.obrabotat(0.4f, 0.2f, 0.1f, Nastrojki(svet = 0.5f), 0f)
+        val bez = KartinkaCpu.obrabotat(0.4f, 0.2f, 0.1f, ID, 0f)
+        assertTrue(v[0] > bez[0] + 0.1f)
+        assertEquals(hsv(bez)[1], hsv(v)[1], 1e-4f)
+    }
+
+    @Test fun multyashnoRovnoeGladkoNaKrayahObvodka() {
+        val w = 40; val h = 20
+        val r = kotlin.random.Random(5)
+        // левая часть — ровный цвет с мелкой рябью ±0,015, правая — ступенька 0,25 → 0,75 на x = 30
+        val ryab = FloatArray(w * h) { (r.nextFloat() * 2 - 1) * 0.015f }
+        val rgb = FloatArray(w * h * 3) { i -> val x = (i / 3) % w
+            if (x < 20) 0.5f + ryab[i / 3] else if (x < 30) 0.25f else 0.75f }
+        val bez = KartinkaCpu.obrabotatKadr(rgb, w, h, ID, 0f)
+        val m = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(multyashno = 1f), 0f)
+        fun razbros(k: FloatArray): Float {                                     // СКО ряби на ровном
+            val v = ArrayList<Float>(); for (y in 3 until h - 3) for (x in 3 until 17) v += k[(y * w + x) * 3]
+            val sr = v.average().toFloat(); return kotlin.math.sqrt(v.map { (it - sr) * (it - sr) }.average()).toFloat() }
+        assertTrue("рябь ${razbros(bez)} → ${razbros(m)}", razbros(m) < 0.5f * razbros(bez))
+        val y = 10
+        assertTrue(m[(y * w + 29) * 3] < bez[(y * w + 29) * 3] - 0.05f)     // у края — обводка темнее
+        assertTrue(m[(y * w + 30) * 3] < bez[(y * w + 30) * 3] - 0.1f)
+        assertEquals(bez[(y * w + 36) * 3], m[(y * w + 36) * 3], 1e-6f)      // ровное вдали от края — как было
+        assertEquals(bez[(y * w + 25) * 3], m[(y * w + 25) * 3], 1e-6f)
+        val n0 = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(multyashno = 0f, svet = 0f), 0f)
+        for (i in rgb.indices) assertEquals(bez[i], n0[i], 0f)
+        val v = Nastrojki(svet = 0.6f, multyashno = 0.5f)
+        assertEquals(v, Nastrojki.izStroki(v.vStroku()))
+        assertEquals(0f, Nastrojki.izStroki("yarkost=0").svet, 0f)            // файл 3.2.7 — без новых ручек
+        assertEquals(1f, ID.izmenit("multyashno", "3")!!.multyashno, 0f)       // не больше 1
+        assertTrue("uSvet" in Shader.UNIFORMY && "uMulty" in Shader.UNIFORMY)
+    }
 }

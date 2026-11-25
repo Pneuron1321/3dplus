@@ -208,6 +208,7 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         u("uVyderzhka", KartinkaCpu.mnozhitelVyderzhki(n)); u("uSila", n.sila)   // 3.2.4
         u("uSravnenie", if (sravnit && !syroe) 1f else 0f)                        // 3.2.6: до | после, только окно
         u("uChistka", if (syroe) 0f else chistka)                                // 3.2.7: чистка — эфир и клип
+        u("uSvet", n.svet); u("uMulty", n.multyashno)                          // 3.2.8: окно, эфир и клип
         u("uPolnyj", if (n.polnyjDiapazon) 1f else 0f); u("uSyroe", if (syroe) 1f else 0f)
         u("uLokalno", if (kartaEst && !syroe) n.lokalno else 0f)
         u("uSuper", if (syroe || oknoW <= 0 || oknoH <= 0) 1f else maxOf(tekW / oknoW.toFloat(), tekH / oknoH.toFloat()))
