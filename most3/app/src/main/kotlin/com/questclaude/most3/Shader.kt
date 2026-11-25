@@ -55,7 +55,7 @@ object Shader {
         uniform float uGamma;     // 0.5..2.5, pow(x, 1/g)
         uniform float uTeni;      // 0..1, подъём теней
         uniform float uAvtoTeni;  // 0..1, авто-ночь (считает CPU), складывается с uTeni
-        uniform float uRezkost;   // 0..4 (3.2.9), нерезкая маска по яркости
+        uniform float uRezkost;   // 0..8 (3.3.0), нерезкая маска по яркости
         uniform float uPolnyj;    // 1 = YUV полный диапазон, 0 = ограниченный 16-235/16-240 (10 бит: 64-940/64-960)
         uniform float uSyroe;     // 1 = без обработки (замер средней яркости и карта): одна выборка, без местной ночи
         uniform float uLokalno;   // 0..1, местная авто-ночь по карте uKarta; 0 = ровно без изменений

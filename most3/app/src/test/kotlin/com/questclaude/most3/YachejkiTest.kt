@@ -14,7 +14,7 @@ class YachejkiTest {
         val y = Yachejki(d)
         assertEquals(0, y.aktivnaya)
         assertNull(y.zagruzit(1))                                   // пустая
-        assertFalse(y.sohranit(6, Nastrojki()))                     // нет такой
+        assertFalse(y.sohranit(7, Nastrojki()))                     // нет такой (3.3.0: ячеек 6)
         val a = Nastrojki(kontrast = 1.3f, temperatura = -20f, vyderzhka = 0.5f, sila = 1.4f)
         assertTrue(y.sohranit(2, a))
         assertEquals(2, y.aktivnaya)
@@ -30,11 +30,30 @@ class YachejkiTest {
         assertEquals(0, y.vernut())                                 // второй раз — нечего
         // сохранил в пустую и вернул — снова пустая
         assertTrue(y.sohranit(4, b)); assertEquals(4, y.vernut()); assertFalse(y.est(4))
-        assertEquals("{\"aktivnaya\":4,\"izmeneno\":false,\"est\":[0,1,0,0,0],\"mozhno_vernut\":false}", y.json(Nastrojki()))
+        assertEquals("{\"aktivnaya\":4,\"izmeneno\":false,\"est\":[0,1,0,0,0,1],\"mozhno_vernut\":false}", y.json(Nastrojki()))
         // после перезапуска: активная и содержимое на месте
         val y2 = Yachejki(d)
         assertEquals(4, y2.aktivnaya)
         assertEquals(a, y2.zagruzit(2)); assertEquals(2, y2.aktivnaya)
+        d.deleteRecursively()
+    }
+
+    @Test fun zavodskayaShestaya() {
+        // 3.3.0: ячейка 6 сразу есть (синтез его 2/4/5), активную не трогает; своё в 6 не перезаписывается
+        val d = Files.createTempDirectory("yach6").toFile()
+        val y = Yachejki(d)
+        assertTrue(y.est(6)); assertEquals(0, y.aktivnaya)
+        val v = y.zagruzit(6)!!
+        assertEquals(1.75f, v.nasyshch, 1e-4f); assertEquals(0.6f, v.svet, 1e-4f); assertEquals(4f, v.rezkost, 0f)
+        val svoe = Nastrojki(gamma = 1.3f)
+        assertTrue(y.sohranit(6, svoe))
+        assertEquals(svoe, Yachejki(d).vzyat(6))                    // после перезапуска — его, не заводская
+        // заводская: белое не выжигается (от 240/255), чёрное — только настоящий
+        val z = Yachejki.ZAVOD[6]!!
+        var bel = 1f
+        for (k in 1000 downTo 0) { val x = k / 1000f; if (KartinkaCpu.obrabotat(x, x, x, z, 0f)[0] >= 1f - 0.5f / 255f) bel = x }
+        assertTrue("белое от $bel", bel >= 0.93f)
+        assertTrue(KartinkaCpu.obrabotat(0.02f, 0.02f, 0.02f, z, 0f)[0] > 0.02f)
         d.deleteRecursively()
     }
 }

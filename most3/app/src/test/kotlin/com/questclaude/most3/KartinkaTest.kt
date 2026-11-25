@@ -208,7 +208,7 @@ class KartinkaTest {
 
     @Test fun ogranichit() {
         val n = Nastrojki(-3f, 9f, -1f, 0f, 5f, 7f, -2f).ogranichit()
-        assertEquals(Nastrojki(-0.5f, 2f, 0f, 0.5f, 1f, 4f, 0f), n)            // 3.2.9: резкость до 4
+        assertEquals(Nastrojki(-0.5f, 2f, 0f, 0.5f, 1f, 7f, 0f), n)            // 3.3.0: резкость до 8 (7 — в пределе)
         assertEquals(1f, Nastrojki(kontrast = Float.NaN).ogranichit().kontrast, 0f)
     }
 
@@ -490,7 +490,8 @@ class KartinkaTest {
 
     @Test fun rezkostDoChetyreh() {
         // 3.2.9 (Александр 25.11: «резкости ещё больше, максимум вдвое»): до 4, предел края растёт выше 2
-        assertEquals(4f, ID.izmenit("rezkost", "9")!!.rezkost, 0f)
+        assertEquals(8f, ID.izmenit("rezkost", "9")!!.rezkost, 0f)            // 3.3.0: до 8
+        assertEquals(4f * KartinkaCpu.PREDEL_REZKOSTI, KartinkaCpu.predelRezkosti(8f), 1e-6f)
         assertEquals(KartinkaCpu.PREDEL_REZKOSTI, KartinkaCpu.predelRezkosti(2f), 0f)
         assertEquals(2f * KartinkaCpu.PREDEL_REZKOSTI, KartinkaCpu.predelRezkosti(4f), 1e-6f)
         val w = 16; val h = 4

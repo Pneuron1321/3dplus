@@ -14,7 +14,7 @@ import java.net.URLDecoder
  *                                       3.2.2 — temperatura balr balg balb ton sveta chernyj belyj zhivost (=-N — задать минус);
  *                                       3.2.4 — vyderzhka (−2..2 ступени), sila (0..2: сила всех ручек), chernyj −0.2..0.3
  *   GET /kartinka?nabor=noch          — набор: obychno monitor noch yarko rezko
- *   GET /yachejka?zagruzit=N|sohranit=N|vernut — 3.2.6: ячейки ручек 1–5 (без параметров — какие заняты, какая активна)
+ *   GET /yachejka?zagruzit=N|sohranit=N|vernut — 3.2.6: ячейки ручек 1–6 (3.3.0) (без параметров — какие заняты, какая активна)
  *   GET /efir?rezhim=fokus|vsegda|shlem — 3.2.3: игра в эфир, пока окно активно / всегда / никогда (вид шлема)
  *   GET /zvuk?vkl=0|1&g=80            — звук карты в шлем, громкость в %
  *   GET /karta/ruchki?yarkost=N&…     — ручки внутри карты (UVC): yarkost kontrast ton nasyshchennost

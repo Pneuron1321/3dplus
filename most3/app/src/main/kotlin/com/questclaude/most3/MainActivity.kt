@@ -211,7 +211,7 @@ class MainActivity : Activity() {
         Polzunok("nasyshch", "Насыщенность", 0f, 2.5f) { it.nasyshch },
         Polzunok("gamma", "Гамма", 0.5f, 2.5f) { it.gamma },
         Polzunok("teni", "Тени", 0f, 1f) { it.teni },
-        Polzunok("rezkost", "Резкость", 0f, 4f) { it.rezkost },
+        Polzunok("rezkost", "Резкость", 0f, 8f) { it.rezkost },
         Polzunok("avtonoch", "Авто-ночь", 0f, 1f) { it.avtoNoch },
         // 3.2.2: цвет и уровни (просьба Александра 21.11)
         Polzunok("temperatura", "Температура (холодно — тепло)", -100f, 100f) { it.temperatura },
@@ -227,7 +227,7 @@ class MainActivity : Activity() {
         Polzunok("chistka", "Чистка для эфира", 0f, 1f) { it.chistka })
     // 3.2.6 (Александр 25.11: «ручки не должны занимать пол-окна, ещё и с затемнением»): две тонкие строки внизу, кадр
     // не затемнён. Сверху — что крутим (короткие названия, листается вбок; там же «Ячейки», «◧ До|После», «↺ Цвет»),
-    // снизу — один ползунок выбранной ручки с «−» и «+» (шаг 1 % хода) или ряд ячеек 1–5.
+    // снизу — один ползунок выбранной ручки с «−» и «+» (шаг 1 % хода) или ряд ячеек 1–6.
     private val KOROTKO = mapOf("sila" to "Сила", "vyderzhka" to "Выдержка", "yarkost" to "Яркость", "kontrast" to "Контраст",
         "nasyshch" to "Насыщ.", "gamma" to "Гамма", "teni" to "Тени", "rezkost" to "Резкость", "avtonoch" to "Авто-ночь",
         "temperatura" to "Темп.", "balr" to "Красный", "balg" to "Зелёный", "balb" to "Синий", "ton" to "Тон", "sveta" to "Света",

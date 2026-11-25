@@ -16,7 +16,7 @@ data class Nastrojki(
     val nasyshch: Float = 1f,    // 0..2.5 (3.2.2: было до 2)
     val gamma: Float = 1f,       // 0.5..2.5
     val teni: Float = 0f,        // 0..1
-    val rezkost: Float = 0f,     // 0..4 (3.2.9: было до 2; Александр 25.11: «резкости хочется ещё больше, максимум вдвое»)
+    val rezkost: Float = 0f,     // 0..8 (3.2.9 — до 4, 3.3.0 — до 8; Александр 25.11: «резкости хочется ещё больше»)
     val avtoNoch: Float = 0f,    // сила авто-ночи 0..1
     val polnyjDiapazon: Boolean = false,
     val lokalno: Float = 0f,     // местная авто-ночь 0..1 (uLokalno)
@@ -43,7 +43,7 @@ data class Nastrojki(
 ) {
     fun ogranichit(): Nastrojki = Nastrojki(
         ogr(yarkost, -0.5f, 0.5f, 0f), ogr(kontrast, 0.5f, 2f, 1f), ogr(nasyshch, 0f, 2.5f, 1f),
-        ogr(gamma, 0.5f, 2.5f, 1f), ogr(teni, 0f, 1f, 0f), ogr(rezkost, 0f, 4f, 0f), ogr(avtoNoch, 0f, 1f, 0f),
+        ogr(gamma, 0.5f, 2.5f, 1f), ogr(teni, 0f, 1f, 0f), ogr(rezkost, 0f, 8f, 0f), ogr(avtoNoch, 0f, 1f, 0f),
         polnyjDiapazon, ogr(lokalno, 0f, 1f, 0f), ogr(hdrPik, 100f, 10000f, 1000f),
         ogr(temperatura, -100f, 100f, 0f), ogr(balR, 0.5f, 1.5f, 1f), ogr(balG, 0.5f, 1.5f, 1f), ogr(balB, 0.5f, 1.5f, 1f),
         ogr(ton, -30f, 30f, 0f), ogr(sveta, -1f, 1f, 0f), ogr(chernyj, -0.2f, 0.3f, 0f), ogr(belyj, 0.7f, 1f, 1f),
@@ -196,7 +196,7 @@ object KartinkaCpu {
     const val MU_PERIOD = 30f
     const val MU_TYAGA = 0.6f
     // выдержка в гамма-кодированном: ×2^(ступени/2.2) = ×2^ступени в линейном свете
-    const val PREDEL_REZKOSTI = 0.1f   // предел подъёма края; 3.2.9: × max(1, резкость/2) — до 2 как было, при 4 — 0,2
+    const val PREDEL_REZKOSTI = 0.1f   // предел подъёма края; 3.2.9: × max(1, резкость/2) — до 2 как было, при 4 — 0,2, при 8 — 0,4
     const val SUPER_POROG = 1.2f
     const val BELYJ_NIT = 203f          // белый SDR в нитах (BT.2408), uBelyj
     const val KARTA_W = 32

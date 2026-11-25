@@ -15,6 +15,8 @@ class Yachejki(private val dir: File) {
 
     init {
         aktivnaya = try { File(dir, AKTIVNAYA).readText().trim().toInt().takeIf { it in 1..SKOLKO } ?: 0 } catch (e: Exception) { 0 }
+        // 3.3.0: заводские ячейки — только если пустые (своё никогда не перезаписываем); активную не трогаем
+        for ((n, v) in ZAVOD) if (!fajl(n).isFile) try { dir.mkdirs(); fajl(n).writeText(v.ogranichit().vStroku()) } catch (e: Exception) { }
     }
 
     private fun fajl(n: Int) = File(dir, "yachejka-$n")
@@ -63,7 +65,16 @@ class Yachejki(private val dir: File) {
     }
 
     companion object {
-        const val SKOLKO = 5
+        const val SKOLKO = 6                          // 3.3.0: было 5 (Александр 25.11: «в ячейку 6 — свою»)
         const val AKTIVNAYA = "yachejka-aktivnaya"
+
+        /**
+         * 3.3.0, ячейка 6 — синтез его ячеек 2, 4, 5 (25.11, «2 нравится больше всех — за основу»): вид ячейки 2 (яркая
+         * середина, сочный цвет, резкость 4), но без выжигания и без провала: по KartinkaCpu у ячейки 2 белое уже от 161/255
+         * (сила 1,876 тянет всё за край), у 6 — от 240/255, чёрное — только настоящий чёрный; серое 0,2 → 99 (у 2 — 93),
+         * 0,5 → 200 (219). Яркость — «светом цвета», цвет — насыщенностью, живостью и мультяшностью, сила 1.
+         */
+        val ZAVOD: Map<Int, Nastrojki> = mapOf(6 to Nastrojki(nasyshch = 1.75f, rezkost = 4f, avtoNoch = 0.25f, zhivost = 0.5f,
+            svet = 0.6f, multyashno = 0.3f))
     }
 }
