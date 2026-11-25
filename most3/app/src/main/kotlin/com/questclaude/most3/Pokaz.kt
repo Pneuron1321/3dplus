@@ -120,7 +120,9 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         val vw = (kw * m).toInt(); val vh = (kh * m).toInt()
         glViewport((ekranW - vw) / 2, (ekranH - vh) / 2, vw, vh)
         polka.oknoW = vw; polka.oknoH = vh
-        risovat(prog, n, polka.avtoTeni, syroe = false, oknoW = vw, oknoH = vh, sravnit = Most.sravnenie)
+        // окно: чистка только в «До|После» (справа — ровно то, что уйдёт в эфир), иначе окно как было
+        risovat(prog, n, polka.avtoTeni, syroe = false, oknoW = vw, oknoH = vh, sravnit = Most.sravnenie,
+            chistka = if (Most.sravnenie) n.chistka else 0f)
         if (novyj) { zapisat(prog, n); vEfir(prog, n) }
 
         kadrovPokaz++
@@ -194,7 +196,8 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
     }
 
     /** oknoW×oknoH — куда рисуем (точки): для uSuper; замер в крошку — 32×18 и uSuper = 1. */
-    private fun risovat(prog: Int, n: Nastrojki, avto: Float, syroe: Boolean, oknoW: Int, oknoH: Int, sravnit: Boolean = false) {
+    private fun risovat(prog: Int, n: Nastrojki, avto: Float, syroe: Boolean, oknoW: Int, oknoH: Int, sravnit: Boolean = false,
+                        chistka: Float = n.chistka) {
         glUseProgram(prog)
         fun u(imya: String, v: Float) = glUniform1f(glGetUniformLocation(prog, imya), v)
         u("uYarkost", n.yarkost); u("uKontrast", n.kontrast); u("uNasyshch", n.nasyshch); u("uGamma", n.gamma)
@@ -204,6 +207,7 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         u("uUrChernyj", n.chernyj); u("uUrBelyj", n.belyj); u("uZhivost", n.zhivost)
         u("uVyderzhka", KartinkaCpu.mnozhitelVyderzhki(n)); u("uSila", n.sila)   // 3.2.4
         u("uSravnenie", if (sravnit && !syroe) 1f else 0f)                        // 3.2.6: до | после, только окно
+        u("uChistka", if (syroe) 0f else chistka)                                // 3.2.7: чистка — эфир и клип
         u("uPolnyj", if (n.polnyjDiapazon) 1f else 0f); u("uSyroe", if (syroe) 1f else 0f)
         u("uLokalno", if (kartaEst && !syroe) n.lokalno else 0f)
         u("uSuper", if (syroe || oknoW <= 0 || oknoH <= 0) 1f else maxOf(tekW / oknoW.toFloat(), tekH / oknoH.toFloat()))

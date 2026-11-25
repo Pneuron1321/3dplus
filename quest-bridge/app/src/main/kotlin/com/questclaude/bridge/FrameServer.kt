@@ -397,6 +397,11 @@ class FrameServer(
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.plusUpr(query).toByteArray(Charsets.UTF_8))
             "/efir/mesto" ->                       // 2.8.12: любой слой визора в любое место кадра; без chto — где что
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.mestoUpr(query).toByteArray(Charsets.UTF_8))
+            "/efir/ocenka" -> {                    // 2.8.15 «свой глаз»: SSIM/PSNR эфира против кадра развилки, ?sek=10
+                val f = Hub.ocenkaEfira
+                if (f == null) reply(out, 503, "application/json", "{\"oshibka\":\"эфир не идёт\"}".toByteArray())
+                else reply(out, 200, "application/json; charset=utf-8", f(query["sek"]?.toIntOrNull() ?: 10).toByteArray(Charsets.UTF_8))
+            }
             "/efir/zerkalo" ->                     // 2.8.12: камера зеркально
                 reply(out, 200, "application/json; charset=utf-8", Oformlenie.zerkaloUpr(query["v"]).toByteArray(Charsets.UTF_8))
             "/efir/fon" ->                         // 2.8.7: вырезать зелёный/синий фон камеры

@@ -188,6 +188,17 @@ class Razvilka(private val w: Int, private val h: Int) {
         outs += Out(surface, egl, 1_000_000_000L / fps.coerceIn(1, 120), stamp, ow, oh, sloi, bezKamery)
     }
 
+    /**
+     * 2.8.15 «свой глаз» (OcenkaEfira): у выхода [surface] не чаще раза в [kazhdyeNs] центральный кусок w×h кадра
+     * читается прямо перед отправкой кодировщику; [vzyat] получает время кадра (то же, что у кодировщика) и RGBA
+     * (строки снизу вверх, как отдаёт glReadPixels). Нет замера — null, ничего не читается.
+     */
+    class Etalon(val surface: Surface, val kazhdyeNs: Long, val w: Int, val h: Int, val vzyat: (Long, ByteArray) -> Unit) {
+        var posl = 0L
+        val buf: java.nio.ByteBuffer = java.nio.ByteBuffer.allocateDirect(w * h * 4)
+    }
+    @Volatile var etalon: Etalon? = null
+
     /** Поверхность для декодера камеры (одна; повторный вызов — та же). */
     fun kamera(): Surface = sync {
         ksurf ?: run {
@@ -510,6 +521,13 @@ class Razvilka(private val w: Int, private val h: Int) {
                 sloi["sc"]?.let { plashkaNa(o, "sc", it) }                 // сцена визора — и поверх итогов
                 sloi["sp"]?.let { plashkaNa(o, "sp", it) }                 // 2.8.5: живой Плюс — поверх сцены и итогов
             }
+            etalon?.let { e -> if (o.surface === e.surface && ts - e.posl >= e.kazhdyeNs) {
+                e.posl = ts
+                e.buf.clear()
+                GLES20.glReadPixels((o.w - e.w) / 2, (o.h - e.h) / 2, e.w, e.h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, e.buf)
+                val b = ByteArray(e.w * e.h * 4); e.buf.rewind(); e.buf.get(b)
+                try { e.vzyat(ts, b) } catch (x: Exception) { }
+            } }
             if (o.stamp) EGLExt.eglPresentationTimeANDROID(display, o.egl, ts)
             EGL14.eglSwapBuffers(display, o.egl)
         }

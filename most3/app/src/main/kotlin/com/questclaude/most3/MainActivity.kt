@@ -219,14 +219,16 @@ class MainActivity : Activity() {
         Polzunok("sveta", "Света", -1f, 1f) { it.sveta },
         Polzunok("chernyj", "Точка чёрного (минус — приподнять)", -0.2f, 0.3f) { it.chernyj },
         Polzunok("belyj", "Уровень белого", 0.7f, 1f) { it.belyj },
-        Polzunok("zhivost", "Живость", -1f, 1f) { it.zhivost })
+        Polzunok("zhivost", "Живость", -1f, 1f) { it.zhivost },
+        // 3.2.7 (план К2): чистка кадра для эфира и клипа; в окне видно в «До|После» справа
+        Polzunok("chistka", "Чистка для эфира", 0f, 1f) { it.chistka })
     // 3.2.6 (Александр 25.11: «ручки не должны занимать пол-окна, ещё и с затемнением»): две тонкие строки внизу, кадр
     // не затемнён. Сверху — что крутим (короткие названия, листается вбок; там же «Ячейки», «◧ До|После», «↺ Цвет»),
     // снизу — один ползунок выбранной ручки с «−» и «+» (шаг 1 % хода) или ряд ячеек 1–5.
     private val KOROTKO = mapOf("sila" to "Сила", "vyderzhka" to "Выдержка", "yarkost" to "Яркость", "kontrast" to "Контраст",
         "nasyshch" to "Насыщ.", "gamma" to "Гамма", "teni" to "Тени", "rezkost" to "Резкость", "avtonoch" to "Авто-ночь",
         "temperatura" to "Темп.", "balr" to "Красный", "balg" to "Зелёный", "balb" to "Синий", "ton" to "Тон", "sveta" to "Света",
-        "chernyj" to "Чёрный", "belyj" to "Белый", "zhivost" to "Живость")
+        "chernyj" to "Чёрный", "belyj" to "Белый", "zhivost" to "Живость", "chistka" to "Чистка эфира")
     private var vybrana = "sila"                       // что крутим; "yachejki" — ряд ячеек вместо ползунка
     private val fishki = HashMap<String, Button>()
     private lateinit var ryadRuchki: LinearLayout

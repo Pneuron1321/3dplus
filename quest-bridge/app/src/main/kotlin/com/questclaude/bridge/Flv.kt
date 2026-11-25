@@ -105,11 +105,12 @@ object Flv {
     private val START = byteArrayOf(0, 0, 0, 1)
 
     /** Видео для RTMP (тип 9): config — заголовок, иначе кадр (key — ключевой). */
-    fun video(data: ByteArray, key: Boolean, config: Boolean = false): ByteArray {
+    fun video(data: ByteArray, key: Boolean, config: Boolean = false, ctsMs: Int = 0): ByteArray {
         val out = ByteArray(5 + data.size)
         out[0] = (if (key || config) 0x17 else 0x27).toByte()   // ключевой/обычный, кодек 7 — AVC
         out[1] = (if (config) 0 else 1).toByte()
-        // composition time 0: кодировщик без B-кадров
+        // composition time (SI24, мс): 0 без B-кадров; с B-кадрами — pts − dts (2.8.15, Poryadok)
+        out[2] = (ctsMs shr 16).toByte(); out[3] = (ctsMs shr 8).toByte(); out[4] = ctsMs.toByte()
         System.arraycopy(data, 0, out, 5, data.size)
         return out
     }

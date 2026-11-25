@@ -33,6 +33,7 @@ class Otpravka(
     private class Pkt(val video: Boolean, val payload: ByteArray, val ptsUs: Long, val key: Boolean)
 
     companion object {
+        private const val NET_BAZY = Long.MIN_VALUE
         /** Куда можно слать ключ эфира: только площадки эфира (Twitch, Kick, YouTube) и сам шлем — для проверки.
          *  Ключ каждой площадки — только на её адреса: Ploshchadki.razreshyon. */
         fun adresRazreshyon(url: String): Boolean = Ploshchadki.VSE.any { Ploshchadki.razreshyon(it, url) }
@@ -108,7 +109,7 @@ class Otpravka(
 
     private fun loop() {
         var needKey = true
-        var base = -1L
+        var base = NET_BAZY                         // 2.8.15: признак «не задано» — не «< 0» (dts бывает и отрицательным)
         var vSent = false
         var aSent = false
         while (running) {
@@ -130,7 +131,7 @@ class Otpravka(
                     continue
                 }
                 if (!running) { k.zakonchit(); return }         // подключились, когда эфир уже кончили
-                needKey = true; base = -1L; vSent = false; aSent = false
+                needKey = true; base = NET_BAZY; vSent = false; aSent = false
                 q.clear()                                       // старое — не в новый эфир
                 kanal = k
                 podklyucheniy++
@@ -155,12 +156,12 @@ class Otpravka(
                     if (needKey) {
                         if (!p.key) { drops++; continue }
                         needKey = false
-                        if (base < 0) base = p.ptsUs
+                        if (base == NET_BAZY) base = p.ptsUs
                     }
                     val ms = (p.ptsUs - base) / 1000
                     if (ms >= 0) k.video(p.payload, ms)
                 } else {
-                    if (base < 0 || needKey) continue           // звук — после первого ключевого кадра
+                    if (base == NET_BAZY || needKey) continue           // звук — после первого ключевого кадра
                     val ms = (p.ptsUs - base) / 1000
                     if (ms < 0) continue
                     if (!aSent) {

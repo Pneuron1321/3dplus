@@ -35,6 +35,8 @@ data class Nastrojki(
     // 3.2.4 (Александр 23.11): выдержка и общая сила ручек.
     val vyderzhka: Float = 0f,   // выдержка −2..+2 ступени: свет ×2 на ступень (линейный свет, гамма 2.2), как у камеры
     val sila: Float = 1f,        // сила всех ручек 0..2: 0 — кадр как пришёл, 1 — как настроено, 2 — всё вдвое сильнее
+    // 3.2.7 (план 25.11 К2): чистка кадра для эфира 0..1 — шум на ровном гасится, края чуть резче (только эфир и клип)
+    val chistka: Float = 0f,
 ) {
     fun ogranichit(): Nastrojki = Nastrojki(
         ogr(yarkost, -0.5f, 0.5f, 0f), ogr(kontrast, 0.5f, 2f, 1f), ogr(nasyshch, 0f, 2.5f, 1f),
@@ -42,7 +44,7 @@ data class Nastrojki(
         polnyjDiapazon, ogr(lokalno, 0f, 1f, 0f), ogr(hdrPik, 100f, 10000f, 1000f),
         ogr(temperatura, -100f, 100f, 0f), ogr(balR, 0.5f, 1.5f, 1f), ogr(balG, 0.5f, 1.5f, 1f), ogr(balB, 0.5f, 1.5f, 1f),
         ogr(ton, -30f, 30f, 0f), ogr(sveta, -1f, 1f, 0f), ogr(chernyj, -0.2f, 0.3f, 0f), ogr(belyj, 0.7f, 1f, 1f),
-        ogr(zhivost, -1f, 1f, 0f), ogr(vyderzhka, -2f, 2f, 0f), ogr(sila, 0f, 2f, 1f),
+        ogr(zhivost, -1f, 1f, 0f), ogr(vyderzhka, -2f, 2f, 0f), ogr(sila, 0f, 2f, 1f), ogr(chistka, 0f, 1f, 0f),
     )
 
     fun poluchit(imya: String): Float? = when (imya) {
@@ -51,7 +53,7 @@ data class Nastrojki(
         "polnyj" -> if (polnyjDiapazon) 1f else 0f
         "lokalno" -> lokalno; "hdrpik" -> hdrPik
         "temperatura" -> temperatura; "balr" -> balR; "balg" -> balG; "balb" -> balB; "ton" -> ton; "sveta" -> sveta
-        "chernyj" -> chernyj; "belyj" -> belyj; "zhivost" -> zhivost; "vyderzhka" -> vyderzhka; "sila" -> sila
+        "chernyj" -> chernyj; "belyj" -> belyj; "zhivost" -> zhivost; "vyderzhka" -> vyderzhka; "sila" -> sila; "chistka" -> chistka
         else -> null
     }
 
@@ -61,7 +63,7 @@ data class Nastrojki(
         "avtonoch" -> copy(avtoNoch = v); "lokalno" -> copy(lokalno = v); "hdrpik" -> copy(hdrPik = v)
         "temperatura" -> copy(temperatura = v); "balr" -> copy(balR = v); "balg" -> copy(balG = v); "balb" -> copy(balB = v)
         "ton" -> copy(ton = v); "sveta" -> copy(sveta = v); "chernyj" -> copy(chernyj = v); "belyj" -> copy(belyj = v)
-        "zhivost" -> copy(zhivost = v); "vyderzhka" -> copy(vyderzhka = v); "sila" -> copy(sila = v)
+        "zhivost" -> copy(zhivost = v); "vyderzhka" -> copy(vyderzhka = v); "sila" -> copy(sila = v); "chistka" -> copy(chistka = v)
         else -> copy(polnyjDiapazon = v >= 0.5f)
     }
 
@@ -90,7 +92,7 @@ data class Nastrojki(
 
     companion object {
         val IMENA = listOf("yarkost", "kontrast", "nasyshch", "gamma", "teni", "rezkost", "avtonoch", "polnyj", "lokalno", "hdrpik",
-            "temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila")
+            "temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila", "chistka")
         private val CHISLO = Regex("""\d{1,6}(\.\d*)?|\.\d+""")
         private fun chislo(s: String): Float? = if (CHISLO.matches(s)) s.toFloatOrNull() else null
         private fun ogr(v: Float, a: Float, b: Float, def: Float) = if (v.isNaN()) def else min(b, max(a, v))
@@ -171,7 +173,15 @@ object KartinkaCpu {
     const val K_SVETOV = 0.8f        // света: x + s·0.8·(1−x)·x⁴ — монотонна при |s| ≤ 1
     const val K_TEMPERATURY = 0.12f  // температура ±100 → красный и синий ×(1 ± 0.12)
     const val MIN_UROVNYA = 0.05f    // белый − чёрный не меньше
-    const val GAMMA_VYDERZHKI = 2.2f // выдержка в гамма-кодированном: ×2^(ступени/2.2) = ×2^ступени в линейном свете
+    const val GAMMA_VYDERZHKI = 2.2f
+    // 3.2.7 чистка для эфира (как в Shader.GLAVNAYA): местный контраст k = max − min яркости точки и 4 соседей;
+    // ровно (k < 0,02…0,08) — к среднему соседей (шум прочь), край (k > 0,06…0,2) — от среднего (резче); ±0,08
+    const val CH_SHUM_A = 0.02f
+    const val CH_SHUM_B = 0.08f
+    const val CH_KRAJ_A = 0.06f
+    const val CH_KRAJ_B = 0.2f
+    const val CH_REZKOST = 0.5f
+    const val CH_PREDEL = 0.08f // выдержка в гамма-кодированном: ×2^(ступени/2.2) = ×2^ступени в линейном свете
     const val PREDEL_REZKOSTI = 0.1f
     const val SUPER_POROG = 1.2f
     const val BELYJ_NIT = 203f          // белый SDR в нитах (BT.2408), uBelyj
@@ -269,6 +279,17 @@ object KartinkaCpu {
         return c
     }
 
+    /** Чистка: сдвиг яркости точки l по соседям (4 крестом), сила ch 0..1. */
+    fun chistkaSdvig(l: Float, n: FloatArray, ch: Float): Float {
+        if (ch <= 0f) return 0f
+        val mn = min(l, n.min()); val mx = max(l, n.max())
+        val k = mx - mn
+        val sr = 0.25f * (n[0] + n[1] + n[2] + n[3])
+        val shum = 1f - smoothstep(CH_SHUM_A, CH_SHUM_B, k)
+        val kraj = smoothstep(CH_KRAJ_A, CH_KRAJ_B, k)
+        return min(CH_PREDEL, max(-CH_PREDEL, ch * (shum * (sr - l) + kraj * CH_REZKOST * (l - sr))))
+    }
+
     // Весь кадр с резкостью и местной ночью (как шейдер при uSuper ≤ 1.2): rgb — w*h*3, 0..1; края — повтор
     // крайнего пикселя. karta — яркости 32×18 (строки сверху вниз); null — построить из кадра, как ведущий.
     fun obrabotatKadr(rgb: FloatArray, w: Int, h: Int, n: Nastrojki, avtoTeni: Float, karta: FloatArray? = null): FloatArray {
@@ -287,6 +308,8 @@ object KartinkaCpu {
                 val sr = 0.25f * (ya(x + 1, y) + ya(x - 1, y) + ya(x, y + 1) + ya(x, y - 1))
                 d = min(PREDEL_REZKOSTI, max(-PREDEL_REZKOSTI, n.rezkost * (yarkost(r, g, b) - sr)))
             }
+            if (n.chistka > 0f)
+                d += chistkaSdvig(yarkost(r, g, b), floatArrayOf(ya(x + 1, y), ya(x - 1, y), ya(x, y + 1), ya(x, y - 1)), n.chistka)
             if (k != null) {
                 val lc = lokalno(r, g, b, k, KARTA_W, KARTA_H, (x + 0.5f) / w, (y + 0.5f) / h, n.lokalno)
                 r = lc[0]; g = lc[1]; b = lc[2]

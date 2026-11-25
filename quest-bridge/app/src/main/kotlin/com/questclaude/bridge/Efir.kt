@@ -38,7 +38,7 @@ class Efir(
     private val klip: KlipZapis? = null,
 ) {
     class Opts(val url: String, val w: Int, val h: Int, val fps: Int, val kbps: Int, val akbps: Int = 160,
-               val mic: Float = MIC) {
+               val mic: Float = MIC, val bkadry: Boolean = false) {
         companion object {
             const val TWITCH = Ploshchadki.TWITCH
             /** Голос в эфире по умолчанию — втрое громче записи ушей. */
@@ -60,13 +60,14 @@ class Efir(
 
             /** Из запроса /efir/start: size=720|1080, fps (30|50|60), kbps, url (только Twitch или свой шлем);
              *  чего нет в запросе — из запомненного (fps0, kbps0). */
-            fun iz(q: Map<String, String>, mic: Float = MIC, fps0: Int = FPS, kbps0: Int = KBPS): Opts {
+            fun iz(q: Map<String, String>, mic: Float = MIC, fps0: Int = FPS, kbps0: Int = KBPS, bkadry0: Boolean = false): Opts {
                 val url = q["url"]?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: TWITCH
                 require(razreshyon(url)) { "адрес эфира — только Twitch (ключ не уходит чужим)" }
                 val p = if (q["size"] == "720") 1280 to 720 else 1920 to 1080
                 return Opts(url, p.first, p.second, fps(q["fps"]?.toIntOrNull()) ?: fps0,
                     kbps(q["kbps"]?.toIntOrNull()) ?: kbps0,
-                    mic = q["mic"]?.toFloatOrNull()?.let { glush(it) } ?: mic)
+                    mic = q["mic"]?.toFloatOrNull()?.let { glush(it) } ?: mic,
+                    bkadry = q["bkadry"]?.let { it == "1" } ?: bkadry0)
             }
 
             fun glush(g: Float) = g.coerceIn(0.5f, 8f)
@@ -106,6 +107,21 @@ class Efir(
         private set
     @Volatile private var setSpokojnoS = 0L
     @Volatile private var snizilMs = 0L
+    /** 2.8.15 (план К1): сколько раз сеть заставила снизить поток и сколько секунд он был ниже выбранного. */
+    @Volatile var snizheniy = 0; private set
+    @Volatile private var nizheMs = 0L
+    @Volatile private var podstrMs = 0L
+    /** 2.8.15 «свой глаз»: копия каждого кадра кодировщика (Annex-B, время, ключевой) — для замера качества. */
+    @Volatile var nablyudatel: ((ByteArray, Long, Boolean) -> Unit)? = null
+    /** 2.8.15 (К3): порядок кадров для RTMP при B-кадрах; null — B-кадров не просили, всё как раньше. */
+    @Volatile private var poryadok: Poryadok? = null
+    /** Что с B-кадрами: vykl — не просили; vkl — кодировщик правда их делает; net — просили, а он не делает. */
+    val bkadry: String get() = poryadok?.let { if (it.estB) "vkl" else if (kadrov > 300) "net" else "zhdu" } ?: "vykl"
+    val golova: Pair<ByteArray, ByteArray>? get() = golovaKlipa
+    val vhod: Surface? get() = vsurf
+    val shirina: Int get() = o.w
+    val vysota: Int get() = o.h
+    fun klyuchevoySeychas() = klyuchevoy()
 
     private var venc: MediaCodec? = null
     private var vsurf: Surface? = null
@@ -183,10 +199,13 @@ class Efir(
      * раза в 5 с, не ниже KBPS_SET_MIN); спокойно 30 с — на 15 % выше, пока не вернётся к выбранному.
      */
     private fun podstroitPotok(now: Long, tesno: Boolean) {
+        if (podstrMs != 0L && kbpsSeychas < celKbps) nizheMs += now - podstrMs
+        podstrMs = now
         if (tesno) {
             setSpokojnoS = 0
             if (now - snizilMs >= 5_000 && kbpsSeychas > Opts.KBPS_SET_MIN) {
                 snizilMs = now
+                snizheniy++
                 postavitKbps(maxOf(Opts.KBPS_SET_MIN, kbpsSeychas * 3 / 4))
             }
         } else if (kbpsSeychas < celKbps) {
@@ -268,6 +287,7 @@ class Efir(
             "\"podklyucheniy\":${otpravka.podklyucheniy},\"zvuk\":${FrameServer.json(zvuk)}," +
             "\"razmer\":\"${o.w}x${o.h}@$fpsSeychas\",\"tsel_kbps\":$celKbps,\"kbps_seychas\":$kbpsSeychas,\"mic\":$mikrofon," +
             "\"fps\":$fpsSeychas,\"fps_vybor\":$celFps,\"avto30\":${tesnoS != 0L}," +
+            "\"snizheniy\":$snizheniy,\"nizhe_sek\":${nizheMs / 1000},\"bkadry\":\"$bkadry\"," +
             "\"mic_propuski\":${mic.propuski},\"mic_sbrosy\":${mic.sbrosy}," +
             // 2.3.9: игра или эфир — кадры экрана (то, что видит игрок), загрузки плашек, глаза Плюса
             "\"ekran_fps\":${String.format(java.util.Locale.ROOT, "%.1f", razvilka.ekranFps)}," +
@@ -305,7 +325,8 @@ class Efir(
             setInteger(MediaFormat.KEY_FRAME_RATE, o.fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)                  // Twitch: ключевой раз в 2 с
             setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)    // экран стоит — кадр повторяется
-            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)                      // время показа = время кодирования
+            // 2.8.15 (К3): B-кадры — только с High; время декодирования считает Poryadok. Выкл — как было (pts = dts)
+            setInteger(MediaFormat.KEY_MAX_B_FRAMES, if (o.bkadry && high) Poryadok.B_KADROV else 0)
             if (cbr) setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
             if (high) {
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
@@ -327,6 +348,7 @@ class Efir(
         c.start()
         venc = c
         vsurf = s
+        poryadok = if (o.bkadry) Poryadok() else null
         razvilka.add(s, o.fps, stamp = true, ow = o.w, oh = o.h, sloi = true)   // поверх — окно камеры
         threads += thread(name = "efir-video", isDaemon = true) { videoLoop(c) }
     }
@@ -365,8 +387,12 @@ class Efir(
                 else if (a.isNotEmpty()) {
                     val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
                     kadrov++
-                    otpravka.video(Flv.video(Flv.avcc(a), key), info.presentationTimeUs, key)
+                    val por = poryadok
+                    if (por == null) otpravka.video(Flv.video(Flv.avcc(a), key), info.presentationTimeUs, key)
+                    else for (g in por.polozhit(a, info.presentationTimeUs, key))   // B-кадры: dts и сдвиг показа
+                        otpravka.video(Flv.video(Flv.avcc(g.data), g.key, ctsMs = ((g.ctsUs + 500) / 1000).toInt()), g.dtsUs, g.key)
                     if (klipVideo) try { klip?.video(a, info.presentationTimeUs, key) } catch (e: Exception) { }
+                    nablyudatel?.let { n -> try { n(a, info.presentationTimeUs, key) } catch (e: Exception) { } }
                 }
             }
         }

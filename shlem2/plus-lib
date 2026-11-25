@@ -230,6 +230,8 @@ def efir_skazat(U):
         ks, kt = d.get('kbps_seychas'), d.get('tsel_kbps')
         if ks and kt and ks < kt:
             out.append('Сеть не тянет — поток сам снижен до %s кбит/с (выбрано %s), вернётся сам, когда сеть успокоится.' % (ks, kt))
+        if d.get('snizheniy'):                         # 2.8.15: провалы сети за эфир
+            out.append('За эфир сеть %s раз заставляла снижать поток; ниже выбранного — %s с.' % (d['snizheniy'], d.get('nizhe_sek', 0)))
         if d.get('avto30'):
             out.append('Шлему тесно — эфир сейчас на 30 кадрах (выбрано %s), вернётся сам через минуту спокойствия.' % d.get('fps_vybor'))
         r2 = zapros(U, '/efir/osnova', 3)               # 2.6.9: откуда кадр эфира — от этого зависят его кадры
@@ -341,6 +343,36 @@ def efir(a):
         k, out = efir_skazat(U)
     elif c in ('status', 's'):
         k, out = efir_skazat(U)
+    elif c in ('bkadry', 'b'):                          # 2.8.15 (К3): B-кадры — со следующего эфира
+        v = a[1] if len(a) > 1 and a[1] in ('vkl', 'vykl') else None
+        r = zapros(U, '/efir/nastroyki' + ('?bkadry=' + ('1' if v == 'vkl' else '0') if v else ''), 5)
+        d = razobrat(r[1]) if r else None
+        if not d:
+            k, out = 1, [MOLCHIT]
+        elif 'bkadry_vybor' not in d:
+            k, out = 1, ['B-кадры: нужен мост 2.8.15 (обнови приложение).']
+        else:
+            seychas = {'vkl': 'в этом эфире кодировщик их делает', 'net': 'в этом эфире просили, но кодировщик шлема их не делает',
+                       'zhdu': 'в этом эфире — проверяю, делает ли кодировщик', 'vykl': 'в этом эфире без них'}.get(d.get('bkadry'), '')
+            k, out = 0, ['B-кадры: %s со следующего эфира%s. Замерь `efir ocenka` с ними и без — разница в SSIM и есть польза.'
+                         % ('включены' if d['bkadry_vybor'] == 'vkl' else 'выключены', '; ' + seychas if seychas and d.get('state') == 'efir' else '')]
+    elif c in ('ocenka', 'kachestvo_efira'):            # 2.8.15 «свой глаз»: насколько эфир отличается от кадра моста
+        sek = a[1] if len(a) > 1 and a[1].isdigit() else '10'
+        r = zapros(U, '/efir/ocenka?sek=' + sek, int(sek) + 25)
+        d = razobrat(r[1]) if r else None
+        if r is None:
+            k, out = 1, [MOLCHIT]
+        elif r[0] == 404:
+            k, out = 1, ['Оценка эфира: нужен мост 2.8.15 (обнови приложение).']
+        elif not d or d.get('oshibka'):
+            k, out = 1, ['Оценка эфира: ' + str((d or {}).get('oshibka') or 'непонятный ответ')]
+        else:
+            s_ = float(d.get('ssim', 0))
+            slovo = ('почти неотличимо от исходника' if s_ >= 0.97 else 'хорошо, мелочь слегка мажется' if s_ >= 0.93
+                     else 'заметно: мелкое мажется, в движении квадраты' if s_ >= 0.88 else 'плохо: сжатие видно сразу')
+            k, out = 0, [('Качество эфира: SSIM %s (худший кадр %s), PSNR %s дБ — %s. Замер %s с, %s пар кадров, '
+                         '%s, поток %s кбит/с, кусок %s.' % (d.get('ssim'), d.get('ssim_min'), d.get('psnr'), slovo,
+                                                            d.get('sek'), d.get('par'), d.get('razmer'), d.get('kbps'), d.get('kusok')))]
     elif c == 'klip':                                   # 2.7.9: клип шлема — otdelno (без окна камеры) | efir | vykl
         r = a[1] if len(a) > 1 and a[1] in ('otdelno', 'efir', 'vykl') else None
         q = '?rezhim=' + r if r else ''
@@ -841,12 +873,14 @@ SHEJDER3 = ('gamma', 'teni', 'rezkost', 'avtonoch', 'lokalno',
             # Мост 3 3.2.2 (Александр 21.11): цвет и уровни
             'temperatura', 'ton', 'sveta', 'zhivost', 'chernyj', 'belyj', 'balr', 'balg', 'balb',
             # 3.2.4 (Александр 23.11): выдержка и сила всех ручек
-            'vyderzhka', 'sila')
+            'vyderzhka', 'sila',
+            # 3.2.7 (план К2): чистка кадра для эфира и клипа
+            'chistka')
 SHEJDER3_RU = {'kontrast': 'контраст', 'nasyshch': 'насыщенность', 'gamma': 'гамма', 'teni': 'тени',
                'rezkost': 'резкость', 'avtonoch': 'авто-ночь', 'yarkost': 'яркость', 'lokalno': 'местная ночь',
                'temperatura': 'температура', 'ton': 'тон', 'sveta': 'света', 'zhivost': 'живость',
                'chernyj': 'точка чёрного', 'belyj': 'уровень белого', 'balr': 'красный', 'balg': 'зелёный', 'balb': 'синий',
-               'vyderzhka': 'выдержка', 'sila': 'сила всех ручек'}
+               'vyderzhka': 'выдержка', 'sila': 'сила всех ручек', 'chistka': 'чистка для эфира'}
 # цвет по умолчанию — в ответе не называем
 CVET3_DEF = {'temperatura': 0, 'ton': 0, 'sveta': 0, 'zhivost': 0, 'chernyj': 0, 'belyj': 1, 'balr': 1, 'balg': 1, 'balb': 1,
              'vyderzhka': 0, 'sila': 1}
@@ -872,6 +906,8 @@ def kartinka3_skazat(k, avto=None):
     for i, d in CVET3_DEF.items():                       # 3.2.2: цвет — только то, что сдвинуто
         if i in k and abs(k[i] - d) > 1e-3:
             chasti.append('%s %s' % (SHEJDER3_RU[i], round(k[i], 2)))
+    if k.get('chistka'):
+        chasti.append('чистка для эфира %s' % round(k['chistka'], 2))
     if k.get('yarkost'):
         chasti.insert(0, 'яркость %+.2f' % k['yarkost'])
     out = 'Мост 3, картинка: ' + ', '.join(chasti)
@@ -967,7 +1003,7 @@ def kartinka3(a):
                        '(0.5–1.5); uroven 0.05 0.95 (чёрный −0.2–0.3, белый 0.7–1); chernyj =-0.1 (минус — чёрный приподнят); '
                        'vyderzhka 0.5 (±2 ступени); sila 1.5 (0–2: сила всех ручек сразу, 1 — как настроено); '
                        'cvet_def — цвет как было; kak_bylo; ячейки: yachejka 1..5, sohranit 1..5, vernut_yachejku, yachejki; '
-                       'sravnit [vkl|vykl] — окно пополам: до | после. '
+                       'sravnit [vkl|vykl] — окно пополам: до | после; chistka 0.5 (0–1) — чистка кадра для эфира. '
                        'Минус: «-N» — сдвиг вниз, «=-N» — задать.'], None
         i += 1
     if ruchki:

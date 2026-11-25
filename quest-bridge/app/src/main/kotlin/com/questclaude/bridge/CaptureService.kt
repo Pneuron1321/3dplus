@@ -70,6 +70,7 @@ class CaptureService : Service() {
         private const val PLOSHCHADKI = "efir-ploshchadki"         // площадки эфира — запомненные: «twitch,kick»
         private const val MIC = "efir-mic"         // громкость голоса в эфире — запомненная
         private const val NASTROYKI = "efir-nastroyki"   // частота и поток эфира — запомненные (2.6.9): «fps kbps»
+        private const val BKADRY = "efir-bkadry"         // 2.8.15: B-кадры в эфире — «1» / «0»
         private const val NALET = "nalet-sek"      // налёт: всего секунд в эфире
         private const val POKAZ = "nalozhenie"     // плашки в эфире: «lico nalet radar», 1/0
         private const val CEL = "donat-cel"        // цель доната: сумма, собрано, валюта, показ, на что
@@ -464,8 +465,10 @@ class CaptureService : Service() {
             val f = Efir.Opts.fps(q["fps"]?.toIntOrNull()) ?: f0
             val k = Efir.Opts.kbps(q["kbps"]?.toIntOrNull()) ?: k0
             try { File(filesDir, NASTROYKI).writeText("$f $k") } catch (e: Exception) { }
+            q["bkadry"]?.let { b -> try { File(filesDir, BKADRY).writeText(if (b == "1" || b == "vkl") "1" else "0") } catch (e: Exception) { } }
             efir?.nastroit(f, k)
-            return efir?.status() ?: "{\"state\":\"off\",\"fps_vybor\":$f,\"tsel_kbps\":$k}"
+            val bk = if (bkadryZapomneny()) "vkl" else "vykl"
+            return efir?.status()?.dropLast(1)?.plus(",\"bkadry_vybor\":\"$bk\"}") ?: "{\"state\":\"off\",\"fps_vybor\":$f,\"tsel_kbps\":$k,\"bkadry_vybor\":\"$bk\"}"
         }
     }
 
@@ -511,6 +514,9 @@ class CaptureService : Service() {
                 "\"mesto\":${razvilka?.chatMesto ?: 0},\"oshibka\":${n?.oshibka?.let { FrameServer.json(it) } ?: "null"}}"
         }
     }
+
+    /** 2.8.15 (К3): B-кадры в эфире — `efir bkadry vkl|vykl`, со следующего эфира; нет файла — выкл. */
+    private fun bkadryZapomneny(): Boolean = try { File(filesDir, BKADRY).readText().trim() == "1" } catch (e: Exception) { false }
 
     /** Запомненные частота и поток эфира (нет файла — 30 к/с и 6000 кбит/с, как было). */
     private fun nastroykiZapomneny(): Pair<Int, Int> = try {
@@ -570,7 +576,7 @@ class CaptureService : Service() {
             return e.status(kluchiJson())
         }
         val (fps0, kbps0) = nastroykiZapomneny()
-        val opts = try { Efir.Opts.iz(q, micZapomnen(), fps0, kbps0) } catch (e: Exception) { return oshibka(e.message ?: "настройки эфира") }
+        val opts = try { Efir.Opts.iz(q, micZapomnen(), fps0, kbps0, bkadryZapomneny()) } catch (e: Exception) { return oshibka(e.message ?: "настройки эфира") }
         val nastroyki = nastroykiPloshchadok(vybor, opts.url)
         if (nastroyki.none { it.key != null && it.adresa.isNotEmpty() }) return oshibka(netKlyucha(vybor))
         val p = projection ?: return oshibka("захват не идёт")
@@ -602,6 +608,7 @@ class CaptureService : Service() {
         }
         efir = e
         Hub.klyuchevoyEfira = { e.klyuchevoyKlipa(); klipShlem?.klyuchevoy() }
+        Hub.ocenkaEfira = { sek -> OcenkaEfira(e, rz).zamerit(sek) }        // 2.8.15 «свой глаз»
         efirW = opts.w; efirH = opts.h
         zapustitKlip(e, rz)
         kamera?.podklyuchit(rz)
@@ -669,6 +676,7 @@ class CaptureService : Service() {
         gosti?.otklyuchit()
         klipShlem?.stop(); klipShlem = null
         Hub.klyuchevoyEfira = null
+        Hub.ocenkaEfira = null
         efir?.stop()
         efir = null
         if (razvilka != null) vernutPryamo()

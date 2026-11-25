@@ -386,4 +386,29 @@ class KartinkaTest {
         val k = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(rezkost = 1f, lokalno = 0.6f, kontrast = 1.4f, sila = 0f), 0.2f)
         for (i in rgb.indices) assertEquals(rgb[i], k[i], 1e-6f)
     }
+
+    // 3.2.7 (план К2): чистка для эфира — шум на ровном меньше, край резче, 0 — ничего не меняет
+    @Test fun chistkaShumIKraj() {
+        val w = 32; val h = 16
+        val r = kotlin.random.Random(3)
+        // левая половина — ровное серое с шумом ±0,01, правая — ступенька 0,3 → 0,7 посередине правой части
+        val shumTochki = FloatArray(w * h) { (r.nextFloat() * 2 - 1) * 0.01f }      // шум яркости: во всех каналах один
+        val rgb = FloatArray(w * h * 3) { i -> val x = (i / 3) % w
+            if (x < 16) 0.5f + shumTochki[i / 3] else if (x < 24) 0.3f else 0.7f }
+        val bez = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(), 0f)
+        val s = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(chistka = 1f), 0f)
+        fun razbros(k: FloatArray): Float { var mn = 1f; var mx = 0f
+            for (y in 2 until h - 2) for (x in 2 until 14) { val v = k[(y * w + x) * 3]; mn = minOf(mn, v); mx = maxOf(mx, v) }; return mx - mn }
+        assertTrue("шум ${razbros(bez)} → ${razbros(s)}", razbros(s) < 0.75f * razbros(bez))
+        val y = 8
+        assertTrue(s[(y * w + 23) * 3] < bez[(y * w + 23) * 3] - 0.01f)    // тёмная сторона края — темнее
+        assertTrue(s[(y * w + 24) * 3] > bez[(y * w + 24) * 3] + 0.01f)    // светлая — светлее
+        assertEquals(bez[(y * w + 28) * 3], s[(y * w + 28) * 3], 1e-6f)     // ровное без шума — как было
+        val n0 = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(chistka = 0f), 0f)
+        for (i in rgb.indices) assertEquals(bez[i], n0[i], 0f)
+        val v = Nastrojki(chistka = 0.4f)
+        assertEquals(v, Nastrojki.izStroki(v.vStroku()))
+        assertEquals(0f, Nastrojki.izStroki("yarkost=0").chistka, 0f)       // файл 3.2.6 — без чистки
+        assertTrue("uChistka" in Shader.UNIFORMY)
+    }
 }

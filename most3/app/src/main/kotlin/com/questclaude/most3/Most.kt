@@ -360,7 +360,7 @@ object Most {
             "\"teni\":${it.teni},\"rezkost\":${it.rezkost},\"avtonoch\":${it.avtoNoch},\"lokalno\":${it.lokalno},\"hdrpik\":${it.hdrPik}," +
             "\"temperatura\":${it.temperatura},\"balr\":${it.balR},\"balg\":${it.balG},\"balb\":${it.balB},\"ton\":${it.ton}," +
             "\"sveta\":${it.sveta},\"chernyj\":${it.chernyj},\"belyj\":${it.belyj},\"zhivost\":${it.zhivost}," +
-            "\"vyderzhka\":${it.vyderzhka},\"sila\":${it.sila}}"
+            "\"vyderzhka\":${it.vyderzhka},\"sila\":${it.sila},\"chistka\":${it.chistka}}"
     }
 
     private fun zagruzit() {
@@ -389,7 +389,7 @@ object Most {
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.2.6"
+    const val VERSIYA = "3.2.7"
 }
 
 /**

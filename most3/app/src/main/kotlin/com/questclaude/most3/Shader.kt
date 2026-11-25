@@ -9,7 +9,7 @@ object Shader {
     // uHdr/uPik/uBelyj работают только в P010, uPolnyj — во всех YUV.
     val UNIFORMY = listOf("uYarkost", "uKontrast", "uNasyshch", "uGamma", "uTeni", "uAvtoTeni", "uRezkost", "uPolnyj", "uSyroe",
         "uLokalno", "uSuper", "uHdr", "uPik", "uBelyj",
-        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila", "uSravnenie")
+        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila", "uSravnenie", "uChistka")
     val SAMPLERY_YUY2 = listOf("uTekYuy2")          // блок 0: GL_RGBA8 W/2×H, (Y0,U,Y1,V)
     val SAMPLERY_NV12 = listOf("uTekY", "uTekUV")   // блок 0: GL_R8 W×H; блок 1: GL_RG8 W/2×H/2
     val SAMPLERY_RGBA = listOf("uTekRgba")          // блок 0: GL_RGBA8 W×H
@@ -49,6 +49,7 @@ object Shader {
         uniform float uVyderzhka; // 3.2.4: множитель выдержки 2^(ступени/2.2) (KartinkaCpu.mnozhitelVyderzhki)
         uniform float uSila;      // 3.2.4: сила всех ручек 0..2 — mix(вход, обработанное, uSila)
         uniform float uSravnenie; // 3.2.6: 1 — левая половина как пришла (без ручек), правая с ручками, черта посередине
+        uniform float uChistka;   // 3.2.7: чистка для эфира 0..1 (KartinkaCpu.chistkaSdvig); окно — 0
         uniform float uGamma;     // 0.5..2.5, pow(x, 1/g)
         uniform float uTeni;      // 0..1, подъём теней
         uniform float uAvtoTeni;  // 0..1, авто-ночь (считает CPU), складывается с uTeni
@@ -74,6 +75,12 @@ object Shader {
         const float LOK_LN_RHO = 1.0986123;
         const float LOK_SHOZH = 24.0;
         const float LOK_EPS = 0.02;
+        const float CH_SHUM_A = 0.02;
+        const float CH_SHUM_B = 0.08;
+        const float CH_KRAJ_A = 0.06;
+        const float CH_KRAJ_B = 0.2;
+        const float CH_REZKOST = 0.5;
+        const float CH_PREDEL = 0.08;
     """.trimIndent() + "\n"
 
     // BT.709 YCbCr -> RGB; y,u,v — значения текстуры (байт/255).
@@ -285,11 +292,19 @@ object Shader {
             vec3 c = rgbSuper(vUv);
             vec3 vhod = c;
             float d = 0.0;
-            if (uRezkost > 0.0) {
+            if (uRezkost > 0.0 || uChistka > 0.0) {
                 vec2 s = shag() * max(1.0, uSuper);   // резкость в пикселях окна
-                float sr = 0.25 * (yarkostVzyat(vUv + vec2(s.x, 0.0)) + yarkostVzyat(vUv - vec2(s.x, 0.0))
-                                 + yarkostVzyat(vUv + vec2(0.0, s.y)) + yarkostVzyat(vUv - vec2(0.0, s.y)));
-                d = clamp(uRezkost * (dot(c, VES) - sr), -PREDEL_REZKOSTI, PREDEL_REZKOSTI);
+                vec4 n4 = vec4(yarkostVzyat(vUv + vec2(s.x, 0.0)), yarkostVzyat(vUv - vec2(s.x, 0.0)),
+                               yarkostVzyat(vUv + vec2(0.0, s.y)), yarkostVzyat(vUv - vec2(0.0, s.y)));
+                float sr = 0.25 * (n4.x + n4.y + n4.z + n4.w);
+                float l = dot(c, VES);
+                if (uRezkost > 0.0) d = clamp(uRezkost * (l - sr), -PREDEL_REZKOSTI, PREDEL_REZKOSTI);
+                if (uChistka > 0.0) {                 // 3.2.7: ровное — к соседям, край — резче
+                    float k = max(l, max(max(n4.x, n4.y), max(n4.z, n4.w))) - min(l, min(min(n4.x, n4.y), min(n4.z, n4.w)));
+                    float shum = 1.0 - smoothstep(CH_SHUM_A, CH_SHUM_B, k);
+                    float kraj = smoothstep(CH_KRAJ_A, CH_KRAJ_B, k);
+                    d += clamp(uChistka * (shum * (sr - l) + kraj * CH_REZKOST * (l - sr)), -CH_PREDEL, CH_PREDEL);
+                }
             }
             if (uLokalno > 0.0) c = lokalno(c, vUv);
             vec3 obr = clamp(obrabotat(c) + d, 0.0, 1.0);
