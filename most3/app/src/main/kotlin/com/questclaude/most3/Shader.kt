@@ -51,11 +51,11 @@ object Shader {
         uniform float uSravnenie; // 3.2.6: 1 — левая половина как пришла (без ручек), правая с ручками, черта посередине
         uniform float uChistka;   // 3.2.7: чистка для эфира 0..1 (KartinkaCpu.chistkaSdvig); окно — 0
         uniform float uSvet;      // 3.2.8: свет цвета 0..1 (KartinkaCpu.svet)
-        uniform float uMulty;     // 3.2.8: мультяшность 0..1 (KartinkaCpu.multyashno)
+        uniform float uMulty;     // 3.2.9: мультяшность цвета 0..1 (KartinkaCpu.multyashno), по точке
         uniform float uGamma;     // 0.5..2.5, pow(x, 1/g)
         uniform float uTeni;      // 0..1, подъём теней
         uniform float uAvtoTeni;  // 0..1, авто-ночь (считает CPU), складывается с uTeni
-        uniform float uRezkost;   // 0..2, нерезкая маска по яркости
+        uniform float uRezkost;   // 0..4 (3.2.9), нерезкая маска по яркости
         uniform float uPolnyj;    // 1 = YUV полный диапазон, 0 = ограниченный 16-235/16-240 (10 бит: 64-940/64-960)
         uniform float uSyroe;     // 1 = без обработки (замер средней яркости и карта): одна выборка, без местной ночи
         uniform float uLokalno;   // 0..1, местная авто-ночь по карте uKarta; 0 = ровно без изменений
@@ -80,13 +80,9 @@ object Shader {
         const float CH_SHUM_A = 0.02;
         const float CH_SHUM_B = 0.08;
         const float CH_KRAJ_A = 0.06;
-        const float MU_SHAG = 2.0;
-        const float MU_SIGMA_YA = 0.06;
-        const float MU_VES_REBRO = 0.60653066;
-        const float MU_VES_UGOL = 0.36787944;
-        const float MU_KRAJ_A = 0.12;
-        const float MU_KRAJ_B = 0.35;
-        const float MU_OBVODKA = 0.55;
+        const float MU_PERIOD = 30.0;
+        const float MU_TYAGA = 0.6;
+        const float DVA_PI = 6.2831853;
         const float CH_KRAJ_B = 0.2;
         const float CH_REZKOST = 0.5;
         const float CH_PREDEL = 0.08;
@@ -266,6 +262,17 @@ object Shader {
             // 3.2.8 свет цвета: самый яркий канал m → 1 − (1 − m)^(1 + 2s), каналы × (новое / m) — оттенок и насыщенность те же
             float m = max(c.r, max(c.g, c.b));
             if (uSvet > 0.0 && m > 1e-4) c = clamp(c * ((1.0 - pow(1.0 - m, 1.0 + 2.0 * uSvet)) / m), 0.0, 1.0);
+            // 3.2.9 мультяшность цвета (KartinkaCpu.multyashno): HSV, оттенок к 12 чистым гладко, средние цвета сочнее, V та же
+            m = max(c.r, max(c.g, c.b)); float dd = m - min(c.r, min(c.g, c.b));
+            if (uMulty > 0.0 && dd > 1e-6 && m > 0.0) {
+                float h = (m == c.r) ? mod((c.g - c.b) / dd, 6.0) : ((m == c.g) ? (c.b - c.r) / dd + 2.0 : (c.r - c.g) / dd + 4.0);
+                h *= 60.0;
+                float s = dd / m;
+                h -= uMulty * MU_TYAGA * (MU_PERIOD / DVA_PI) * sin(DVA_PI * h / MU_PERIOD);
+                float s2 = s + uMulty * s * (1.0 - s);
+                vec3 k = clamp(abs(fract(h / 360.0 + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+                c = clamp(m * (1.0 + (k - 1.0) * s2), 0.0, 1.0);
+            }
             return c;
         }
         float kartaYa(ivec2 p, ivec2 r) { return dot(texelFetch(uKarta, clamp(p, ivec2(0), r - 1), 0).rgb, VES); }
@@ -304,27 +311,6 @@ object Shader {
             if (uSravnenie > 0.5 && vUv.x < 0.5 + 1.5 * px) { fragColor = vec4(1.0); return; }
             vec3 c = rgbSuper(vUv);
             vec3 vhod = c;
-            float obv = 0.0;
-            if (uMulty > 0.0) {                     // 3.2.8 мультяшность (KartinkaCpu.multyashno): 3×3 с шагом 2 точки окна
-                vec2 sm = shag() * max(1.0, uSuper) * MU_SHAG;
-                vec3 o[9]; float ya[9];
-                for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) {
-                    int k = j * 3 + i;
-                    o[k] = (k == 4) ? c : rgbVzyat(vUv + vec2(float(i - 1) * sm.x, float(j - 1) * sm.y));
-                    ya[k] = dot(o[k], VES);
-                }
-                float sw = 0.0; vec3 sg = vec3(0.0);
-                for (int k = 0; k < 9; k++) {
-                    float pr = (k == 4) ? 1.0 : ((k == 1 || k == 3 || k == 5 || k == 7) ? MU_VES_REBRO : MU_VES_UGOL);
-                    float dl = (ya[k] - ya[4]) / MU_SIGMA_YA;
-                    float w = pr * exp(-dl * dl);
-                    sw += w; sg += w * o[k];
-                }
-                float gx = ((ya[2] + 2.0 * ya[5] + ya[8]) - (ya[0] + 2.0 * ya[3] + ya[6])) * 0.25;
-                float gy = ((ya[6] + 2.0 * ya[7] + ya[8]) - (ya[0] + 2.0 * ya[1] + ya[2])) * 0.25;
-                obv = smoothstep(MU_KRAJ_A, MU_KRAJ_B, sqrt(gx * gx + gy * gy));
-                c = c + (sg / sw - c) * uMulty;
-            }
             float d = 0.0;
             if (uRezkost > 0.0 || uChistka > 0.0) {
                 vec2 s = shag() * max(1.0, uSuper);   // резкость в пикселях окна
@@ -332,7 +318,8 @@ object Shader {
                                yarkostVzyat(vUv + vec2(0.0, s.y)), yarkostVzyat(vUv - vec2(0.0, s.y)));
                 float sr = 0.25 * (n4.x + n4.y + n4.z + n4.w);
                 float l = dot(c, VES);
-                if (uRezkost > 0.0) d = clamp(uRezkost * (l - sr), -PREDEL_REZKOSTI, PREDEL_REZKOSTI);
+                float pr = PREDEL_REZKOSTI * max(1.0, uRezkost * 0.5);   // 3.2.9 (KartinkaCpu.predelRezkosti)
+                if (uRezkost > 0.0) d = clamp(uRezkost * (l - sr), -pr, pr);
                 if (uChistka > 0.0) {                 // 3.2.7: ровное — к соседям, край — резче
                     float k = max(l, max(max(n4.x, n4.y), max(n4.z, n4.w))) - min(l, min(min(n4.x, n4.y), min(n4.z, n4.w)));
                     float shum = 1.0 - smoothstep(CH_SHUM_A, CH_SHUM_B, k);
@@ -341,7 +328,7 @@ object Shader {
                 }
             }
             if (uLokalno > 0.0) c = lokalno(c, vUv);
-            vec3 obr = clamp(obrabotat(c) + d, 0.0, 1.0) * (1.0 - MU_OBVODKA * uMulty * obv);
+            vec3 obr = clamp(obrabotat(c) + d, 0.0, 1.0);
             fragColor = vec4(clamp(mix(vhod, obr, uSila), 0.0, 1.0), 1.0);   // сила всех ручек (KartinkaCpu.sila)
         }
     """.trimIndent() + "\n"

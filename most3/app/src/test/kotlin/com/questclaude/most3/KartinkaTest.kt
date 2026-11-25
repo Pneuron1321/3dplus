@@ -208,7 +208,7 @@ class KartinkaTest {
 
     @Test fun ogranichit() {
         val n = Nastrojki(-3f, 9f, -1f, 0f, 5f, 7f, -2f).ogranichit()
-        assertEquals(Nastrojki(-0.5f, 2f, 0f, 0.5f, 1f, 2f, 0f), n)
+        assertEquals(Nastrojki(-0.5f, 2f, 0f, 0.5f, 1f, 4f, 0f), n)            // 3.2.9: резкость до 4
         assertEquals(1f, Nastrojki(kontrast = Float.NaN).ogranichit().kontrast, 0f)
     }
 
@@ -445,30 +445,60 @@ class KartinkaTest {
         assertEquals(hsv(bez)[1], hsv(v)[1], 1e-4f)
     }
 
-    @Test fun multyashnoRovnoeGladkoNaKrayahObvodka() {
-        val w = 40; val h = 20
-        val r = kotlin.random.Random(5)
-        // левая часть — ровный цвет с мелкой рябью ±0,015, правая — ступенька 0,25 → 0,75 на x = 30
-        val ryab = FloatArray(w * h) { (r.nextFloat() * 2 - 1) * 0.015f }
-        val rgb = FloatArray(w * h * 3) { i -> val x = (i / 3) % w
-            if (x < 20) 0.5f + ryab[i / 3] else if (x < 30) 0.25f else 0.75f }
-        val bez = KartinkaCpu.obrabotatKadr(rgb, w, h, ID, 0f)
-        val m = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(multyashno = 1f), 0f)
-        fun razbros(k: FloatArray): Float {                                     // СКО ряби на ровном
-            val v = ArrayList<Float>(); for (y in 3 until h - 3) for (x in 3 until 17) v += k[(y * w + x) * 3]
-            val sr = v.average().toFloat(); return kotlin.math.sqrt(v.map { (it - sr) * (it - sr) }.average()).toFloat() }
-        assertTrue("рябь ${razbros(bez)} → ${razbros(m)}", razbros(m) < 0.5f * razbros(bez))
-        val y = 10
-        assertTrue(m[(y * w + 29) * 3] < bez[(y * w + 29) * 3] - 0.05f)     // у края — обводка темнее
-        assertTrue(m[(y * w + 30) * 3] < bez[(y * w + 30) * 3] - 0.1f)
-        assertEquals(bez[(y * w + 36) * 3], m[(y * w + 36) * 3], 1e-6f)      // ровное вдали от края — как было
-        assertEquals(bez[(y * w + 25) * 3], m[(y * w + 25) * 3], 1e-6f)
-        val n0 = KartinkaCpu.obrabotatKadr(rgb, w, h, Nastrojki(multyashno = 0f, svet = 0f), 0f)
-        for (i in rgb.indices) assertEquals(bez[i], n0[i], 0f)
+    @Test fun multyashnoTolkoCvetBezRazmytiya() {
+        // 3.2.9: мультяшность — цвет (Александр 25.11: «смазывание мне не надо»): по точке, V та же, серое серое
+        val r = kotlin.random.Random(9)
+        repeat(500) {
+            val c = floatArrayOf(r.nextFloat(), r.nextFloat(), r.nextFloat())
+            val o = c.copyOf(); KartinkaCpu.multyashno(o, 1f)
+            val a = hsv(c); val b = hsv(o)
+            assertEquals(a[2], b[2], 1e-5f)                                        // яркость V та же
+            assertTrue(b[1] >= a[1] - 1e-5f)                                       // насыщенность не ниже
+            if (a[1] > 0.05f) {                                                    // оттенок — ближе к чистому (через 30°)
+                fun doYakorya(hh: Float) = kotlin.math.abs(((hh * 60f) % 30f + 30f) % 30f).let { minOf(it, 30f - it) }
+                assertTrue(doYakorya(b[0]) <= doYakorya(a[0]) + 1e-2f)
+            }
+        }
+        val sery = floatArrayOf(0.4f, 0.4f, 0.4f); KartinkaCpu.multyashno(sery, 1f); assertEquals(0.4f, sery[1], 0f)
+        val nol = floatArrayOf(0.3f, 0.5f, 0.2f); KartinkaCpu.multyashno(nol, 0f); assertEquals(0.3f, nol[0], 0f)
+        // гладко: оттенок по кругу шагом 0,1° — соседние точки не прыгают (нет полос)
+        var pred: FloatArray? = null; var maks = 0f
+        for (k in 0..3600) {
+            val hh = k / 10f / 60f; val x = floatArrayOf(0f, 0f, 0f)
+            for (i in 0..2) { val q = hh / 6f + floatArrayOf(0f, 2f / 3f, 1f / 3f)[i]
+                x[i] = 0.8f * (1f + (minOf(1f, maxOf(0f, kotlin.math.abs((q - kotlin.math.floor(q)) * 6f - 3f) - 1f)) - 1f) * 0.6f) }
+            KartinkaCpu.multyashno(x, 1f)
+            pred?.let { p -> for (i in 0..2) maks = maxOf(maks, kotlin.math.abs(x[i] - p[i])) }
+            pred = x
+        }
+        assertTrue("скачок $maks", maks < 0.01f)
+        // без размытия: кадр с резкой ступенькой — каждая точка как отдельно (соседи не влияют)
+        val w = 20; val h = 6
+        val rgb = FloatArray(w * h * 3) { i -> val x = (i / 3) % w; if (x < 10) floatArrayOf(0.7f, 0.3f, 0.2f)[i % 3] else floatArrayOf(0.2f, 0.4f, 0.6f)[i % 3] }
+        val n = Nastrojki(multyashno = 1f, svet = 0.5f)
+        val kadr = KartinkaCpu.obrabotatKadr(rgb, w, h, n, 0f)
+        for (p in 0 until w * h) {
+            val t = KartinkaCpu.obrabotat(rgb[p * 3], rgb[p * 3 + 1], rgb[p * 3 + 2], n, 0f)
+            for (i in 0..2) assertEquals(t[i], kadr[p * 3 + i], 1e-6f)
+        }
         val v = Nastrojki(svet = 0.6f, multyashno = 0.5f)
         assertEquals(v, Nastrojki.izStroki(v.vStroku()))
         assertEquals(0f, Nastrojki.izStroki("yarkost=0").svet, 0f)            // файл 3.2.7 — без новых ручек
         assertEquals(1f, ID.izmenit("multyashno", "3")!!.multyashno, 0f)       // не больше 1
         assertTrue("uSvet" in Shader.UNIFORMY && "uMulty" in Shader.UNIFORMY)
+    }
+
+    @Test fun rezkostDoChetyreh() {
+        // 3.2.9 (Александр 25.11: «резкости ещё больше, максимум вдвое»): до 4, предел края растёт выше 2
+        assertEquals(4f, ID.izmenit("rezkost", "9")!!.rezkost, 0f)
+        assertEquals(KartinkaCpu.PREDEL_REZKOSTI, KartinkaCpu.predelRezkosti(2f), 0f)
+        assertEquals(2f * KartinkaCpu.PREDEL_REZKOSTI, KartinkaCpu.predelRezkosti(4f), 1e-6f)
+        val w = 16; val h = 4
+        val k = FloatArray(w * h * 3) { i -> if ((i / 3) % w < 8) 0.3f else 0.7f }
+        val o2 = KartinkaCpu.obrabotatKadr(k, w, h, Nastrojki(rezkost = 2f), 0f)
+        val o4 = KartinkaCpu.obrabotatKadr(k, w, h, Nastrojki(rezkost = 4f), 0f)
+        val y = 2
+        assertTrue(o4[(y * w + 7) * 3] < o2[(y * w + 7) * 3] - 0.05f)        // тёмная сторона края — темнее
+        assertTrue(o4[(y * w + 8) * 3] > o2[(y * w + 8) * 3] + 0.05f)        // светлая — светлее
     }
 }

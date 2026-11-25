@@ -390,7 +390,7 @@ object Most {
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.2.8"
+    const val VERSIYA = "3.2.9"
 }
 
 /**

@@ -1058,14 +1058,15 @@ def kartinka3(a):
             i += 1
         else:
             return 1, ['karta kartinka (Мост 3) — как сейчас; yarche|temnee|sochnee|blednee|kontrastnee|myagche|rezche|teplee|holodnee; '
-                       'obychno|monitor|noch|yarko|rezko|hdr|kino; gamma|teni|rezkost|avtonoch|lokalno 1.2|+0.1|def; '
+                       'obychno|monitor|noch|yarko|rezko|hdr|kino; gamma|teni|rezkost|avtonoch|lokalno 1.2|+0.1|def (rezkost 0–4); '
                        'temperatura =-30 (−100..100); ton =-10 (±30°); sveta 0.5 (±1); zhivost 0.4 (±1); balans 1.1 1 0.9 '
                        '(0.5–1.5); uroven 0.05 0.95 (чёрный −0.2–0.3, белый 0.7–1); chernyj =-0.1 (минус — чёрный приподнят); '
                        'vyderzhka 0.5 (±2 ступени); sila 1.5 (0–2: сила всех ручек сразу, 1 — как настроено); '
                        'cvet_def — цвет как было; kak_bylo; ячейки: yachejka 1..5, sohranit 1..5, vernut_yachejku, yachejki; '
                        'sravnit [vkl|vykl] — окно пополам: до | после; chistka 0.5 (0–1) — чистка кадра для эфира; '
                        'svet 0.6 (0–1) — свет цвета: все цвета ярче, не белеет (yarche_cveta|tusklee_cveta — ±0.2); '
-                       'multyashno 0.5 (0–1) — мультяшность: ровное ровнее, на краях обводка (multyashnee|menshe_multyashno — ±0.2). '
+                       'multyashno 0.5 (0–1) — мультяшность цвета: оттенки чище, средние цвета сочнее, без размытия '
+                       '(multyashnee|menshe_multyashno — ±0.2); rezkost до 4 (Мост 3 3.2.9). '
                        'Минус: «-N» — сдвиг вниз, «=-N» — задать.'], None
         i += 1
     if ruchki:

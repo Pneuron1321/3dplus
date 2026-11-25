@@ -16,7 +16,7 @@ data class Nastrojki(
     val nasyshch: Float = 1f,    // 0..2.5 (3.2.2: было до 2)
     val gamma: Float = 1f,       // 0.5..2.5
     val teni: Float = 0f,        // 0..1
-    val rezkost: Float = 0f,     // 0..2
+    val rezkost: Float = 0f,     // 0..4 (3.2.9: было до 2; Александр 25.11: «резкости хочется ещё больше, максимум вдвое»)
     val avtoNoch: Float = 0f,    // сила авто-ночи 0..1
     val polnyjDiapazon: Boolean = false,
     val lokalno: Float = 0f,     // местная авто-ночь 0..1 (uLokalno)
@@ -39,11 +39,11 @@ data class Nastrojki(
     val chistka: Float = 0f,
     // 3.2.8 (Александр 25.11: «намного насыщеннее и мультяшнее; все цвета ярче, весь свет ярче — не обелевшая»)
     val svet: Float = 0f,        // свет цвета 0..1: каждый цвет ярче к своему пределу, оттенок и насыщенность те же
-    val multyashno: Float = 0f,  // мультяшность 0..1: ровное ровнее (края на месте), на резких краях тёмная обводка
+    val multyashno: Float = 0f,  // мультяшность цвета 0..1 (3.2.9): оттенки к чистым, средние цвета сочнее; без размытия
 ) {
     fun ogranichit(): Nastrojki = Nastrojki(
         ogr(yarkost, -0.5f, 0.5f, 0f), ogr(kontrast, 0.5f, 2f, 1f), ogr(nasyshch, 0f, 2.5f, 1f),
-        ogr(gamma, 0.5f, 2.5f, 1f), ogr(teni, 0f, 1f, 0f), ogr(rezkost, 0f, 2f, 0f), ogr(avtoNoch, 0f, 1f, 0f),
+        ogr(gamma, 0.5f, 2.5f, 1f), ogr(teni, 0f, 1f, 0f), ogr(rezkost, 0f, 4f, 0f), ogr(avtoNoch, 0f, 1f, 0f),
         polnyjDiapazon, ogr(lokalno, 0f, 1f, 0f), ogr(hdrPik, 100f, 10000f, 1000f),
         ogr(temperatura, -100f, 100f, 0f), ogr(balR, 0.5f, 1.5f, 1f), ogr(balG, 0.5f, 1.5f, 1f), ogr(balB, 0.5f, 1.5f, 1f),
         ogr(ton, -30f, 30f, 0f), ogr(sveta, -1f, 1f, 0f), ogr(chernyj, -0.2f, 0.3f, 0f), ogr(belyj, 0.7f, 1f, 1f),
@@ -189,18 +189,14 @@ object KartinkaCpu {
     const val CH_KRAJ_B = 0.2f
     const val CH_REZKOST = 0.5f
     const val CH_PREDEL = 0.08f
-    // 3.2.8 мультяшность (как в Shader.GLAVNAYA): окрестность 3×3 с шагом 2 точки окна; веса места — гаусс (σ = шаг),
-    // веса похожести — exp(−(Δяркости/0,06)²): ровное сглаживается, через край не мажет. Обводка — Собел по яркости
-    // входа (/4 — перепад на 4 точки), smoothstep(0,12; 0,35), край темнее до ×(1 − 0,55·сила).
-    const val MU_SHAG = 2
-    const val MU_SIGMA_YA = 0.06f
-    const val MU_VES_REBRO = 0.60653066f   // exp(−1/2)
-    const val MU_VES_UGOL = 0.36787944f    // exp(−1)
-    const val MU_KRAJ_A = 0.12f
-    const val MU_KRAJ_B = 0.35f
-    const val MU_OBVODKA = 0.55f
+    // 3.2.9 мультяшность цвета (Александр 25.11: «я имел в виду мультяшность в цветах — насыщеннее, красивее; смазывание не
+    // надо, резкость я ставил ради чётких форм»; 3.2.8 сглаживал и обводил — убрано). В HSV, по точке, без соседей:
+    // оттенок тянется к 12 чистым (через 30°) гладко — h − t·0,6·(30/2π)·sin(2πh/30), производная ≥ 0,4 (без полос и скачков);
+    // насыщенность средних цветов s + t·s·(1 − s) (серое остаётся серым, яркость V та же).
+    const val MU_PERIOD = 30f
+    const val MU_TYAGA = 0.6f
     // выдержка в гамма-кодированном: ×2^(ступени/2.2) = ×2^ступени в линейном свете
-    const val PREDEL_REZKOSTI = 0.1f
+    const val PREDEL_REZKOSTI = 0.1f   // предел подъёма края; 3.2.9: × max(1, резкость/2) — до 2 как было, при 4 — 0,2
     const val SUPER_POROG = 1.2f
     const val BELYJ_NIT = 203f          // белый SDR в нитах (BT.2408), uBelyj
     const val KARTA_W = 32
@@ -295,6 +291,7 @@ object KartinkaCpu {
             c[i] = kl(svetaKrivaya(teniKrivaya(x, t), n.sveta))
         }
         svet(c, n.svet)
+        multyashno(c, n.multyashno)
         return c
     }
 
@@ -310,27 +307,30 @@ object KartinkaCpu {
         for (i in 0..2) c[i] = kl(c[i] * k)
     }
 
-    /**
-     * 3.2.8 «Мультяшность»: o — окрестность 3×3 (строки сверху вниз, слева направо; [4] — сама точка), RGB входа 0..1.
-     * Ответ — сглаженная точка (к похожим по яркости соседям, на t) и сила обводки края 0..1.
-     */
-    fun multyashno(o: Array<FloatArray>, t: Float): Pair<FloatArray, Float> {
-        val ya = FloatArray(9) { yarkost(o[it][0], o[it][1], o[it][2]) }
-        val l = ya[4]
-        var sw = 0f
-        val s = FloatArray(3)
-        for (i in 0..8) {
-            val pr = if (i == 4) 1f else if (i % 2 == 1) MU_VES_REBRO else MU_VES_UGOL
-            val dl = (ya[i] - l) / MU_SIGMA_YA
-            val w = pr * exp(-dl * dl)
-            sw += w
-            for (k in 0..2) s[k] += w * o[i][k]
+    /** 3.2.9: предел подъёма края растёт с резкостью выше 2 — иначе 4 упиралась бы в тот же потолок, что и 2. */
+    fun predelRezkosti(r: Float) = PREDEL_REZKOSTI * max(1f, r / 2f)
+
+    /** 3.2.9 «Мультяшность» цвета (см. MU_PERIOD): по точке, на месте; t = 0 и серое — без изменений. */
+    fun multyashno(c: FloatArray, t: Float) {
+        if (t <= 0f) return
+        val mx = max(c[0], max(c[1], c[2])); val mn = min(c[0], min(c[1], c[2])); val d = mx - mn
+        if (d <= 1e-6f || mx <= 0f) return
+        var h = (if (mx == c[0]) modG((c[1] - c[2]) / d, 6f) else if (mx == c[1]) (c[2] - c[0]) / d + 2f else (c[0] - c[1]) / d + 4f) * 60f
+        val s = d / mx
+        h -= t * MU_TYAGA * (MU_PERIOD / DVA_PI) * kotlin.math.sin(DVA_PI * h / MU_PERIOD)
+        val s2 = s + t * s * (1f - s)
+        val hh = h / 360f
+        val sdvig = floatArrayOf(0f, 2f / 3f, 1f / 3f)
+        for (i in 0..2) {
+            val x = hh + sdvig[i]
+            val k = min(1f, max(0f, kotlin.math.abs((x - floor(x)) * 6f - 3f) - 1f))
+            c[i] = kl(mx * (1f + (k - 1f) * s2))
         }
-        val c = FloatArray(3) { o[4][it] + (s[it] / sw - o[4][it]) * t }
-        val gx = ((ya[2] + 2f * ya[5] + ya[8]) - (ya[0] + 2f * ya[3] + ya[6])) * 0.25f
-        val gy = ((ya[6] + 2f * ya[7] + ya[8]) - (ya[0] + 2f * ya[1] + ya[2])) * 0.25f
-        return c to smoothstep(MU_KRAJ_A, MU_KRAJ_B, kotlin.math.sqrt(gx * gx + gy * gy))
     }
+
+    private const val DVA_PI = 6.2831853f
+    /** mod как в GLSL: a − b·floor(a/b). */
+    private fun modG(a: Float, b: Float) = a - b * floor(a / b)
 
     /** Чистка: сдвиг яркости точки l по соседям (4 крестом), сила ch 0..1. */
     fun chistkaSdvig(l: Float, n: FloatArray, ch: Float): Float {
@@ -356,20 +356,11 @@ object KartinkaCpu {
             val o = (y * w + x) * 3
             var r = kl(rgb[o]); var g = kl(rgb[o + 1]); var b = kl(rgb[o + 2])
             val vhod = floatArrayOf(r, g, b)
-            var obv = 0f
-            if (n.multyashno > 0f) {                     // 3.2.8: до резкости — как в шейдере
-                val okr = Array(9) { i ->
-                    val xx = min(w - 1, max(0, x + (i % 3 - 1) * MU_SHAG)); val yy = min(h - 1, max(0, y + (i / 3 - 1) * MU_SHAG))
-                    val q = (yy * w + xx) * 3
-                    floatArrayOf(kl(rgb[q]), kl(rgb[q + 1]), kl(rgb[q + 2]))
-                }
-                val (cm, e) = multyashno(okr, n.multyashno)
-                r = cm[0]; g = cm[1]; b = cm[2]; obv = e
-            }
             var d = 0f
             if (n.rezkost > 0f) {
                 val sr = 0.25f * (ya(x + 1, y) + ya(x - 1, y) + ya(x, y + 1) + ya(x, y - 1))
-                d = min(PREDEL_REZKOSTI, max(-PREDEL_REZKOSTI, n.rezkost * (yarkost(r, g, b) - sr)))
+                val p = predelRezkosti(n.rezkost)
+                d = min(p, max(-p, n.rezkost * (yarkost(r, g, b) - sr)))
             }
             if (n.chistka > 0f)
                 d += chistkaSdvig(yarkost(r, g, b), floatArrayOf(ya(x + 1, y), ya(x - 1, y), ya(x, y + 1), ya(x, y - 1)), n.chistka)
@@ -378,8 +369,7 @@ object KartinkaCpu {
                 r = lc[0]; g = lc[1]; b = lc[2]
             }
             val c = obrabotatBezSily(r, g, b, n, avtoTeni)
-            val tm = 1f - MU_OBVODKA * n.multyashno * obv
-            for (i in 0..2) c[i] = kl(c[i] + d) * tm
+            for (i in 0..2) c[i] = kl(c[i] + d)
             sila(vhod, c, n.sila).copyInto(out, o)
         }
         return out

@@ -211,7 +211,7 @@ class MainActivity : Activity() {
         Polzunok("nasyshch", "Насыщенность", 0f, 2.5f) { it.nasyshch },
         Polzunok("gamma", "Гамма", 0.5f, 2.5f) { it.gamma },
         Polzunok("teni", "Тени", 0f, 1f) { it.teni },
-        Polzunok("rezkost", "Резкость", 0f, 2f) { it.rezkost },
+        Polzunok("rezkost", "Резкость", 0f, 4f) { it.rezkost },
         Polzunok("avtonoch", "Авто-ночь", 0f, 1f) { it.avtoNoch },
         // 3.2.2: цвет и уровни (просьба Александра 21.11)
         Polzunok("temperatura", "Температура (холодно — тепло)", -100f, 100f) { it.temperatura },
@@ -233,6 +233,8 @@ class MainActivity : Activity() {
         "temperatura" to "Темп.", "balr" to "Красный", "balg" to "Зелёный", "balb" to "Синий", "ton" to "Тон", "sveta" to "Света",
         "chernyj" to "Чёрный", "belyj" to "Белый", "zhivost" to "Живость", "chistka" to "Чистка эфира",
         "svet" to "Свет цвета", "multyashno" to "Мульт")
+    /** 3.2.9: второй ряд фишек — цвет и уровни; первый — свет, резкость и остальное. */
+    private val GRUPPA_CVET = setOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost")
     private var vybrana = "sila"                       // что крутим; "yachejki" — ряд ячеек вместо ползунка
     private val fishki = HashMap<String, Button>()
     private lateinit var ryadRuchki: LinearLayout
@@ -252,12 +254,20 @@ class MainActivity : Activity() {
     private fun sobratPolzunki() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         val ten = 0x80000000.toInt()                   // фон только под самими кнопками, кадр не темнеет
-        addView(HorizontalScrollView(context).apply {
-            isHorizontalScrollBarEnabled = false
-            setOnScrollChangeListener { _, _, _, _, _ -> pokazatPanel() }
+        // 3.2.9 (Александр 25.11: «в новом Мосте 3 стало меньше ручек, не вижу цвета»): ручки не пропадали — ряд был один
+        // и листался вбок без видимой полосы, а 3.2.8 добавил две фишки, и цвет уехал за край. Теперь два ряда: свет и
+        // цвет; у каждого видимая толстая полоса (polosa), если окно уже ряда.
+        fun ryadFishek(spis: List<Polzunok>, hvost: LinearLayout.() -> Unit) = HorizontalScrollView(context).apply {
+            polosa(this, true)
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL; setBackgroundColor(ten)
-                for (p in spisok) addView(fishka(KOROTKO[p.imya] ?: p.imya) { vybrana = p.imya; obnovitPolzunki() }.also { fishki[p.imya] = it })
+                for (p in spis) addView(fishka(KOROTKO[p.imya] ?: p.imya) { vybrana = p.imya; obnovitPolzunki() }.also { fishki[p.imya] = it })
+                hvost()
+            })
+        }
+        addView(ryadFishek(spisok.filter { it.imya !in GRUPPA_CVET }) {},
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        addView(ryadFishek(spisok.filter { it.imya in GRUPPA_CVET }) {
                 addView(fishka("Ячейки") { vybrana = "yachejki"; obnovitPolzunki() }.also { fishki["yachejki"] = it })
                 lateinit var sr: Button
                 sr = fishka(if (Most.sravnenie) "◧ До|После: вкл" else "◧ До|После") {
@@ -269,8 +279,7 @@ class MainActivity : Activity() {
                         n = n.izmenit(im, "def") ?: n
                     Most.postavit(n); obnovitPolzunki()
                 })
-            })
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL })
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL })
         // строка ползунка: имя и значение, «−», ползунок, «+»
         ryadRuchki = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(ten); setPadding(12, 0, 12, 0)
