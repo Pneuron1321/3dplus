@@ -14,6 +14,7 @@ import java.net.URLDecoder
  *                                       3.2.2 — temperatura balr balg balb ton sveta chernyj belyj zhivost (=-N — задать минус);
  *                                       3.2.4 — vyderzhka (−2..2 ступени), sila (0..2: сила всех ручек), chernyj −0.2..0.3
  *   GET /kartinka?nabor=noch          — набор: obychno monitor noch yarko rezko
+ *   GET /yachejka?zagruzit=N|sohranit=N|vernut — 3.2.6: ячейки ручек 1–5 (без параметров — какие заняты, какая активна)
  *   GET /efir?rezhim=fokus|vsegda|shlem — 3.2.3: игра в эфир, пока окно активно / всегда / никогда (вид шлема)
  *   GET /zvuk?vkl=0|1&g=80            — звук карты в шлем, громкость в %
  *   GET /karta/ruchki?yarkost=N&…     — ручки внутри карты (UVC): yarkost kontrast ton nasyshchennost
@@ -52,8 +53,19 @@ class Server(private val port: Int) {
         "/status", "/" -> 200 to Most.status()
         "/podklyuchit" -> 200 to "{\"otvet\":${Json.str(Most.app?.let { Most.podklyuchit(it) } ?: "мост не запущен")}}"
         "/kartinka" -> {
-            val n = Pult.kartinka(Most.nastrojki, q) ?: return 400 to "{\"oshibka\":\"не понял: ${q.keys.joinToString()}\"}"
-            Most.postavit(n); 200 to Most.nastrojkiJson()
+            q["sravnit"]?.let { v -> Most.sravnenie = when (v) { "1", "vkl" -> true; "0", "vykl" -> false; else -> !Most.sravnenie } }
+            val ruchki = q - "sravnit"
+            val n = if (ruchki.isEmpty() && q.isNotEmpty()) Most.nastrojki
+                else Pult.kartinka(Most.nastrojki, ruchki) ?: return 400 to "{\"oshibka\":\"не понял: ${q.keys.joinToString()}\"}"
+            Most.postavit(n); 200 to Most.nastrojkiJson().dropLast(1) + ",\"sravnenie\":${Most.sravnenie}}"
+        }
+        "/yachejka" -> {                                    // 3.2.6: ячейки ручек 1–5
+            val y = Most.yachejki ?: return 503 to "{\"oshibka\":\"мост не запущен\"}"
+            val otvet = q["zagruzit"]?.toIntOrNull()?.let { Most.yachejkaZagruzit(it) }
+                ?: q["sohranit"]?.toIntOrNull()?.let { Most.yachejkaSohranit(it) }
+                ?: if (q.containsKey("vernut")) Most.yachejkaVernut() else null
+            200 to (y.json(Most.nastrojki).dropLast(1) + (otvet?.let { ",\"otvet\":${Json.str(it)}" } ?: "") +
+                ",\"kartinka\":${Most.nastrojkiJson()}}")
         }
         "/zvuk" -> {
             q["vkl"]?.let { Most.zvuk(it == "1" || it == "vkl") }

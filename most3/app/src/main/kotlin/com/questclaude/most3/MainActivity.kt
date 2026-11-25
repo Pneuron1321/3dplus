@@ -40,7 +40,7 @@ class MainActivity : Activity() {
     private val pokaz = Pokaz(Most.polka)
     private lateinit var stroka: TextView
     private lateinit var panel: HorizontalScrollView
-    private lateinit var polzunki: ScrollView
+    private lateinit var polzunki: LinearLayout
     private val ui = Handler(Looper.getMainLooper())
     private var panelVidna = true
     private val spryatat = Runnable {
@@ -160,14 +160,6 @@ class MainActivity : Activity() {
         v.setOnScrollChangeListener { _, _, _, _, _ -> pokazatPanel() }   // листает — панель не прячется
     }
 
-    /** Ползунки: не выше половины окна — ниже всегда остаётся ряд кнопок. */
-    private class Polovina(c: Context) : ScrollView(c) {
-        override fun onMeasure(w: Int, h: Int) {
-            val okno = (parent?.parent as? View)?.height?.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
-            super.onMeasure(w, MeasureSpec.makeMeasureSpec(okno / 2, MeasureSpec.AT_MOST))
-        }
-    }
-
     private fun sobratPanel() = HorizontalScrollView(this).apply {
         setBackgroundColor(0x99000000.toInt()); isFillViewport = true; setPadding(0, 0, 0, 26)
         polosa(this, vbok = true)
@@ -228,45 +220,132 @@ class MainActivity : Activity() {
         Polzunok("chernyj", "Точка чёрного (минус — приподнять)", -0.2f, 0.3f) { it.chernyj },
         Polzunok("belyj", "Уровень белого", 0.7f, 1f) { it.belyj },
         Polzunok("zhivost", "Живость", -1f, 1f) { it.zhivost })
-    private val bary = HashMap<String, SeekBar>()
+    // 3.2.6 (Александр 25.11: «ручки не должны занимать пол-окна, ещё и с затемнением»): две тонкие строки внизу, кадр
+    // не затемнён. Сверху — что крутим (короткие названия, листается вбок; там же «Ячейки», «◧ До|После», «↺ Цвет»),
+    // снизу — один ползунок выбранной ручки с «−» и «+» (шаг 1 % хода) или ряд ячеек 1–5.
+    private val KOROTKO = mapOf("sila" to "Сила", "vyderzhka" to "Выдержка", "yarkost" to "Яркость", "kontrast" to "Контраст",
+        "nasyshch" to "Насыщ.", "gamma" to "Гамма", "teni" to "Тени", "rezkost" to "Резкость", "avtonoch" to "Авто-ночь",
+        "temperatura" to "Темп.", "balr" to "Красный", "balg" to "Зелёный", "balb" to "Синий", "ton" to "Тон", "sveta" to "Света",
+        "chernyj" to "Чёрный", "belyj" to "Белый", "zhivost" to "Живость")
+    private var vybrana = "sila"                       // что крутим; "yachejki" — ряд ячеек вместо ползунка
+    private val fishki = HashMap<String, Button>()
+    private lateinit var ryadRuchki: LinearLayout
+    private lateinit var ryadYachejki: LinearLayout
+    private lateinit var imyaRuchki: TextView
+    private lateinit var bar: SeekBar
+    private var stavlyuBar = false
 
-    private fun sobratPolzunki() = Polovina(this).apply {
-        setBackgroundColor(0x99000000.toInt())
-        polosa(this, vbok = false)
-        addView(sobratRyadyPolzunkov())
+    private fun fishka(t: String, f: () -> Unit) = Button(this).apply {
+        text = t; textSize = 12f; isAllCaps = false; minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
+        setPadding(18, 6, 18, 6)
+        setOnClickListener { f(); pokazatPanel() }
     }
 
-    private fun sobratRyadyPolzunkov() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; setPadding(24, 8, 56, 8)   // справа — место полосе прокрутки
-        addView(knopka("Цвет как было (температура, баланс, тон, света, уровни, живость, выдержка, сила)") {
-            var n = Most.nastrojki
-            for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila"))
-                n = n.izmenit(im, "def") ?: n
-            Most.postavit(n); obnovitPolzunki()
-        })
-        for (p in spisok) addView(LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            addView(TextView(context).apply { text = p.nadpis; setTextColor(Color.WHITE); width = 360 })
-            addView(SeekBar(context).apply {
-                max = 1000; bary[p.imya] = this
+    private fun tekushchij() = spisok.firstOrNull { it.imya == vybrana }
+
+    private fun sobratPolzunki() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        val ten = 0x80000000.toInt()                   // фон только под самими кнопками, кадр не темнеет
+        addView(HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            setOnScrollChangeListener { _, _, _, _, _ -> pokazatPanel() }
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; setBackgroundColor(ten)
+                for (p in spisok) addView(fishka(KOROTKO[p.imya] ?: p.imya) { vybrana = p.imya; obnovitPolzunki() }.also { fishki[p.imya] = it })
+                addView(fishka("Ячейки") { vybrana = "yachejki"; obnovitPolzunki() }.also { fishki["yachejki"] = it })
+                lateinit var sr: Button
+                sr = fishka(if (Most.sravnenie) "◧ До|После: вкл" else "◧ До|После") {
+                    Most.sravnenie = !Most.sravnenie; sr.text = if (Most.sravnenie) "◧ До|После: вкл" else "◧ До|После" }
+                addView(sr)
+                addView(fishka("↺ Цвет как было") {
+                    var n = Most.nastrojki
+                    for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila"))
+                        n = n.izmenit(im, "def") ?: n
+                    Most.postavit(n); obnovitPolzunki()
+                })
+            })
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        // строка ползунка: имя и значение, «−», ползунок, «+»
+        ryadRuchki = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(ten); setPadding(12, 0, 12, 0)
+            imyaRuchki = TextView(context).apply { setTextColor(Color.WHITE); textSize = 13f; width = 260 }
+            addView(imyaRuchki)
+            addView(fishka("−") { shag(-1) })
+            bar = SeekBar(context).apply {
+                max = 1000
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(s: SeekBar, v: Int, ot: Boolean) {
-                        if (!ot) return
-                        val z = p.min + (p.max - p.min) * v / 1000f
-                        Most.nastrojki.izmenit(p.imya, "=" + "%.3f".format(java.util.Locale.ROOT, z))?.let { Most.postavit(it) }
-                        pokazatPanel()
+                        val p = tekushchij() ?: return
+                        if (!ot || stavlyuBar) return
+                        postavitRuchku(p, p.min + (p.max - p.min) * v / 1000f)
                     }
                     override fun onStartTrackingTouch(s: SeekBar) {}
                     override fun onStopTrackingTouch(s: SeekBar) {}
                 })
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        })
+            }
+            addView(bar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(fishka("+") { shag(+1) })
+        }
+        addView(ryadRuchki, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        ryadYachejki = sobratYachejki().apply { setBackgroundColor(ten); visibility = View.GONE }
+        addView(ryadYachejki, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         post { obnovitPolzunki() }
     }
 
+    private fun postavitRuchku(p: Polzunok, z: Float) {
+        Most.nastrojki.izmenit(p.imya, "=" + "%.3f".format(java.util.Locale.ROOT, z))?.let { Most.postavit(it) }
+        obnovitPolzunki()
+        pokazatPanel()
+    }
+
+    /** «−» / «+»: 1 % хода ручки. */
+    private fun shag(zn: Int) {
+        val p = tekushchij() ?: return
+        postavitRuchku(p, (p.vzyat(Most.nastrojki) + zn * (p.max - p.min) / 100f).coerceIn(p.min, p.max))
+    }
+
+    // 3.2.6 (Александр 24.11): ячейки ручек 1–5 — одной строкой: «Загрузить 1–5», «💾 1–5» (сохранить), «↶» (вернуть).
+    // Редактировать — загрузить, подвинуть ручки, сохранить в ту же.
+    private val zagrK = HashMap<Int, Button>()
+    private lateinit var yachStroka: TextView
+
+    private fun sobratYachejki() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        yachStroka = TextView(context).apply { setTextColor(Color.WHITE); textSize = 12f; setPadding(12, 2, 12, 0) }
+        addView(yachStroka)
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(12, 0, 12, 0)
+            addView(TextView(context).apply { text = "Загрузить:"; setTextColor(Color.WHITE); textSize = 12f })
+            for (n in 1..Yachejki.SKOLKO) addView(fishka("$n") { yachSoobshchenie = Most.yachejkaZagruzit(n); obnovitPolzunki() }.also { zagrK[n] = it })
+            addView(TextView(context).apply { text = "   💾 Сохранить в:"; setTextColor(Color.WHITE); textSize = 12f })
+            for (n in 1..Yachejki.SKOLKO) addView(fishka("$n") { yachSoobshchenie = Most.yachejkaSohranit(n); obnovitPolzunki() })
+            addView(fishka("↶ вернуть") { yachSoobshchenie = Most.yachejkaVernut(); obnovitPolzunki() })
+        })
+    }
+    private var yachSoobshchenie = ""
+
+    private fun obnovitYachejki() {
+        val y = Most.yachejki ?: return
+        if (!::yachStroka.isInitialized) return
+        for ((n, b) in zagrK) b.text = when { n == y.aktivnaya -> "▸$n"; y.est(n) -> "$n"; else -> "$n—" }
+        val sejchas = if (y.aktivnaya == 0) "ячейка не выбрана" else "сейчас ${y.aktivnaya}" +
+            (if (y.izmeneno(Most.nastrojki)) " — ручки изменены, «💾 ${y.aktivnaya}» запомнит" else "")
+        yachStroka.text = "Ячейки («—» пустая): $sejchas" + (if (yachSoobshchenie.isNotEmpty()) " · $yachSoobshchenie" else "")
+    }
+
     private fun obnovitPolzunki() {
-        val n = Most.nastrojki
-        for (p in spisok) bary[p.imya]?.progress = (((p.vzyat(n) - p.min) / (p.max - p.min)) * 1000).toInt().coerceIn(0, 1000)
+        if (!::bar.isInitialized) return
+        obnovitYachejki()
+        for ((k, b) in fishki) b.alpha = if (k == vybrana) 1f else 0.6f
+        val yach = vybrana == "yachejki"
+        ryadYachejki.visibility = if (yach) View.VISIBLE else View.GONE
+        ryadRuchki.visibility = if (yach) View.GONE else View.VISIBLE
+        val p = tekushchij() ?: return
+        val z = p.vzyat(Most.nastrojki)
+        imyaRuchki.text = "${KOROTKO[p.imya] ?: p.imya}: ${"%.2f".format(java.util.Locale.ROOT, z)}"
+        stavlyuBar = true
+        bar.progress = (((z - p.min) / (p.max - p.min)) * 1000).toInt().coerceIn(0, 1000)
+        stavlyuBar = false
     }
 
     private fun pokazatPanel() {

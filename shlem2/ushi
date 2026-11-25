@@ -293,6 +293,75 @@ def otvet_chatu(t):
     return True
 
 
+# 25.11 Джой — творческий режим Плюса (joy): «плюс плюс, джой, …» или ответ в секунду после его слов — ему, не Плюсу.
+JOY = re.compile(r'^(?:плюс[,\s]+)?(?:джой|джои|джоя|джою|joy|joey)\b[\s,.:!?—-]*(.*)$', re.I)
+JOY_ZAPROS = os.environ.get('USHI_JOY_ZAPROS', '/tmp/joy.zapros')
+JOY_PAPKA = os.environ.get('USHI_JOY_PAPKA', '/root/.joy')
+JOY_BIN = os.environ.get('USHI_JOY_BIN', '/usr/local/bin/joy')
+JOY_PLUSU_T = os.environ.get('USHI_JOY_PLUSU_T', '/tmp/joy.plusu-t')
+
+
+def joy_zhiv():
+    return os.path.exists(JOY_BIN) and not os.path.exists(os.path.join(JOY_PAPKA, 'vykl'))
+
+
+def joy_govoril_posledney():
+    try:
+        return (open(G_DOSLUH_KTO).read().strip() == 'joy' and
+                time.time() - os.path.getmtime(G_DOSLUH_KTO) <= VED_PAUZA)
+    except OSError:
+        return False
+
+
+def joy_zapros(t, dosluh=False, vyzov=False):
+    """Фраза Джою (сам он ответит голосом Плюса, подпись JOY). True — забрал, Плюсу не идёт."""
+    if not joy_zhiv():
+        return False
+    m = JOY.match(t.strip())
+    # vyzov — мост услышал «плюс джой» (2.8.14, how "joy"): вся фраза Джою, даже если Whisper не записал «джой»
+    tekst = (m.group(1) if m else t if vyzov or (dosluh and joy_govoril_posledney()) else '').strip(' .!?,…«»"')
+    if not m and not vyzov and not tekst:
+        return False
+    if not tekst:
+        tekst = 'Привет! Я позвал тебя — что думаешь о том, что сейчас происходит?'
+    try:
+        with open(JOY_ZAPROS + '.tmp', 'w') as f:
+            json.dump({'t': time.time(), 'tekst': tekst}, f, ensure_ascii=False)
+        os.replace(JOY_ZAPROS + '.tmp', JOY_ZAPROS)
+    except OSError:
+        return False
+    print(time.strftime('%H:%M:%S'), 'Джою:', tekst[:60], flush=True)
+    return True
+
+
+def joy_dlya_plusa():
+    """25.11 (Александр: «Плюс должен быть в курсе того, что делает Джой — это один и тот же Плюс»): новое, что сказал
+    Джой с прошлой фразы Плюсу (за последние 30 мин, до 2 записей) — коротко перед его следующей фразой."""
+    try:
+        bylo = float(open(JOY_PLUSU_T).read().strip() or 0)
+    except (OSError, ValueError):
+        bylo = 0.0
+    novye = []
+    try:
+        for l in open(os.path.join(JOY_PAPKA, 'dlya-plusa.jsonl'), errors='replace').read().splitlines()[-5:]:
+            try:
+                z = json.loads(l)
+            except ValueError:
+                continue
+            if z.get('t', 0) > bylo and time.time() - z.get('t', 0) < 1800:
+                novye.append(z)
+    except OSError:
+        return ''
+    if not novye:
+        return ''
+    novye = novye[-2:]
+    try:
+        open(JOY_PLUSU_T, 'w').write(str(novye[-1]['t']))
+    except OSError:
+        pass
+    return '(Джой — твой творческий режим — недавно сказал: %s) ' % ' / '.join('«%s»' % str(z.get('tekst', ''))[:300] for z in novye)
+
+
 def sufler_zapros(t):
     """«Плюс, по-английски [фраза]» / «плюс, разминка» — суфлёру (он ответит в ухо; Плюсу не идёт). True — забрали."""
     low = t.lower().strip(' .!?,…')
@@ -545,6 +614,8 @@ def v_plus(text, metka='(голосом) '):
     раз. На экране вопрос Claude Code — не вписываем
     (False): Enter ответил бы на него."""
     text = text.rstrip(' ;')
+    if metka == '(голосом) ':
+        text = joy_dlya_plusa() + text       # 25.11: Плюс в курсе слов Джоя
     if raciya_zhiva():
         v_raciyu(metka + text)
         return True
@@ -1423,6 +1494,10 @@ def handle(e, sluh):
         metka('vpisal', e['id'])
     elif kind == 'text' and (SUF_RAZMINKA.match(low) or SUF_EN.match(t.strip())) and sufler_zapros(t):
         ved_dialog(t, 'plus')
+        metka('vpisal', e['id'])
+    elif kind == 'text' and (JOY.match(t.strip()) or dosluh or e.get('how') == 'joy') and \
+            joy_zapros(t, dosluh, vyzov=e.get('how') == 'joy'):
+        ved_dialog(t, 'joy')
         metka('vpisal', e['id'])
     elif kind == 'text' and (SEK_PLAN.match(low) or SEK_PERERYV_R.match(low) or SEK_ITOG.match(low)):
         ved_dialog(t, 'plus')

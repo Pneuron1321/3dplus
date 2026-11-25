@@ -356,6 +356,45 @@ def ideya_dostavit():
         ved_ideya(z.get('tekst', ''), z.get('nomer', 0))
 
 
+JOY_BIN = E('KANAL_JOY_BIN', '/usr/local/bin/joy')
+JOY_PAPKA = E('KANAL_JOY_PAPKA', '/root/.joy')
+
+
+def joy_zhiv():
+    return os.path.exists(JOY_BIN) and not os.path.exists(os.path.join(JOY_PAPKA, 'vykl'))
+
+
+def joy_dusha():
+    """25.11: идеи рождает Джой — творческий режим Плюса: его душа и память о вкусе Александра (joy dusha). Нет — ''."""
+    if not joy_zhiv():
+        return ''
+    try:
+        r = subprocess.run([JOY_BIN, 'dusha'], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() if r.returncode == 0 else ''
+    except Exception:
+        return ''
+
+
+def joy_ideya(fraza, nomer):
+    """Идею говорит Джой — голосом Плюса, только в ухо («.joyu»); ответил сразу — разговор с Джоем. В его журнал и в общий."""
+    os.makedirs(G_Q, exist_ok=True)
+    put = '%s/%d.joyu' % (G_Q, time.time_ns())
+    with open(put + '.tmp', 'w') as f:
+        f.write(fraza)
+    os.replace(put + '.tmp', put)
+    t = round(time.time(), 1)
+    os.makedirs(JOY_PAPKA, exist_ok=True)
+    with open(os.path.join(JOY_PAPKA, 'zhurnal.jsonl'), 'a') as f:
+        f.write(json.dumps({'t': t, 'kogda': time.strftime('%Y-%m-%d %H:%M'), 'vid': 'ideya', 'vopros': '',
+                            'otvet': fraza, 'ideya': nomer}, ensure_ascii=False) + '\n')
+    with open(os.path.join(JOY_PAPKA, 'dlya-plusa.jsonl'), 'a') as f:
+        f.write(json.dumps({'t': t, 'tekst': fraza[:400]}, ensure_ascii=False) + '\n')
+    os.makedirs(os.path.dirname(VED_DIALOG), exist_ok=True)
+    with open(VED_DIALOG, 'a') as f:
+        f.write(json.dumps({'t': t, 'rol': 'joy', 'komu': 'alex', 'tekst': fraza, 'ru': fraza, 'vid': 'ideya',
+                            'ideya': nomer}, ensure_ascii=False) + '\n')
+
+
 def ved_ideya(tekst, nomer):
     """06.11 (Александр: «идеи не привязаны ни к Плюсу, ни к соведущей — с ними тяжело взаимодействовать»): идею говорит
     соведущая — её голосом, только ему в ухо («.vedu»); после — секунда «дослуха» ей: ответил — она обсуждает и пишет
@@ -364,10 +403,16 @@ def ved_ideya(tekst, nomer):
     if v_raunde() or not uho_svobodno():               # раунд или ухо только что занято — подождёт
         zapisat(os.path.join(PAPKA, 'ideya-zhdet.json'), {'tekst': tekst, 'nomer': nomer, 't': time.time()})
         return
+    fraza = 'Идея %d: %s' % (nomer, tekst.strip())   # 06.11: без имени
+    if joy_zhiv():                                    # 25.11: идеи — от Джоя, его голосом (голос Плюса)
+        try:
+            joy_ideya(fraza, nomer)
+            return
+        except OSError:
+            pass
     if os.path.exists(VED_OFF):
         v_uho(tekst)
         return
-    fraza = 'Идея %d: %s' % (nomer, tekst.strip())   # 06.11: без имени
     try:
         os.makedirs(G_Q, exist_ok=True)
         put = '%s/%d.vedu' % (G_Q, time.time_ns())
@@ -508,7 +553,7 @@ def haiku(sistema, zapros_, model='haiku', timeout=120, effort=None):
            '--settings', '{"disableAllHooks":true}', '--output-format', 'json', '--system-prompt', sistema, zapros_]
     try:
         r = subprocess.run(cmd, cwd=PAPKA, env=env, capture_output=True, text=True, timeout=timeout)
-        uchet('kanal:' + ('idei' if sistema.startswith(ZADANIE_IDEI) else 'kritik' if sistema is ZADANIE_KRITIK
+        uchet('kanal:' + ('idei' if ZADANIE_IDEI in sistema else 'kritik' if sistema is ZADANIE_KRITIK
                           else model), model, effort, r.stdout)
         t = json.loads(r.stdout).get('result', '')
         m = re.search(r'\{.*\}', t, re.S)
@@ -1093,7 +1138,8 @@ class Kanal:
                 'idei_zriteley': chitat(os.path.join(PAPKA, 'idei-zriteley.json'), [])[-10:],
                 'vopros_sezona': sezon().get('vopros'), 'strany_sezona': len(strany()),
                 'urok_dnya': urok_dnya().get('tekst'), 'pamyat_zriteley': len(pamyat())}
-        o = haiku(ZADANIE_IDEI + ('\n\n=== Методы ===\n' + kozyri if kozyri else ''),
+        d = joy_dusha()                                   # 25.11: генератор — Джой (душа + его память о вкусе)
+        o = haiku((d + '\n\n=== Задание сейчас ===\n' if d else '') + ZADANIE_IDEI + ('\n\n=== Методы ===\n' + kozyri if kozyri else ''),
                   json.dumps(sost, ensure_ascii=False), model=IDEI_MODEL, timeout=360, effort='medium')
         kand = [k for k in (o or {}).get('kandidaty') or [] if isinstance(k, dict) and k.get('ideya')][:6]
         if not kand:

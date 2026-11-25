@@ -880,8 +880,41 @@ def kartinka3_skazat(k, avto=None):
     return out + '.'
 
 
+def yachejki3(a):
+    """Мост 3 3.2.6: ячейки ручек 1–5 — yachejka N (загрузить), sohranit N, vernut_yachejku, yachejki (что занято)."""
+    U = most3_url()
+    w = a[0]
+    n = a[1] if len(a) > 1 and a[1] in ('1', '2', '3', '4', '5') else None
+    if w in ('yachejka', 'yacheyka', 'preset') and n:
+        q = '?zagruzit=' + n
+    elif w in ('sohranit', 'zapomni') and n:
+        q = '?sohranit=' + n
+    elif w in ('vernut_yachejku', 'vernut'):
+        q = '?vernut=1'
+    elif w == 'yachejki' and len(a) == 1:
+        q = ''
+    else:
+        return 1, ['karta kartinka yachejka 1..5 — загрузить ручки ячейки; sohranit 1..5 — записать нынешние ручки; '
+                   'vernut_yachejku — отменить последнее сохранение; yachejki — какие заняты.'], None
+    r = zapros(U, '/yachejka' + q, 5)
+    if r is None:
+        return 1, [MOST3_MOLCHIT], None
+    if r[0] == 404:
+        return 1, ['Ячейки ручек: нужен Мост 3 3.2.6 (обнови приложение).'], None
+    d = razobrat(r[1]) or {}
+    est = [str(i + 1) for i, x in enumerate(d.get('est') or []) if x]
+    out = (d.get('otvet') + '. ' if d.get('otvet') else '') + 'Ячейки заняты: %s' % (', '.join(est) or 'ни одной')
+    if d.get('aktivnaya'):
+        out += '; сейчас %s%s' % (d['aktivnaya'], ' (ручки изменены, не сохранены)' if d.get('izmeneno') else '')
+    if d.get('otvet') and 'загружена' in d['otvet'] and isinstance(d.get('kartinka'), dict):
+        out += '. ' + kartinka3_skazat(d['kartinka'])
+    return 0, [out + ('' if out.endswith('.') else '.')], None
+
+
 def kartinka3(a):
     U = most3_url()
+    if a and a[0] in ('yachejka', 'yacheyka', 'preset', 'sohranit', 'zapomni', 'vernut_yachejku', 'yachejki'):
+        return yachejki3(a)
     shejder, ruchki = {}, []
     i = 0
     while i < len(a):
@@ -909,6 +942,12 @@ def kartinka3(a):
         elif w == 'uroven' and i + 2 < len(a) and all(re.fullmatch(CHISLO3 + '|def', x) for x in a[i + 1:i + 3]):
             shejder['chernyj'], shejder['belyj'] = a[i + 1:i + 3]                         # uroven 0.05 0.95
             i += 2
+        elif w == 'sravnit':                               # Мост 3 3.2.6: окно пополам — до | после
+            if i + 1 < len(a) and a[i + 1] in ('vkl', 'vykl'):
+                shejder['sravnit'] = a[i + 1]
+                i += 1
+            else:
+                shejder['sravnit'] = 'pereklyuchit'
         elif w in ('cvet_def', 'cvet_kak_bylo'):
             for x in CVET3_DEF:
                 shejder[x] = 'def'
@@ -927,7 +966,8 @@ def kartinka3(a):
                        'temperatura =-30 (−100..100); ton =-10 (±30°); sveta 0.5 (±1); zhivost 0.4 (±1); balans 1.1 1 0.9 '
                        '(0.5–1.5); uroven 0.05 0.95 (чёрный −0.2–0.3, белый 0.7–1); chernyj =-0.1 (минус — чёрный приподнят); '
                        'vyderzhka 0.5 (±2 ступени); sila 1.5 (0–2: сила всех ручек сразу, 1 — как настроено); '
-                       'cvet_def — цвет как было; kak_bylo. '
+                       'cvet_def — цвет как было; kak_bylo; ячейки: yachejka 1..5, sohranit 1..5, vernut_yachejku, yachejki; '
+                       'sravnit [vkl|vykl] — окно пополам: до | после. '
                        'Минус: «-N» — сдвиг вниз, «=-N» — задать.'], None
         i += 1
     if ruchki:
@@ -950,6 +990,9 @@ def kartinka3(a):
     if st:
         avto = (razobrat(st[1]) or {}).get('avto_teni')
     out = kartinka3_skazat(d, avto)
+    if 'sravnit' in shejder and 'sravnenie' in d:
+        out = ('Сравнение включено: слева кадр как пришёл с карты, справа с ручками. ' if d['sravnenie']
+               else 'Сравнение выключено. ') + out
     if 'nabor' in shejder:
         out = 'Набор «%s». ' % NABORY3_RU[shejder['nabor']] + out
     return 0, [out], None

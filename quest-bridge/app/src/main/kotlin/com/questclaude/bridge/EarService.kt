@@ -310,7 +310,7 @@ class EarService : Service() {
                             if (h != null) {
                                 if (h.action != "stop") hits += h          // «копи копи» — только внутри фразы
                                 if (h.action == "wake" && !uho) bare += h
-                                if (h.action == "wake" || h.action == Triggers.CHEK) {
+                                if (h.action == "wake" || h.action == Triggers.CHEK || h.action == Triggers.JOY) {
                                     (if (uho) words.getOrNull(1) ?: words.lastOrNull() else words.lastOrNull())
                                         ?.let { wakeAt[h] = e.base + (it.end * RATE).toLong() }
                                     words.firstOrNull()?.let { wakeFrom[h] = e.base + (it.start * RATE).toLong() }
@@ -318,7 +318,7 @@ class EarService : Service() {
                                 }
                             } else {
                                 // «плюс плюс …» или «чек чек плюс …» в начале итога, дальше уже фраза
-                                for (a in listOf("wake", Triggers.CHEK)) {
+                                for (a in listOf("wake", Triggers.CHEK, Triggers.JOY)) {
                                     val end = triggers.wakeAtStart(e.lang, words, action = a) ?: continue
                                     val w = Triggers.Hit(a, e.lang, triggers.minConf)
                                     hits += w
@@ -394,7 +394,7 @@ class EarService : Service() {
                     val pre = if (from == null) ShortArray(0) else kolco.since(from)
                     ears.forEach { fresh(it, triggers, from ?: kolco.total) }   // вторая модель не повторит то же
                     when {
-                        h.action == "wake" || h.action == Triggers.CHEK -> {
+                        h.action == "wake" || h.action == Triggers.CHEK || h.action == Triggers.JOY -> {
                             Hub.say?.stop()                  // голос через приложение — замолкает сразу
                             val wake = Hub.ear.post("wake")          // Ава замолкает; момент — для плёнки
                             Hub.lastWakeMs = wake.ms
@@ -408,7 +408,8 @@ class EarService : Service() {
                                 else wakeFrom[h]?.let { maxOf(0L, it - LEAD_MARGIN, from - LEAD_MAX) }
                             val lead = if (leadFrom == null || leadFrom >= from!!) ShortArray(0)
                                 else kolco.since(leadFrom).let { it.copyOfRange(0, maxOf(0, it.size - pre.size)) }
-                            nachatFrazu(pre, lead, how[h].orEmpty(), h.action == Triggers.CHEK)
+                            // 2.8.14: «плюс джой» — фраза помечена how "joy": уши отдают её Джою
+                            nachatFrazu(pre, lead, if (h.action == Triggers.JOY) "joy" else how[h].orEmpty(), h.action == Triggers.CHEK)
                         }
                         h.action.startsWith("rezhim:") -> {
                             beep(Signal.Kind.HEARD)
@@ -802,6 +803,13 @@ class EarService : Service() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         Pamyat.trim(level)
+    }
+
+    /** 2.8.14: задачу моста убрали (крестик на Quest, смахнули) — закрыть всё, не жить в фоне. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // только главное окно моста: закрыли окно чата (своя задача) — мост живёт дальше
+        if (Hub.glavnoeOkno(rootIntent)) Hub.zakrytVsyo(this)
     }
 
     override fun onDestroy() {

@@ -205,7 +205,7 @@ def subtitr(kto, tekst, perevod_=None, sek=None):
         log('приложение:', type(e).__name__, str(e)[:80])
     try:
         with open(ISTORIYA, 'a') as f:
-            f.write('%s %s | %s | %s\n' % (time.strftime('%H:%M:%S'), 'Плюс' if kto == 'plus' else 'Александр',
+            f.write('%s %s | %s | %s\n' % (time.strftime('%H:%M:%S'), {'plus': 'Плюс', 'joy': 'Джой'}.get(kto, 'Александр'),
                                           tekst, perevod_ or ''))
     except OSError:
         pass

@@ -26,11 +26,35 @@ object Most {
     private var dir: File? = null
     private var server: Server? = null
     @Volatile var app: Context? = null; private set
+    /** 3.2.6 (Александр 25.11: «настраивать ручки тяжело — нет ориентира»): окно шлема пополам — слева кадр как
+     *  пришёл с карты (без ручек), справа с ручками, белая черта посередине. Только окно: эфир, клип — как обычно. */
+    @Volatile var sravnenie = false
+    /** 3.2.6: ячейки ручек 1–5 (Yachejki). */
+    @Volatile var yachejki: Yachejki? = null; private set
+
+    /** Загрузить ячейку [n] — поставить её ручки. Ответ — для панели и Плюса. */
+    fun yachejkaZagruzit(n: Int): String {
+        val y = yachejki ?: return "мост не запущен"
+        val v = y.zagruzit(n) ?: return "ячейка $n пустая — сначала «Сохранить в $n»"
+        postavit(v); return "ячейка $n загружена"
+    }
+
+    /** Сохранить нынешние ручки в ячейку [n]. */
+    fun yachejkaSohranit(n: Int): String {
+        val y = yachejki ?: return "мост не запущен"
+        return if (y.sohranit(n, nastrojki)) "ручки сохранены в ячейку $n (передумал — «вернуть ячейку»)" else "ячейка $n не сохранилась"
+    }
+
+    fun yachejkaVernut(): String {
+        val n = yachejki?.vernut() ?: 0
+        return if (n == 0) "возвращать нечего" else "ячейке $n вернул прежнее"
+    }
 
     @Synchronized fun zapusk(ctx: Context) {
         if (dir == null) {
             app = ctx.applicationContext
             dir = ctx.filesDir
+            yachejki = Yachejki(ctx.filesDir)
             zagruzit()
             server = Server(PORT).also { it.start() }
             Struny.start(ctx.applicationContext)          // эфир моста 2 может брать игру отсюда (efir igra)
@@ -325,7 +349,7 @@ object Most {
         val k = karta
         return "{\"versiya\":\"$VERSIYA\",\"karta\":${k?.let { Json.str(it.ustr.productName.orEmpty()) } ?: "null"}," +
             "\"video\":${video?.status() ?: "null"},\"klip\":${klip?.status() ?: "null"},\"zvuk\":${zvuk?.status() ?: zvukOshibka?.let { "{\"idyot\":false,\"oshibka\":${Json.str(it)}}" } ?: "null"},\"zvuk_vkl\":$zvukVkl," +
-            "\"usb2\":${k?.let { usb2(it) } ?: false},\"ruchnoj\":${ruchnoj != null},\"profil\":\"${profil.imya}\",\"pokaz_fps\":${Json.num(polka.pokazFps)},\"srednyaya\":${Json.num(polka.srednyaya, 3)}," +
+            "\"usb2\":${k?.let { usb2(it) } ?: false},\"ruchnoj\":${ruchnoj != null},\"profil\":\"${profil.imya}\",\"pokaz_fps\":${Json.num(polka.pokazFps)},\"okno\":\"${polka.oknoW}x${polka.oknoH}\",\"sravnenie\":$sravnenie,\"srednyaya\":${Json.num(polka.srednyaya, 3)}," +
             "\"avto_teni\":${Json.num(polka.avtoTeni, 3)},\"mjpeg_ms\":${Json.num(polka.mjpegMs)},\"mjpeg_propuskov\":${polka.mjpegPropuskov},\"efir\":${Json.str(Struny.sostoyanie)},\"efir_rezhim\":\"${Struny.rezhim}\",\"okno_aktivno\":${Struny.oknoAktivno},\"efir_kadrov\":${Struny.kadrov},\"kartinka\":${nastrojkiJson()}," +
             "\"oshibka_pokaza\":${oshibkaPokaza?.let { Json.str(it) } ?: "null"}," +
             "\"oshibka\":${oshibka?.let { Json.str(it) } ?: "null"}}"
@@ -365,7 +389,7 @@ object Most {
 
     const val PORT = 8767
     /** = versionName в app/build.gradle.kts (сборка сверяет). */
-    const val VERSIYA = "3.2.5"
+    const val VERSIYA = "3.2.6"
 }
 
 /**
@@ -377,6 +401,9 @@ class Polka {
     @Volatile var rezhim: UvcRezhim? = null
     @Volatile var kadr: Kadr? = null; private set
     @Volatile var pokazFps = 0f
+    /** 3.2.6: сколько точек у картинки в окне шлема (окно меньше кадра — кадр уменьшается под окно). */
+    @Volatile var oknoW = 0
+    @Volatile var oknoH = 0
     @Volatile var srednyaya = 0f
     @Volatile var avtoTeni = 0f
     /** MJPEG: среднее время разжатия кадра (мс) и сколько кадров не дождались свободного потока. */

@@ -9,7 +9,7 @@ object Shader {
     // uHdr/uPik/uBelyj работают только в P010, uPolnyj — во всех YUV.
     val UNIFORMY = listOf("uYarkost", "uKontrast", "uNasyshch", "uGamma", "uTeni", "uAvtoTeni", "uRezkost", "uPolnyj", "uSyroe",
         "uLokalno", "uSuper", "uHdr", "uPik", "uBelyj",
-        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila")
+        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila", "uSravnenie")
     val SAMPLERY_YUY2 = listOf("uTekYuy2")          // блок 0: GL_RGBA8 W/2×H, (Y0,U,Y1,V)
     val SAMPLERY_NV12 = listOf("uTekY", "uTekUV")   // блок 0: GL_R8 W×H; блок 1: GL_RG8 W/2×H/2
     val SAMPLERY_RGBA = listOf("uTekRgba")          // блок 0: GL_RGBA8 W×H
@@ -48,6 +48,7 @@ object Shader {
         uniform float uZhivost;   // живость −1..1
         uniform float uVyderzhka; // 3.2.4: множитель выдержки 2^(ступени/2.2) (KartinkaCpu.mnozhitelVyderzhki)
         uniform float uSila;      // 3.2.4: сила всех ручек 0..2 — mix(вход, обработанное, uSila)
+        uniform float uSravnenie; // 3.2.6: 1 — левая половина как пришла (без ручек), правая с ручками, черта посередине
         uniform float uGamma;     // 0.5..2.5, pow(x, 1/g)
         uniform float uTeni;      // 0..1, подъём теней
         uniform float uAvtoTeni;  // 0..1, авто-ночь (считает CPU), складывается с uTeni
@@ -277,7 +278,10 @@ object Shader {
         }
         float yarkostVzyat(vec2 uv) { return dot(rgbVzyat(uv), VES); }
         void main() {
+            float px = fwidth(vUv.x);                       // ширина точки окна в долях — для черты сравнения
             if (uSyroe > 0.5) { fragColor = vec4(rgbVzyat(vUv), 1.0); return; }
+            if (uSravnenie > 0.5 && vUv.x < 0.5 - 1.5 * px) { fragColor = vec4(rgbSuper(vUv), 1.0); return; }
+            if (uSravnenie > 0.5 && vUv.x < 0.5 + 1.5 * px) { fragColor = vec4(1.0); return; }
             vec3 c = rgbSuper(vUv);
             vec3 vhod = c;
             float d = 0.0;

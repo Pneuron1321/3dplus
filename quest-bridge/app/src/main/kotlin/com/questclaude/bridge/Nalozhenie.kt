@@ -925,7 +925,8 @@ class Nalozhenie(
 
     /** Имя голоса в субтитрах: ALEXANDER, PLUS, GAME, гость — его имя большими буквами. */
     private fun imyaGolosa(kto: String): String = when (kto) {
-        "plus" -> "FIERCY JOY"               // 2.8.12 (Александр 23.11): у Плюса имя — Fiercy Joy
+        "plus" -> "PLUS"                     // 2.8.14 (Александр 25.11): подписи «PLUS» и «JOY» (Джой — творческий режим Плюса)
+        "joy" -> "JOY"
         "igra" -> "GAME"
         "ya" -> "ALEXANDER"
         else -> gosti?.komnata?.imyaGolosa(kto)?.uppercase() ?: "GUEST"
@@ -933,6 +934,7 @@ class Nalozhenie(
 
     private fun cvetGolosa(kto: String): Int = when (kto) {
         "plus" -> Color.rgb(255, 205, 70)
+        "joy" -> Color.rgb(255, 120, 210)    // 2.8.14: Джой — розовый, чтобы отличать от Плюса
         "igra" -> Color.rgb(140, 225, 140)
         "ya" -> Color.rgb(130, 200, 255)
         else -> gosti?.komnata?.poGolosu(kto)?.let { cvetRamki(it) } ?: cvetRamki(null)

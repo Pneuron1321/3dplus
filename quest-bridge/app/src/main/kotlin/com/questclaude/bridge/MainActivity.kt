@@ -55,6 +55,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Hub.zakryt = false                               // 2.8.14: открыли снова — снова всё как обычно
         noSleep()
         status = TextView(this).apply { textSize = 20f }
         fun button(text: String, action: () -> Unit) = Button(this).apply {
@@ -317,4 +318,11 @@ class MainActivity : Activity() {
         ui.removeCallbacks(refresh)
         super.onPause()
     }
+
+    /** 2.8.14 (Александр 25.11: «нажимаю крестик — приложение должно закрываться со всем, что из-за него работает»). */
+    override fun onDestroy() {
+        if (isFinishing) Hub.zakrytVsyo(this)
+        super.onDestroy()
+    }
+
 }

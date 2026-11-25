@@ -120,7 +120,7 @@ class Titry(
     }
 
     companion object {
-        val KTO = setOf("ya", "plus", "igra", "g1", "g2", "g3")
+        val KTO = setOf("ya", "plus", "joy", "igra", "g1", "g2", "g3")   // 2.8.14: joy — Джой
         const val MAKS = 2
         const val MAKS_VNIZU = 3
         const val HRANIT = 12

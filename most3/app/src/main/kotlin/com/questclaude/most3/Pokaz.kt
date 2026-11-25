@@ -119,7 +119,8 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         val m = minOf(ekranW / kw, ekranH / kh)
         val vw = (kw * m).toInt(); val vh = (kh * m).toInt()
         glViewport((ekranW - vw) / 2, (ekranH - vh) / 2, vw, vh)
-        risovat(prog, n, polka.avtoTeni, syroe = false, oknoW = vw, oknoH = vh)
+        polka.oknoW = vw; polka.oknoH = vh
+        risovat(prog, n, polka.avtoTeni, syroe = false, oknoW = vw, oknoH = vh, sravnit = Most.sravnenie)
         if (novyj) { zapisat(prog, n); vEfir(prog, n) }
 
         kadrovPokaz++
@@ -193,7 +194,7 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
     }
 
     /** oknoW×oknoH — куда рисуем (точки): для uSuper; замер в крошку — 32×18 и uSuper = 1. */
-    private fun risovat(prog: Int, n: Nastrojki, avto: Float, syroe: Boolean, oknoW: Int, oknoH: Int) {
+    private fun risovat(prog: Int, n: Nastrojki, avto: Float, syroe: Boolean, oknoW: Int, oknoH: Int, sravnit: Boolean = false) {
         glUseProgram(prog)
         fun u(imya: String, v: Float) = glUniform1f(glGetUniformLocation(prog, imya), v)
         u("uYarkost", n.yarkost); u("uKontrast", n.kontrast); u("uNasyshch", n.nasyshch); u("uGamma", n.gamma)
@@ -202,6 +203,7 @@ class Pokaz(private val polka: Polka) : GLSurfaceView.Renderer {
         u("uMnR", mn[0]); u("uMnG", mn[1]); u("uMnB", mn[2]); u("uTon", n.ton); u("uSveta", n.sveta)
         u("uUrChernyj", n.chernyj); u("uUrBelyj", n.belyj); u("uZhivost", n.zhivost)
         u("uVyderzhka", KartinkaCpu.mnozhitelVyderzhki(n)); u("uSila", n.sila)   // 3.2.4
+        u("uSravnenie", if (sravnit && !syroe) 1f else 0f)                        // 3.2.6: до | после, только окно
         u("uPolnyj", if (n.polnyjDiapazon) 1f else 0f); u("uSyroe", if (syroe) 1f else 0f)
         u("uLokalno", if (kartaEst && !syroe) n.lokalno else 0f)
         u("uSuper", if (syroe || oknoW <= 0 || oknoH <= 0) 1f else maxOf(tekW / oknoW.toFloat(), tekH / oknoH.toFloat()))

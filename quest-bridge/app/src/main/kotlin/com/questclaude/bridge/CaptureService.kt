@@ -237,8 +237,9 @@ class CaptureService : Service() {
         p.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
                 status = "Захват остановлен системой."
-                // 2.8.1 (Александр 30.10: эфир оборвался через 54 мин, а он не понял): уши — Плюсу, тот скажет вслух
-                Hub.ear.post("zahvat", if (Hub.efir != null) "oborvan efir" else "oborvan")
+                // 2.8.1 (Александр 30.10: эфир оборвался через 54 мин, а он не понял): уши — Плюсу, тот скажет вслух.
+                // 2.8.14: мост закрыли крестиком — это не обрыв, молчим
+                if (!Hub.zakryt) Hub.ear.post("zahvat", if (Hub.efir != null) "oborvan efir" else "oborvan")
                 stopSelf()
             }
         }, handler)
@@ -792,6 +793,13 @@ class CaptureService : Service() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         Pamyat.trim(level)
+    }
+
+    /** 2.8.14: задачу моста убрали (крестик на Quest, смахнули) — закрыть всё, не жить в фоне. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // только главное окно моста: закрыли окно чата (своя задача) — мост живёт дальше
+        if (Hub.glavnoeOkno(rootIntent)) Hub.zakrytVsyo(this)
     }
 
     override fun onDestroy() {

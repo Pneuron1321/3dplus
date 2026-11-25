@@ -68,6 +68,23 @@ object Hub {
     @Volatile var say: FrameServer.Say? = null
     /** Фоновая музыка (2.5.6, /fon…): ставит первая служба, как голос. */
     @Volatile var fon: Fon? = null
+    /** 2.8.14: мост закрывают крестиком — всё гасим, и обрыв захвата не объявлять (это не авария). */
+    @Volatile var zakryt = false
+
+    /** Крестик окна или задачу убрали (Александр 25.11: «закрываю — а музыка играет, говорит „захват оборван“»):
+     *  музыку и голос — сразу, службы захвата и ушей — стоп (сервер моста гаснет вместе с ними). */
+    /** Это задача главного окна моста (а не окна чата и не входа карты). */
+    fun glavnoeOkno(i: android.content.Intent?): Boolean = i?.component?.className?.endsWith(".MainActivity") == true
+
+    fun zakrytVsyo(ctx: android.content.Context) {
+        zakryt = true
+        try { fon?.stop() } catch (e: Exception) { }
+        try { say?.stop() } catch (e: Exception) { }
+        try { ctx.stopService(android.content.Intent(ctx, CaptureService::class.java)) } catch (e: Exception) { }
+        try { ctx.stopService(android.content.Intent(ctx, EarService::class.java)) } catch (e: Exception) { }
+        try { Shlem.sleepAsUsual(ctx) } catch (e: Exception) { }   // открытие моста выключало сон — вернуть как было
+        Pamyat.zapis("мост закрыт крестиком — всё выключено")
+    }
     /** Звук карты захвата (2.6.0, /karta…): ставит первая служба, как музыку. */
     @Volatile var karta: KartaZvuk? = null
 

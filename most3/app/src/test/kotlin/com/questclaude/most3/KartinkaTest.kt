@@ -338,7 +338,7 @@ class KartinkaTest {
     @Test fun shejderZnaetNovyeRuchki() {
         val f = Shader.FRAG_NV12
         assertTrue(f.contains("K_SVETOV = ${KartinkaCpu.K_SVETOV}") && f.contains("MIN_UROVNYA = ${KartinkaCpu.MIN_UROVNYA}"))
-        for (u in listOf("uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila"))
+        for (u in listOf("uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila", "uSravnenie"))
             assertTrue(u, u in Shader.UNIFORMY)
         assertTrue(f.contains("mix(vhod, obr, uSila)") && f.contains("c * uVyderzhka"))
     }
