@@ -58,6 +58,7 @@ import kotlin.concurrent.thread
  *   GET /kamera              -> камера телефона: {"state":"vykl|zhdu|idyot", razmer, fps, kbps, v_efire, vid, gde,
  *                              dolya, povorot, vplotnuyu, sboku, adres (без ключа), oshibka}
  *   GET /kamera/vid?v=ugol|krupno|skryt&gde=pn|ln|pv|lv&r=0.25 -> окно камеры в эфире (приложение запоминает);
+ *                            polnyj=1 (2.8.16) — вся картинка: срез краёв 0 и своему окну форма картинки;
  *                              pov=0|90|180|270 — повернуть картинку по часовой, kray=0 — вплотную снизу (сверху),
  *                              1 — с отступом 3 % высоты; bok=4 — отступ сбоку, % ширины (0 — вплотную; 2.3.8)
  *   GET /kamera/stranica     -> открыть на 2 минуты страницу для айфона (http://plus.local:8770): {"adres","ip","sek"}

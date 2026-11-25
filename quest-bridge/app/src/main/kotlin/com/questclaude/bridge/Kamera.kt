@@ -245,6 +245,17 @@ class Kamera(
             "\"snizu\":${p(1080f - r[1] - r[3], 1080f)},\"shirina\":${p(r[2], 1920f)},\"vysota\":${p(r[3], 1080f)}},"
     }
 
+    /** 2.8.16: сколько картинки камеры не видно с каждой стороны (срез краёв + форма своего окна) — Плюсу и шторке. */
+    private fun kartinka(v: Okno.Vid): String {
+        val z = Oformlenie.fonObrez
+        fun f(x: Float) = String.format(java.util.Locale.ROOT, "%.1f", x)
+        val obrez = "\"obrez\":[${z.joinToString(",") { f(it * 100f) }}],"
+        if (w <= 0 || h <= 0 || v.rezhim == "skryt") return obrez
+        val k = Okno.kartinka(v, Okno.proporcii(w, h, v.povorot), z.takeIf { o -> o.any { it > 0f } })
+        return obrez + "\"kartinka\":{\"sleva\":${f(k[0])},\"sverhu\":${f(k[1])},\"sprava\":${f(k[2])},\"snizu\":${f(k[3])}," +
+            "\"zapolnenie\":[${f(k[4])},${f(k[5])},${f(k[6])},${f(k[7])}],\"celikom\":${(0..3).all { k[it] < 0.5f }}},"
+    }
+
     override fun status(): String {
         val v = vid
         val ip = ip()
@@ -253,7 +264,7 @@ class Kamera(
             "\"pokazano\":$pokazano,\"klip_sek\":${klip.sekund},\"propushcheno\":$propushcheno,\"v_efire\":${dec != null}," +
             "\"vid\":\"${v.rezhim}\",\"gde\":\"${v.gde}\",\"dolya\":${v.dolya}," +
             "\"povorot\":${v.povorot},\"vplotnuyu\":${v.vplotnuyu},\"sboku\":${v.sboku}," +
-            "\"ramka\":[${v.ramka.joinToString(",") { "%.1f".format(java.util.Locale.ROOT, it) }}]," + kraya(v) +
+            "\"ramka\":[${v.ramka.joinToString(",") { "%.1f".format(java.util.Locale.ROOT, it) }}]," + kraya(v) + kartinka(v) +
             "\"zerkalo\":${Oformlenie.zerkalo}," +
             "\"slushaet\":${priyom.slushaet},\"popytok\":${priyom.popytok},\"perezapuskov\":${priyom.perezapuskov}," +
             "\"adres\":${ip?.let { FrameServer.json("rtmp://$it:${RtmpPriyom.PORT}/kamera") } ?: "null"}," +
@@ -262,7 +273,11 @@ class Kamera(
 
     override fun vid(q: Map<String, String>): String {
         val ar = if (w > 0 && h > 0) Okno.proporcii(w, h, vid.povorot) else 16f / 9f
-        val v = Okno.izmenit(Okno.Vid.iz(q, vid), q, ar)
+        var v = Okno.izmenit(Okno.Vid.iz(q, vid), q, ar)
+        if (q["polnyj"] != null) {        // 2.8.16 «ПОЛНЫЙ КАДР»: вся картинка — срез краёв 0 и своему окну форма картинки
+            Oformlenie.fonUpr(mapOf("obrez" to "0,0,0,0"))
+            if (w > 0 && h > 0) v = Okno.polnyj(v, Okno.proporcii(w, h, v.povorot))
+        }
         vid = v
         razvilka?.vid = v
         try { File(dir, VID).writeText(v.toString()) } catch (e: Exception) { }

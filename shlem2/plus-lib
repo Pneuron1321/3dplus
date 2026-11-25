@@ -535,6 +535,27 @@ def kamera_skazat(telo):
             round(kr.get('vysota') or 0, 1))
     if d.get('zerkalo'):
         mesto += ', зеркально'
+    kt = d.get('kartinka')
+    if isinstance(kt, dict) and d.get('vid') != 'skryt':
+        # мост 2.8.16 (Александр 25.11: «просил вернуть — обрезал не с той стороны, говорит „уже полная“, а явно не
+        # полная»): картинку режут ДВЕ вещи — срез краёв и форма своего окна; здесь — сколько не видно на самом деле
+        if kt.get('celikom'):
+            mesto += '; картинка камеры видна ЦЕЛИКОМ'
+        else:
+            def pr(x):
+                return '%d %%' % round(float(x or 0))
+            mesto += '; картинки камеры НЕ видно: слева %s, сверху %s, справа %s, снизу %s' % (
+                pr(kt.get('sleva')), pr(kt.get('sverhu')), pr(kt.get('sprava')), pr(kt.get('snizu')))
+            ob = d.get('obrez') or [0, 0, 0, 0]
+            zp = kt.get('zapolnenie') or [0, 0, 0, 0]
+            prich = []
+            if any(float(x or 0) >= 0.5 for x in ob):
+                prich.append('срез краёв окна: слева %s, сверху %s, справа %s, снизу %s окна' % tuple(pr(x) for x in ob[:4]))
+            if any(float(x or 0) >= 0.5 for x in zp):
+                prich.append('форма окна не как у картинки — картинка заполняет окно, по краям уходит')
+            if prich:
+                mesto += ' (' + '; '.join(prich) + ')'
+            mesto += '; вся картинка — kamera polnyj'
     if not isinstance(kr, dict) and d.get('vid') not in ('krupno', 'skryt', 'svoe'):   # мост до 2.8.12 — по настройкам
         if b is None:                                  # приложение до 2.3.8: отступ сбоку как снизу
             if d.get('vplotnuyu'):
@@ -576,7 +597,8 @@ def kamera_skazat(telo):
 def kamera(a):
     """kamera — как камера; svyaz; ugol pn|ln|pv|lv [0.25]; bolshe|menshe [15]; povorot 90|180|270|0;
     vplotnuyu|otstup; sboku 4; snizu vplotnuyu|otstup; krupno; skryt; klip [60];
-    2.8.1: rastyani|szhat vlevo|vpravo|vverh|vniz N; sdvin vlevo|vpravo|vverh|vniz N; ramka Л В П Н (% кадра)."""
+    2.8.1: rastyani|szhat vlevo|vpravo|vverh|vniz N; sdvin vlevo|vpravo|vverh|vniz N; ramka Л В П Н (% кадра);
+    2.8.16: srezat|vernut sleva|sverhu|sprava|snizu [N] — край картинки; polnyj — вся картинка."""
     a = list(a)
     U = os.environ.get('KAMERA_URL') or APP
     c = a[0] if a else ''
@@ -638,6 +660,37 @@ def kamera(a):
                 return 1, ['kamera ugol pn 0.3 — доля ширины числом 0.1–0.5.'], None
             q += '&r=' + ost[0]
         return vid(q)
+    # 2.8.16 (Александр 25.11: Плюс путал стороны и считал картинку полной, когда её резала форма окна): край картинки —
+    # по имени стороны, на N % окна (как кнопки шторки; стороны — как видят зрители, зеркало не меняет); вся картинка
+    if c in ('polnyj', 'polnyj_kadr', 'polnaya', 'celikom', 'vsya'):
+        zapros(U, '/efir/fon?obrez=0,0,0,0', 5)           # мосты 2.8.11–2.8.15 не знают polnyj — срез хотя бы так
+        r = zapros(U, '/kamera/vid?polnyj=1', 5)
+        if r is None:
+            return 1, [MOLCHIT], None
+        k, out = kamera_skazat(r[1])
+        if '"kartinka"' not in r[1] and '"state"' in r[1]:
+            out = ['Срез краёв убрал. Форму окна под картинку поправит мост 2.8.16 (обнови приложение).'] + out
+        return k, out, None
+    if c in ('srezat', 'srezh', 'srezhi', 'obrezat', 'obrezh', 'vernut', 'verni', 'otrezat'):
+        STOR = {'sleva': 'l', 'levo': 'l', 'vlevo': 'l', 'l': 'l', 'sverhu': 'v', 'verh': 'v', 'vverh': 'v', 'v': 'v',
+                'sprava': 'p', 'pravo': 'p', 'vpravo': 'p', 'p': 'p', 'snizu': 'n', 'niz': 'n', 'vniz': 'n', 'n': 'n'}
+        IMYA = {'l': 'слева', 'v': 'сверху', 'p': 'справа', 'n': 'снизу'}
+        st = STOR.get(a2)
+        n = (a[2] if len(a) > 2 else '5').replace(',', '.').rstrip('%')
+        if st is None or not re.fullmatch(r'\d+(\.\d+)?', n):
+            return 1, ['kamera srezat sleva 5 — срезать картинку камеры слева на 5 % окна (sverhu, sprava, snizu); '
+                       'kamera vernut sleva 5 — вернуть; kamera polnyj — вся картинка. Стороны — как видят зрители.'], None
+        r = zapros(U, '/efir/fon', 5)
+        d = razobrat(r[1]) if r else None
+        if not d or not isinstance(d.get('obrez'), list):
+            return 1, [MOLCHIT if r is None else 'Срез краёв окна — с моста 2.8.11 (обнови приложение).'], None
+        i = 'lvpn'.index(st)
+        bylo = float(d['obrez'][i] or 0)
+        stalo = max(0.0, min(45.0, bylo + (-1 if c.startswith('vern') else 1) * float(n)))
+        zapros(U, '/efir/fon?%s=%g' % (st, stalo), 5)
+        r = zapros(U, '/kamera', 5)
+        k, out = kamera_skazat(r[1]) if r else (0, [])
+        return k, ['Край %s: было срезано %g %% окна, стало %g %%.' % (IMYA[st], bylo, stalo)] + out, None
     # 2.8.1 (Александр 30.10: «растяни влево настолько-то, вниз, вправо… в процентах»): своё окно — любой край
     # растянуть / сжать и всё окно сдвинуть, в % кадра (по горизонтали — ширины, по вертикали — высоты)
     STORONY = {'vlevo': 'vlevo', 'vpravo': 'vpravo', 'vverh': 'vverh', 'vniz': 'vniz', 'levo': 'vlevo',
@@ -708,7 +761,8 @@ def kamera(a):
     return 0, ['kamera — как камера; kamera svyaz — подключить айфон; kamera ugol pn|ln|pv|lv [0.25]; kamera '
                'bolshe|menshe [15]; kamera povorot 90|180|270|0; kamera vplotnuyu|otstup; kamera sboku 4; kamera '
                'snizu vplotnuyu|otstup; kamera krupno; kamera skryt; kamera klip [60] — клип камеры в полном качестве; '
-               'kamera rastyani|szhat vlevo|vpravo|vverh|vniz 10; kamera sdvin vniz 5; kamera ramka Л В П Н (% кадра).'], None
+               'kamera rastyani|szhat vlevo|vpravo|vverh|vniz 10; kamera sdvin vniz 5; kamera ramka Л В П Н (% кадра); '
+               'kamera srezat|vernut sleva|sverhu|sprava|snizu 5 — край картинки; kamera polnyj — вся картинка.'], None
 
 
 # ---------- karta: звук карты захвата (2.6.0) ----------
@@ -1463,10 +1517,20 @@ def vid_plus_fon(U, a):
     if a[0] == 'plus':
         return 0, ['Плюс в кадре: %s (мост запомнил).' % ('на своём месте, внизу слева' if d.get('svoyo') else
                    'левый верхний угол в %s %% ширины и %s %% высоты' % (round(d.get('x', 0)), round(d.get('y', 0))))], None
-    if d.get('fon') == 'net':
-        return 0, ['Фон камеры не вырезаю (мост запомнил).'], None
     o = d.get('obrez') or [0, 0, 0, 0]
-    kraya = (' Края окна срезаны: слева %s %%, сверху %s %%, справа %s %%, снизу %s %%.' % tuple(o)) if any(o) else ''
+    # 2.8.16: срез краёв — и без вырезанного фона (с 2.8.13); раньше тут о нём молчали, и Плюс не знал, что срезано
+    kraya = (' Края окна срезаны: слева %s %%, сверху %s %%, справа %s %%, снизу %s %%.' % tuple(o)) if any(o) else \
+        ' Края окна не срезаны.'
+    if b == 'obrez':
+        rk = zapros(U, '/kamera', 5)
+        kd = razobrat(rk[1]) if rk else None
+        kt = (kd or {}).get('kartinka')
+        if isinstance(kt, dict):
+            kraya += ' Картинка камеры видна целиком.' if kt.get('celikom') else (
+                ' Картинки камеры не видно: слева %d %%, сверху %d %%, справа %d %%, снизу %d %% (подробно — kamera; '
+                'вся — kamera polnyj).' % tuple(round(float(kt.get(x) or 0)) for x in ('sleva', 'sverhu', 'sprava', 'snizu')))
+    if d.get('fon') == 'net':
+        return 0, ['Фон камеры не вырезаю (мост запомнил).' + kraya], None
     return 0, ['Вырезаю %s фон камеры, сила %s (мост запомнил).%s Остаются пятна фона — vid fon %s 0.25; режет тебя — '
                'vid fon %s 0.1.' % ('зелёный' if d.get('fon') == 'zel' else 'синий', d.get('sila'), kraya, d.get('fon'), d.get('fon'))], None
 

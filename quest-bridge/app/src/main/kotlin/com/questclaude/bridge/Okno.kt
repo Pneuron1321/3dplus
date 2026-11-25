@@ -125,6 +125,63 @@ object Okno {
         return intArrayOf(x, y, r[2], r[3])
     }
 
+    /**
+     * 2.8.16 (Александр 25.11: «просил вернуть — обрезал не с той стороны; говорит, это уже полная картинка, а она явно не
+     * полная»): сколько картинки камеры НЕ видно с каждой стороны, % картинки (Л, В, П, Н — как видят зрители; зеркало
+     * и поворот этого не меняют: срез — в координатах окна, заполнение — поровну с двух сторон). Режут ДВЕ вещи:
+     * срез краёв z (кнопки, `vid fon obrez`; доли окна) и форма своего окна — «svoe» другой формы, чем картинка, картинка
+     * заполняет окно, лишнее по краям уходит (obrezka). Плюс видел только первую. Ответ — [Л, В, П, Н, и заполнение
+     * Л, В, П, Н].
+     */
+    fun kartinka(v: Vid, ar: Float, z: FloatArray?, w: Int = 1920, h: Int = 1080): FloatArray {
+        var sx = 1f; var sy = 1f
+        if (v.rezhim == "svoe") {
+            val m = mesto(w, h, ar, v)
+            if (m[3] > 0 && ar > 0f) {
+                val ok = m[2].toFloat() / m[3]
+                if (ok > ar * (1 + TOCHNOST_FORMY)) sy = ar / ok else if (ok < ar * (1 - TOCHNOST_FORMY)) sx = ok / ar
+            }
+        }
+        val zz = z ?: FloatArray(4)
+        val zx = (1 - sx) / 2 * 100; val zy = (1 - sy) / 2 * 100
+        return floatArrayOf(zx + zz[0] * sx * 100, zy + zz[1] * sy * 100, zx + zz[2] * sx * 100, zy + zz[3] * sy * 100,
+            zx, zy, zx, zy)
+    }
+
+    /** Форма окна и картинки «одна и та же», если разница меньше 0,5 % (края окна — в целых точках). */
+    const val TOCHNOST_FORMY = 0.005f
+
+    /**
+     * 2.8.16 «ПОЛНЫЙ КАДР» для формы окна: своему окну — форму картинки в том же масштабе картинки: срезанное
+     * заполнением возвращается, окно растёт по той стороне, где резало. Прижато к краям кадра, которых касалось, иначе —
+     * от середины; не влезает в кадр — уменьшается целиком. Остальные виды — как есть (там картинка и так целиком).
+     */
+    fun polnyj(v: Vid, ar: Float, w: Int = 1920, h: Int = 1080): Vid {
+        if (v.rezhim != "svoe" || ar <= 0f) return v
+        val r = v.ramka
+        var cw = (r[2] - r[0]) * w / 100f; var ch = (r[3] - r[1]) * h / 100f
+        if (cw <= 0f || ch <= 0f) return v
+        val ok = cw / ch
+        if (ok <= ar * (1 + TOCHNOST_FORMY) && ok >= ar * (1 - TOCHNOST_FORMY)) return v
+        if (ok > ar) ch = cw / ar else cw = ch * ar
+        val k = minOf(1f, w / cw, h / ch); cw *= k; ch *= k
+        fun os(a: Float, b: Float, nov: Float, ves: Float): Pair<Float, Float> {
+            val u = ves * 0.002f
+            var (n0, n1) = when {
+                a <= u && b < ves - u -> 0f to nov                       // касалось начала — от него
+                b >= ves - u && a > u -> ves - nov to ves                // касалось конца — от него
+                else -> ((a + b) - nov) / 2 to ((a + b) + nov) / 2       // иначе — от середины
+            }
+            if (n0 < 0f) { n1 -= n0; n0 = 0f }
+            if (n1 > ves) { n0 -= n1 - ves; n1 = ves }
+            return n0 to n1
+        }
+        val (l, p) = os(r[0] * w / 100f, r[2] * w / 100f, cw, w.toFloat())
+        val (t, b) = os(r[1] * h / 100f, r[3] * h / 100f, ch, h.toFloat())
+        return Vid("svoe", v.gde, v.dolya, v.povorot, v.vplotnuyu, v.sboku,
+            Vid.popravit(floatArrayOf(l * 100f / w, t * 100f / h, p * 100f / w, b * 100f / h)))
+    }
+
     /** Видимая часть окна (без срезанных краёв), [x, y от низа, w, h]. */
     fun vidimoe(r: IntArray, z: FloatArray?): IntArray {
         if (z == null || z.all { it <= 0f }) return r
