@@ -29,11 +29,14 @@ import android.widget.TextView
 
 /**
  * Окно игры Мост 3: видео карты на весь экран окна, сверху строка состояния, снизу — наборы картинки и звук,
- * по кнопке «Ручки» — ползунки. Панель прячется через 5 с; коснулся картинки — вернулась.
+ * по кнопке «Ручки» — ползунки. Панель прячется через 5 с (курсор виден — через 2,5 с, как ушёл со шторки); коснулся
+ * картинки — вернулась.
  * 3.1.3 (Александр 22.10: полоска «режим, приём, показ, звук» попала в эфир): строка состояния прячется вместе с
  * панелью, пока видео идёт; нет видео или ошибка — строка видна.
  * 3.2.2 (Александр 21.11: в маленьком окне не все кнопки видны — «Ручки» не нажать): ряд кнопок листается вбок,
  * ползунки — вверх-вниз (не выше половины окна), полосы прокрутки видны всегда и толстые — их можно тянуть.
+ * 3.3.2 (Александр 26.11): ручки открыты — шторка спряталась и по касанию окна вернулась вместе с ними (та же ручка);
+ * курсор на шторке — не прячется совсем, ушёл с неё — прячется через 2,5 с (Shtorka).
  */
 class MainActivity : Activity() {
     private lateinit var gl: GLSurfaceView
@@ -43,7 +46,10 @@ class MainActivity : Activity() {
     private lateinit var polzunki: LinearLayout
     private val ui = Handler(Looper.getMainLooper())
     private var panelVidna = true
+    private val shtorka = Shtorka()
+    private lateinit var niz: LinearLayout                // шторка: ползунки и ряд кнопок
     private val spryatat = Runnable {
+        if (shtorka.kursorNaShtorke) return@Runnable          // курсор на шторке — не прятать
         panel.visibility = View.GONE; polzunki.visibility = View.GONE; panelVidna = false
         if (Most.video?.rabotaet == true) stroka.visibility = View.GONE
     }
@@ -91,10 +97,11 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.BLACK)
             addView(gl, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(stroka, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
-            addView(LinearLayout(context).apply {
+            niz = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(polzunki); addView(panel)
-            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+            }
+            addView(niz, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         })
         val f = IntentFilter().apply { addAction(UsbManager.ACTION_USB_DEVICE_DETACHED); addAction(RAZRESHENIE) }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(usb, f, Context.RECEIVER_NOT_EXPORTED) else registerReceiver(usb, f)
@@ -194,7 +201,11 @@ class MainActivity : Activity() {
             efK.text = "…"; Most.vFone { val o = Most.efirRezhim(sl); ui.post { efK.text = Most.efirRezhimOpisanie(); stroka.text = o } }
         }
         addView(efK)
-        addView(knopka("Ручки") { polzunki.visibility = if (polzunki.visibility == View.VISIBLE) View.GONE else View.VISIBLE })
+        addView(knopka("Ручки") {                            // 3.3.2: открытые ручки шторка помнит
+            val r = shtorka.pereklyuchitRuchki()
+            polzunki.visibility = if (r) View.VISIBLE else View.GONE
+            if (r) obnovitPolzunki()
+        })
     }
 
     /** Ползунок: имя настройки, подпись, диапазон, как взять и как поставить. */
@@ -367,7 +378,39 @@ class MainActivity : Activity() {
 
     private fun pokazatPanel() {
         panel.visibility = View.VISIBLE; stroka.visibility = View.VISIBLE; panelVidna = true
-        ui.removeCallbacks(spryatat); ui.postDelayed(spryatat, 5000)
+        if (shtorka.ruchki && polzunki.visibility != View.VISIBLE) { polzunki.visibility = View.VISIBLE; obnovitPolzunki() }
+        zaplanirovat()
+    }
+
+    /** Спрятать шторку через столько, сколько решает Shtorka (курсор на ней — не прятать). */
+    private fun zaplanirovat() {
+        ui.removeCallbacks(spryatat)
+        shtorka.pryatatCherez()?.let { ui.postDelayed(spryatat, it) }
+    }
+
+    /** Точка окна (x, y) — на видимой шторке? */
+    private fun naShtorke(x: Float, y: Float): Boolean {
+        if (!panelVidna || niz.height == 0) return false
+        val l = IntArray(2); niz.getLocationInWindow(l)
+        return x >= l[0] && x < l[0] + niz.width && y >= l[1] && y < l[1] + niz.height
+    }
+
+    // 3.3.2: где курсор — по наведению (луч контроллера / рука шлема шлёт HOVER), касание — по шторке или по картинке
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE ->
+                if (shtorka.navedenie(naShtorke(ev.x, ev.y)) && panelVidna) zaplanirovat()
+            MotionEvent.ACTION_HOVER_EXIT -> { shtorka.ushyol(); if (panelVidna) zaplanirovat() }
+        }
+        return super.dispatchGenericMotionEvent(ev)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            shtorka.kasanie(naShtorke(ev.x, ev.y))
+            if (panelVidna) zaplanirovat()
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onResume() { super.onResume(); gl.onResume(); ui.post(obnovit); obnovitPolzunki() }

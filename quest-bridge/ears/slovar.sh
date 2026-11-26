@@ -27,10 +27,14 @@ else:
     slova = Est()
 t = json.load(open(sys.argv[2], encoding='utf-8'))['models']['ru']
 nuzhny = set()
-for f in list(t['phrases']) + list(t.get('commands', {})) + list(t.get('decoys', [])):
+for f in list(t['phrases']) + list(t.get('commands', {})) + list(t.get('decoys', [])) + t.get('seriya', {}).get('slova', []):
     nuzhny.update(f.split())
 net = sorted(w for w in nuzhny if w not in slova)
 print('Словарь модели (%s): слов вызова %d; нет в словаре: %s' % (put.rsplit('/', 1)[-1], len(nuzhny), ', '.join(net) or 'все есть'))
 print('::notice title=Слово «джой»::%s' % ('есть в словаре модели — «плюс джой» будет слышен' if 'джой' in slova
                                          else 'НЕТ в словаре модели — звать «плюс плюс, джой»'))
+sr = t.get('seriya', {}).get('slova', [])
+if sr:                               # 2.8.17: «скскс» ×3 — клип; модель слышит его как «скс»/«кс»
+    print('::notice title=Слово клипа «скскс»::%s' % ('«%s» есть в словаре модели' % '», «'.join(sr) if all(w in slova for w in sr)
+                                                   else 'НЕТ в словаре: %s — «скскс» не услышится' % ', '.join(w for w in sr if w not in slova)))
 PY

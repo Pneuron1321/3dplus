@@ -10,9 +10,9 @@ import kotlin.concurrent.thread
 
 /**
  * Шторка клипов (2.8.13, Александр 24.11: «сделай шторку с галочками вкл/выкл» — одним нажатием вернуться к тому,
- * что было, и обратно). «🎬 КЛИПЫ ▸» — под ней три галочки KlipNastroyki: высокое качество, чистая игра из Моста 3,
- * камера телефона. Во время эфира галочка качества действует сразу (круг клипа начинается заново), иначе —
- * со следующего эфира. То же голосом: `efir klip kachestvo|most3|kamera vkl|vykl`.
+ * что было, и обратно). «🎬 КЛИПЫ ▸» — под ней кнопка слова клипа (2.8.17, KlipSlovo: «скскс» ×3 | «клип клип клип»)
+ * и три галочки KlipNastroyki: высокое качество, чистая игра из Моста 3, камера телефона. Во время эфира галочка
+ * качества действует сразу (круг клипа начинается заново), иначе — со следующего эфира. То же голосом: `efir klip kachestvo|most3|kamera vkl|vykl`.
  */
 class KlipShtorka(private val ctx: Context, private val soobshchit: (String) -> Unit) {
     private var otkryta = false
@@ -30,12 +30,23 @@ class KlipShtorka(private val ctx: Context, private val soobshchit: (String) -> 
         pomenyat { KlipNastroyki.postavit(most3 = v) } }
     private val kamera = galka("Камера телефона (как пришла с телефона)") { v -> pomenyat { KlipNastroyki.postavit(kamera = v) } }
     private val podskazka = TextView(ctx).apply { textSize = 15f }
+    // 2.8.17 (Александр 26.11): кнопка — каким словом звать клип: «скскс» ×3 (по умолчанию) или «клип клип клип»
+    private val slovo = Button(ctx).apply {
+        textSize = 18f; isAllCaps = false
+        setOnClickListener {
+            KlipSlovo.pereklyuchit()
+            narisovat()
+            soobshchit("Клип теперь — «${KlipSlovo.fraza()}».")
+        }
+    }
+    private val chtoSohranyaet = TextView(ctx).apply { textSize = 15f }
 
     private val panel = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
         visibility = View.GONE
         setPadding(20, 10, 0, 20)
-        addView(TextView(ctx).apply { text = "Что сохраняет «клип клип клип» (галочки):"; textSize = 15f })
+        addView(slovo)
+        addView(chtoSohranyaet)
         addView(kachestvo); addView(most3); addView(kamera)
         addView(podskazka)
     }
@@ -67,7 +78,10 @@ class KlipShtorka(private val ctx: Context, private val soobshchit: (String) -> 
     fun narisovat() {
         val chto = listOfNotNull(if (KlipNastroyki.kachestvo) "шлем HQ" else "шлем (копия эфира)",
             if (KlipNastroyki.most3) "игра Моста 3" else null, if (KlipNastroyki.kamera) "камера" else null)
-        zagolovok.text = "🎬 КЛИПЫ: " + chto.joinToString(" + ") + (if (otkryta) " ▾" else " ▸")
+        zagolovok.text = "🎬 КЛИПЫ ${KlipSlovo.korotko()}: " + chto.joinToString(" + ") + (if (otkryta) " ▾" else " ▸")
+        slovo.text = "🗣 Слово клипа: «${KlipSlovo.fraza()}» — нажми, будет «${KlipSlovo.fraza(
+            if (KlipSlovo.slovo == KlipSlovo.SKS) KlipSlovo.KLIP else KlipSlovo.SKS)}»"
+        chtoSohranyaet.text = "Что сохраняет «${KlipSlovo.fraza()}» (галочки):"
         stavlyu = true
         kachestvo.isChecked = KlipNastroyki.kachestvo
         most3.isChecked = KlipNastroyki.most3

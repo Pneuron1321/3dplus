@@ -91,7 +91,26 @@ class Ear(private val keep: Int = 20, private val keepAudio: Int = 3) {
 
     fun get(id: Long): Event? = lock.withLock { events.firstOrNull { it.id == id } }
 
+    /** 2.8.17: последние итоги грамматики ушей (только слова грамматики — вызовы и приманки, не речь): как модель
+     *  слышит «скскс» и другие слова вызова голосом Александра — /ear/slyshal, у Плюса `efir klip slyshal`. */
+    private val slyshal = ArrayDeque<String>()
+
+    fun zapomnit(text: String, confs: List<Double>, ms: Long = System.currentTimeMillis()) {
+        val t = text.trim()
+        if (t.isEmpty() || t.split(' ').all { it == "[unk]" }) return
+        val c = confs.joinToString(",") { "%.2f".format(java.util.Locale.US, it) }
+        lock.withLock {
+            slyshal.addLast("{\"ms\":$ms,\"t\":\"${t.replace("\\", "").replace("\"", "")}\",\"c\":[$c]}")
+            while (slyshal.size > SLYSHAL) slyshal.removeFirst()
+        }
+    }
+
+    fun slyshalJson(): String = lock.withLock { slyshal.joinToString(",", "[", "]") }
+
     companion object {
+        /** Сколько итогов грамматики помнить для /ear/slyshal. */
+        const val SLYSHAL = 30
+
         /** WAV-файл из PCM 16 бит моно. */
         fun wav(pcm: ByteArray, rate: Int = 16000): ByteArray {
             val b = java.nio.ByteBuffer.allocate(44 + pcm.size).order(java.nio.ByteOrder.LITTLE_ENDIAN)

@@ -431,6 +431,19 @@ class FrameServerTest {
         assertEquals(true, ear.strimLive())
     }
 
+    @Test fun earKlipSlovoISlyshal() {             // 2.8.17
+        KlipSlovo.zanovo()
+        try {
+            assertEquals("{\"slovo\":\"sks\",\"fraza\":\"скскс скскс скскс\",\"izmeneno\":false}",
+                String(get("/ear/klip").body, Charsets.UTF_8))
+            assertEquals("{\"slovo\":\"klip\",\"fraza\":\"клип клип клип\",\"izmeneno\":true}",
+                String(get("/ear/klip?slovo=klip").body, Charsets.UTF_8))
+            ear.zapomnit("скс скс", listOf(1.0, 0.5), ms = 7)
+            assertEquals("{\"klip\":{\"slovo\":\"klip\",\"fraza\":\"клип клип клип\"},\"itogi\":[{\"ms\":7,\"t\":\"скс скс\",\"c\":[1.00,0.50]}]}",
+                String(get("/ear/slyshal").body, Charsets.UTF_8))
+        } finally { KlipSlovo.zanovo() }
+    }
+
     @Test fun earDosluh() {
         assertEquals("{\"okno\":1.0,\"db\":38,\"otkryto\":1,\"zagovoril\":0}", String(get("/ear/dosluh").body))
         get("/ear/set?dosluh=0")

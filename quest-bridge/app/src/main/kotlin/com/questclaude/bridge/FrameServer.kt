@@ -382,6 +382,14 @@ class FrameServer(
                     reply(out, 200, "application/json", e.nastroyki().toByteArray())
                 }
             }
+            "/ear/klip" -> {                       // 2.8.17: слово клипа — ?slovo=sks («скскс» ×3) | klip («клип клип клип»)
+                val izm = KlipSlovo.postavit(query["slovo"])
+                reply(out, 200, "application/json; charset=utf-8",
+                    (KlipSlovo.json().dropLast(1) + ",\"izmeneno\":$izm}").toByteArray(Charsets.UTF_8))
+            }
+            "/ear/slyshal" ->                      // 2.8.17: последние итоги грамматики ушей — как слышны слова вызова
+                reply(out, 200, "application/json; charset=utf-8",
+                    ("{\"klip\":${KlipSlovo.json()},\"itogi\":${ear?.slyshalJson() ?: "[]"}}").toByteArray(Charsets.UTF_8))
             "/ear/dosluh" -> {                     // голос-демон: договорила ответ — слушай секунду
                 val e = ear
                 if (e == null) reply(out, 404, "text/plain", "no ears".toByteArray())

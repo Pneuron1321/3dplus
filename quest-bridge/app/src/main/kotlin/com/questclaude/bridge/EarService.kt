@@ -95,6 +95,7 @@ class EarService : Service() {
         startForeground(2, notification("Уши: «плюс плюс», «зум зум»"), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         Pamyat.start(this)
         Pamyat.zapis("уши: включены")
+        KlipSlovo.zagruzit(filesDir)                      // 2.8.17: слово клипа — «скскс» ×3 или «клип клип клип»
         try {
             if (Hub.say == null) Hub.say = Golos(cacheDir)
             if (Hub.fon == null) Hub.fon = Fon(cacheDir, java.io.File(filesDir, "fon-nastroyki"))
@@ -165,6 +166,7 @@ class EarService : Service() {
         val chooser = Triggers.Chooser()
         val stopWord = Triggers.StopWord(triggers.stop, one = triggers.stopOne)   // свободный текст: варианты
         val early = Triggers.EarlyWake(triggers, triggers.earlyChunks)
+        val seriya = Triggers.SeriyaSlov(triggers)     // 2.8.17: «скскс» ×3 — клип
         val kolco = Kolco(30, RATE)                    // последние 30 с: фраза с конца слов вызова
         var pending: Triggers.Hit? = null              // голый «плюс плюс»: ждём, не скажет ли другая
         var pendingAt = 0L                             // модель точную команду («… вслух»)
@@ -303,11 +305,17 @@ class EarService : Service() {
                             val json = e.keyword.result
                             val heard = heardOf(e.lang, json)
                             val words = wordsOf(json, "result")
-                            val h0 = triggers.match(e.lang, heard.text, heard.confs)
+                            Hub.ear.zapomnit(heard.text, heard.confs)
+                            val sks = seriya.check(e.lang, words, e.base.toDouble() / RATE)   // счёт серии — по каждому итогу
+                            val h0 = triggers.match(e.lang, heard.text, heard.confs) ?: sks
                             // «плюс плюс в ухо» — вызов, а «в ухо» — уже фраза после него (для Whisper)
                             val uho = h0?.action == UHO
                             val h = if (uho) Triggers.Hit("wake", e.lang, h0!!.conf) else h0
-                            if (h != null) {
+                            // 2.8.17: клип зовут одним словом — «скскс» ×3 или «клип клип клип» (KlipSlovo); другое молчит
+                            if (h != null && !KlipSlovo.beret(h.action)) {
+                                status = "Уши: слышу «${KlipSlovo.fraza(if (h.action == "klip") KlipSlovo.KLIP else KlipSlovo.SKS)}», " +
+                                    "а клип сейчас — «${KlipSlovo.fraza()}» (кнопка в «🎬 КЛИПЫ»)."
+                            } else if (h != null) {
                                 if (h.action != "stop") hits += h          // «копи копи» — только внутри фразы
                                 if (h.action == "wake" && !uho) bare += h
                                 if (h.action == "wake" || h.action == Triggers.CHEK || h.action == Triggers.JOY) {
@@ -426,14 +434,15 @@ class EarService : Service() {
                             Hub.ear.post("plenka", h.action.removePrefix("plenka:"))
                             status = "Уши: плёнка ${h.action.removePrefix("plenka:")} кадров."
                         }
-                        h.action == "klip" -> {                   // 2.7.8: «клип клип клип» — два клипа сразу, без Плюса
+                        h.action == "klip" || h.action == Triggers.SKS -> {   // 2.7.8: «клип клип клип», 2.8.17: «скскс» ×3
                             beep(Signal.Kind.KLIP)
-                            status = "Уши: клип — сохраняю камеру и эфир (5 мин)…"
+                            status = "Уши: клип — сохраняю (${"%.1f".format(CaptureService.KLIP_SEK / 60.0)} мин)…"
+                            val fraza = KlipSlovo.fraza()
                             kotlin.concurrent.thread(name = "klip-klip", isDaemon = true) {
                                 val r = try { Hub.klipKlip?.invoke(CaptureService.KLIP_SEK) ?: "{\"oshibka\":\"захват не идёт — клипов нет\"}" }
                                     catch (e: Exception) { "{\"oshibka\":${FrameServer.json(e.message ?: "клип не вышел")}}" }
                                 Hub.ear.post("klip", r)
-                                Pamyat.zapis("клип клип клип: $r")
+                                Pamyat.zapis("$fraza: $r")
                             }
                         }
                         h.action == "tiho" -> {
@@ -617,6 +626,7 @@ class EarService : Service() {
         val stop = mutableMapOf<String, Set<String>>()
         val stopOne = mutableMapOf<String, Set<String>>()
         val commands = mutableMapOf<String, Map<String, String>>()
+        val seriya = mutableMapOf<String, Triggers.Seriya>()
         val assetsByLang = linkedMapOf<String, String>()
         val present = assets.list("")?.toSet() ?: emptySet()
         for (lang in models.keys()) {
@@ -631,13 +641,18 @@ class EarService : Service() {
             stopOne[lang] = (0 until (so?.length() ?: 0)).map { so!!.getString(it) }.toSet()
             val cm = m.optJSONObject("commands")
             commands[lang] = cm?.keys()?.asSequence()?.associateWith { cm.getString(it) } ?: emptyMap()
+            m.optJSONObject("seriya")?.let { sr ->                 // 2.8.17: «скскс» ×3 — серия слов, не фраза
+                val sl = sr.optJSONArray("slova")
+                seriya[lang] = Triggers.Seriya((0 until (sl?.length() ?: 0)).map { sl!!.getString(it) }.toSet(),
+                    sr.optInt("skolko", 3), sr.optDouble("pauza", 1.5), sr.optString("action", Triggers.SKS))
+            }
             val asset = m.getString("asset")
             if (asset in present) assetsByLang[lang] = asset
         }
         val bonus = o.optJSONObject("phraseBonus")
         val phraseBonus = bonus?.keys()?.asSequence()?.associateWith { bonus.getDouble(it) } ?: emptyMap()
         return Triggers(o.optDouble("minConf", 0.6), phrases, decoys, phraseBonus, stop, stopOne, commands,
-            o.optInt("earlyChunks", 3), o.optInt("bareWaitChunks", 5)) to assetsByLang
+            o.optInt("earlyChunks", 3), o.optInt("bareWaitChunks", 5), seriya) to assetsByLang
     }
 
     private fun text(json: String, key: String = "text"): String =

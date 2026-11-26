@@ -99,6 +99,7 @@ class MainActivity : Activity() {
             oknoShtorka = OknoShtorka(this@MainActivity) { t -> kameraStatus = t }.also { it.vstavit(this) }
             // 2.8.13 (Александр 24.11): что сохраняет «клип клип клип» — галочками
             KlipNastroyki.zagruzit(filesDir)
+            KlipSlovo.zagruzit(filesDir)                 // 2.8.17: слово клипа
             klipShtorka = KlipShtorka(this@MainActivity) { t -> klipyStatus = t }.also { it.vstavit(this) }
             addView(button("КЛИП КАМЕРЫ: сохранить последние 2 минуты") { klipKnopka() })
             addView(button("КЛИПЫ: открыть на айфоне (15 минут)") { klipyKnopka() }.apply {

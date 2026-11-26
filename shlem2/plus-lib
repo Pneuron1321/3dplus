@@ -373,6 +373,29 @@ def efir(a):
             k, out = 0, [('Качество эфира: SSIM %s (худший кадр %s), PSNR %s дБ — %s. Замер %s с, %s пар кадров, '
                          '%s, поток %s кбит/с, кусок %s.' % (d.get('ssim'), d.get('ssim_min'), d.get('psnr'), slovo,
                                                             d.get('sek'), d.get('par'), d.get('razmer'), d.get('kbps'), d.get('kusok')))]
+    elif c == 'klip' and len(a) > 1 and a[1] in ('slovo', 'slyshal'):
+        # 2.8.17: слово клипа — «скскс» ×3 (sks, по умолчанию) | «клип клип клип» (klip); slyshal — что слышат уши
+        if a[1] == 'slovo':
+            q = '?slovo=' + a[2] if len(a) > 2 and a[2] in ('sks', 'klip') else ''
+            r = zapros(U, '/ear/klip' + q, 5)
+        else:
+            r = zapros(U, '/ear/slyshal', 5)
+        d = razobrat(r[1]) if r else None
+        if r is None:
+            k, out = 1, [MOLCHIT]
+        elif r[0] == 404:
+            k, out = 1, ['Слово клипа: нужен мост 2.8.17 (обнови приложение). Сейчас клип — «клип клип клип».']
+        elif not d:
+            k, out = 1, ['Слово клипа: непонятный ответ приложения.']
+        elif a[1] == 'slovo':
+            k, out = 0, ['Клип сейчас — «%s»%s. Переключить: efir klip slovo sks|klip (кнопка — в «🎬 КЛИПЫ»).'
+                         % (d.get('fraza'), ' (только что)' if d.get('izmeneno') else '')]
+        else:
+            itogi = d.get('itogi') or []
+            sl = ['%s %s (%s)' % (time.strftime('%H:%M:%S', time.localtime(i.get('ms', 0) / 1000)), i.get('t'),
+                                  ' '.join('%.2f' % x for x in i.get('c', []))) for i in itogi[-12:]]
+            k, out = 0, ['Клип — «%s». Уши слышали (слова грамматики и уверенность; клип «скскс» — три скс/кс подряд, '
+                         'каждое от 0,75, между ними до 1,5 с):' % (d.get('klip') or {}).get('fraza')] + (sl or ['— пока ничего.'])
     elif c == 'klip':                                   # 2.7.9: клип шлема — otdelno (без окна камеры) | efir | vykl
         r = a[1] if len(a) > 1 and a[1] in ('otdelno', 'efir', 'vykl') else None
         q = '?rezhim=' + r if r else ''
@@ -396,7 +419,7 @@ def efir(a):
                     chto.append('чистая игра из Моста 3')
                 if d.get('kamera'):
                     chto.append('камера телефона')
-                out = '«Клип клип клип» сохраняет: %s.' % ', '.join(chto) + (
+                out = 'Клип сохраняет: %s.' % ', '.join(chto) + (
                     ' Применено: %s.' % d['primeneno'] if d.get('primeneno') else '')
             if r:
                 out += ' Со следующего эфира.'
