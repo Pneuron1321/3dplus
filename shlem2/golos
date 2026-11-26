@@ -409,6 +409,25 @@ def bez_imeni(t):
     return IMYA_POSLE.sub(lambda m: m.group(1), t)
 
 
+# 26.11 (Александр: «ответ, что Плюс говорит мне про сохранённый клип, — только в уши, как бы ни было включено, в уши
+# или в эфир»): ответ Плюса про сохранённый клип — Александру в ухо при любом режиме, без субтитров. Узнаём сами (Плюс
+# мог не пометить); любой ответ Плюс может пустить так же меткой «👂» в начале.
+UHO_METKA = re.compile(r'^\s*(?:👂\ufe0f?|\((?:в ухо|ухо)\)|\[(?:в ухо|ухо)\])\s*', re.I)
+KLIP_SOHRANIL = re.compile(
+    r'(?:сохран|записал|записан|нарезал|вырезал|сделал)\w*\W+(?:\w+\W+){0,4}?клип'
+    r'|клип\w*\W+(?:\w+\W+){0,5}?(?:сохран|записан|готов|лежит|лежат|в «?фильм)'
+    r'|\bclips?\b\W+(?:\w+\W+){0,3}?(?:saved|ready)|\b(?:saved|clipped)\b\W+(?:\w+\W+){0,3}?clip', re.I)
+PLUS_VIDY = ('hook', 'pre', 'potok0', 'potok')         # ответ Плюса: хук, вступление, рация
+
+
+def tolko_v_uho(t):
+    """(текст, только в ухо?): метка «👂» снимается; ответ про сохранённый клип — в ухо и без метки."""
+    m = UHO_METKA.match(t)
+    if m:
+        return t[m.end():], True
+    return t, bool(KLIP_SOHRANIL.search(t))
+
+
 def dlya_uha(t, predel=1500):
     """Из ответа — то, что можно сказать: без кода, ссылок, путей и разметки.
     Строка без точки в конце (пункт списка, заголовок) получает точку — иначе
@@ -1133,6 +1152,9 @@ class Golos:
             _, tekst = iz_transkripta(raw)
         else:
             tekst = iz_huka(raw) if vid == 'hook' else raw
+        v_uho = False
+        if vid in PLUS_VIDY:               # 26.11: про сохранённый клип (или «👂») — только Александру
+            tekst, v_uho = tolko_v_uho(tekst)
         tekst = bez_imeni(dlya_uha(tekst))   # 06.11: без обращений по имени
         klyuch = re.sub(r'\W+', '', tekst.lower())
         if vid == 'pre' and (not klyuch or klyuch in self.skazano):
@@ -1162,14 +1184,14 @@ class Golos:
         # договорила — уши ещё секунду слушают без «плюс плюс» (Александр 09.10). Вступление перед
         # инструментом, приветствие зрителям, «не расслышала» — нет.
         dosluh = vid in DOSLUH
-        if self.chitat_rezhim() != 'uho' and vid not in UHO_VIDY:  # субтитры — только вслух: перевод всего ответа сразу
+        if self.chitat_rezhim() != 'uho' and vid not in UHO_VIDY and not v_uho:  # субтитры — только вслух: перевод всего ответа сразу
             self.titry.perevesti(ns, [f for p in ps for f in p], ved=vid == 'ved')
         with self.cv:
             for i, p in enumerate(ps):
                 k = Kusok(p, ns, t, i == 0 and not dalshe, dosluh and i == len(ps) - 1)
                 if vid in ('ved', 'vedu'):
                     k.golos = VOICE_VED    # соведущая — голосом Серафины (12.10), остальное как у Авы
-                k.uho = vid in UHO_VIDY
+                k.uho = vid in UHO_VIDY or v_uho
                 k.vid = vid
                 self.q.append(k)
             self.cv.notify_all()
