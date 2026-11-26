@@ -9,7 +9,7 @@ object Shader {
     // uHdr/uPik/uBelyj работают только в P010, uPolnyj — во всех YUV.
     val UNIFORMY = listOf("uYarkost", "uKontrast", "uNasyshch", "uGamma", "uTeni", "uAvtoTeni", "uRezkost", "uPolnyj", "uSyroe",
         "uLokalno", "uSuper", "uHdr", "uPik", "uBelyj",
-        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila", "uSravnenie", "uChistka", "uSvet", "uMulty")
+        "uMnR", "uMnG", "uMnB", "uTon", "uSveta", "uUrChernyj", "uUrBelyj", "uZhivost", "uVyderzhka", "uSila", "uSravnenie", "uChistka", "uSvet", "uMulty", "uBelo")
     val SAMPLERY_YUY2 = listOf("uTekYuy2")          // блок 0: GL_RGBA8 W/2×H, (Y0,U,Y1,V)
     val SAMPLERY_NV12 = listOf("uTekY", "uTekUV")   // блок 0: GL_R8 W×H; блок 1: GL_RG8 W/2×H/2
     val SAMPLERY_RGBA = listOf("uTekRgba")          // блок 0: GL_RGBA8 W×H
@@ -52,6 +52,7 @@ object Shader {
         uniform float uChistka;   // 3.2.7: чистка для эфира 0..1 (KartinkaCpu.chistkaSdvig); окно — 0
         uniform float uSvet;      // 3.2.8: свет цвета 0..1 (KartinkaCpu.svet)
         uniform float uMulty;     // 3.2.9: мультяшность цвета 0..1 (KartinkaCpu.multyashno), по точке
+        uniform float uBelo;      // 3.3.1: белое белым 0..1 (KartinkaCpu.zashchitaBelogo)
         uniform float uGamma;     // 0.5..2.5, pow(x, 1/g)
         uniform float uTeni;      // 0..1, подъём теней
         uniform float uAvtoTeni;  // 0..1, авто-ночь (считает CPU), складывается с uTeni
@@ -83,6 +84,8 @@ object Shader {
         const float MU_PERIOD = 30.0;
         const float MU_TYAGA = 0.6;
         const float DVA_PI = 6.2831853;
+        const float BEL_A = 0.05;
+        const float BEL_B = 0.40;
         const float CH_KRAJ_B = 0.2;
         const float CH_REZKOST = 0.5;
         const float CH_PREDEL = 0.08;
@@ -245,11 +248,15 @@ object Shader {
             vec3 niz = 0.5 * pow(max(2.0 * c, vec3(1e-7)), vec3(uKontrast));
             vec3 verh = 1.0 - 0.5 * pow(max(2.0 - 2.0 * c, vec3(1e-7)), vec3(uKontrast));
             c = mix(niz, verh, step(0.5, c));
+            // 3.3.1 белое белым: почти белое и серое (насыщенность до насыщения < 0,05…0,4) — без раскраски
+            float mx0 = max(c.r, max(c.g, c.b));
+            float zash = (uBelo > 0.0) ? uBelo * (1.0 - smoothstep(BEL_A, BEL_B, (mx0 - min(c.r, min(c.g, c.b))) / max(mx0, 1e-4))) : 0.0;
             float l = dot(c, VES);
-            c = l + (c - l) * uNasyshch;
+            c = l + (c - l) * (uNasyshch + (1.0 - uNasyshch) * zash);
             c = povorotTona(c, uTon);
             float mx = max(c.r, max(c.g, c.b)); float mn = min(c.r, min(c.g, c.b));
             float zh = 1.0 + uZhivost * (1.0 - clamp((mx - mn) / max(mx, 1e-4), 0.0, 1.0));   // блёклое — сильнее
+            zh = zh + (1.0 - zh) * zash;
             float l2 = dot(c, VES);
             c = l2 + (c - l2) * zh;
             c = clamp(c, 0.0, 1.0);
@@ -264,12 +271,13 @@ object Shader {
             if (uSvet > 0.0 && m > 1e-4) c = clamp(c * ((1.0 - pow(1.0 - m, 1.0 + 2.0 * uSvet)) / m), 0.0, 1.0);
             // 3.2.9 мультяшность цвета (KartinkaCpu.multyashno): HSV, оттенок к 12 чистым гладко, средние цвета сочнее, V та же
             m = max(c.r, max(c.g, c.b)); float dd = m - min(c.r, min(c.g, c.b));
-            if (uMulty > 0.0 && dd > 1e-6 && m > 0.0) {
+            float tm = uMulty * (1.0 - zash);
+            if (tm > 0.0 && dd > 1e-6 && m > 0.0) {
                 float h = (m == c.r) ? mod((c.g - c.b) / dd, 6.0) : ((m == c.g) ? (c.b - c.r) / dd + 2.0 : (c.r - c.g) / dd + 4.0);
                 h *= 60.0;
                 float s = dd / m;
-                h -= uMulty * MU_TYAGA * (MU_PERIOD / DVA_PI) * sin(DVA_PI * h / MU_PERIOD);
-                float s2 = s + uMulty * s * (1.0 - s);
+                h -= tm * MU_TYAGA * (MU_PERIOD / DVA_PI) * sin(DVA_PI * h / MU_PERIOD);
+                float s2 = s + tm * s * (1.0 - s);
                 vec3 k = clamp(abs(fract(h / 360.0 + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
                 c = clamp(m * (1.0 + (k - 1.0) * s2), 0.0, 1.0);
             }

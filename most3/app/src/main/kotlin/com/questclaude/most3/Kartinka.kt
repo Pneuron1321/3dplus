@@ -40,6 +40,8 @@ data class Nastrojki(
     // 3.2.8 (Александр 25.11: «намного насыщеннее и мультяшнее; все цвета ярче, весь свет ярче — не обелевшая»)
     val svet: Float = 0f,        // свет цвета 0..1: каждый цвет ярче к своему пределу, оттенок и насыщенность те же
     val multyashno: Float = 0f,  // мультяшность цвета 0..1 (3.2.9): оттенки к чистым, средние цвета сочнее; без размытия
+    // 3.3.1 (Александр 26.11, «белое белым»): почти белое и серое не раскрашиваются насыщенностью, живостью и мультяшностью
+    val belo: Float = 0f,
 ) {
     fun ogranichit(): Nastrojki = Nastrojki(
         ogr(yarkost, -0.5f, 0.5f, 0f), ogr(kontrast, 0.5f, 2f, 1f), ogr(nasyshch, 0f, 2.5f, 1f),
@@ -48,7 +50,7 @@ data class Nastrojki(
         ogr(temperatura, -100f, 100f, 0f), ogr(balR, 0.5f, 1.5f, 1f), ogr(balG, 0.5f, 1.5f, 1f), ogr(balB, 0.5f, 1.5f, 1f),
         ogr(ton, -30f, 30f, 0f), ogr(sveta, -1f, 1f, 0f), ogr(chernyj, -0.2f, 0.3f, 0f), ogr(belyj, 0.7f, 1f, 1f),
         ogr(zhivost, -1f, 1f, 0f), ogr(vyderzhka, -2f, 2f, 0f), ogr(sila, 0f, 2f, 1f), ogr(chistka, 0f, 1f, 0f),
-        ogr(svet, 0f, 1f, 0f), ogr(multyashno, 0f, 1f, 0f),
+        ogr(svet, 0f, 1f, 0f), ogr(multyashno, 0f, 1f, 0f), ogr(belo, 0f, 1f, 0f),
     )
 
     fun poluchit(imya: String): Float? = when (imya) {
@@ -58,7 +60,7 @@ data class Nastrojki(
         "lokalno" -> lokalno; "hdrpik" -> hdrPik
         "temperatura" -> temperatura; "balr" -> balR; "balg" -> balG; "balb" -> balB; "ton" -> ton; "sveta" -> sveta
         "chernyj" -> chernyj; "belyj" -> belyj; "zhivost" -> zhivost; "vyderzhka" -> vyderzhka; "sila" -> sila; "chistka" -> chistka
-        "svet" -> svet; "multyashno" -> multyashno
+        "svet" -> svet; "multyashno" -> multyashno; "belo" -> belo
         else -> null
     }
 
@@ -69,7 +71,7 @@ data class Nastrojki(
         "temperatura" -> copy(temperatura = v); "balr" -> copy(balR = v); "balg" -> copy(balG = v); "balb" -> copy(balB = v)
         "ton" -> copy(ton = v); "sveta" -> copy(sveta = v); "chernyj" -> copy(chernyj = v); "belyj" -> copy(belyj = v)
         "zhivost" -> copy(zhivost = v); "vyderzhka" -> copy(vyderzhka = v); "sila" -> copy(sila = v); "chistka" -> copy(chistka = v)
-        "svet" -> copy(svet = v); "multyashno" -> copy(multyashno = v)
+        "svet" -> copy(svet = v); "multyashno" -> copy(multyashno = v); "belo" -> copy(belo = v)
         else -> copy(polnyjDiapazon = v >= 0.5f)
     }
 
@@ -99,7 +101,7 @@ data class Nastrojki(
     companion object {
         val IMENA = listOf("yarkost", "kontrast", "nasyshch", "gamma", "teni", "rezkost", "avtonoch", "polnyj", "lokalno", "hdrpik",
             "temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila", "chistka",
-            "svet", "multyashno")
+            "svet", "multyashno", "belo")
         private val CHISLO = Regex("""\d{1,6}(\.\d*)?|\.\d+""")
         private fun chislo(s: String): Float? = if (CHISLO.matches(s)) s.toFloatOrNull() else null
         private fun ogr(v: Float, a: Float, b: Float, def: Float) = if (v.isNaN()) def else min(b, max(a, v))
@@ -195,6 +197,12 @@ object KartinkaCpu {
     // насыщенность средних цветов s + t·s·(1 − s) (серое остаётся серым, яркость V та же).
     const val MU_PERIOD = 30f
     const val MU_TYAGA = 0.6f
+    // 3.3.1 «Белое белым» (Александр 26.11; его кадры: белый зонт 163,188,178 — мятный, белая стена 178,136,87 — оранжевая):
+    // насыщенность, живость и мультяшность раздували лёгкий оттенок белого и серого (живость сильнее всего — она для
+    // блёклого). Защита по насыщенности ДО них (после контраста): s ≤ 0,05 — полная, 0,05…0,4 — плавно, ≥ 0,4 — нет;
+    // защищённое: множители насыщенности и живости → 1, мультяшность → 0, на силу ручки «belo».
+    const val BEL_A = 0.05f
+    const val BEL_B = 0.40f
     // выдержка в гамма-кодированном: ×2^(ступени/2.2) = ×2^ступени в линейном свете
     const val PREDEL_REZKOSTI = 0.1f   // предел подъёма края; 3.2.9: × max(1, резкость/2) — до 2 как было, при 4 — 0,2, при 8 — 0,4
     const val SUPER_POROG = 1.2f
@@ -276,11 +284,14 @@ object KartinkaCpu {
         val vh = floatArrayOf(kl(r * vy), kl(g * vy), kl(b * vy))
         val c = FloatArray(3) { kl(kl((vh[it] - n.chernyj) / sh) * m[it] + n.yarkost) }
         for (i in 0..2) c[i] = kontrastKrivaya(c[i], n.kontrast)
+        val zash = zashchitaBelogo(c, n.belo)            // 3.3.1: до насыщенности — по тому, что пришло
         val l = yarkost(c[0], c[1], c[2])
-        for (i in 0..2) c[i] = l + (c[i] - l) * n.nasyshch
+        val ns = n.nasyshch + (1f - n.nasyshch) * zash
+        for (i in 0..2) c[i] = l + (c[i] - l) * ns
         povorotTona(c, n.ton)
         val mx = max(c[0], max(c[1], c[2])); val mn = min(c[0], min(c[1], c[2]))
-        val zh = 1f + n.zhivost * (1f - min(1f, max(0f, (mx - mn) / max(mx, 1e-4f))))
+        val zh0 = 1f + n.zhivost * (1f - min(1f, max(0f, (mx - mn) / max(mx, 1e-4f))))
+        val zh = zh0 + (1f - zh0) * zash
         val l2 = yarkost(c[0], c[1], c[2])
         val t = min(1f, max(0f, n.teni + avtoTeni))
         val pg = 1f / n.gamma
@@ -291,7 +302,7 @@ object KartinkaCpu {
             c[i] = kl(svetaKrivaya(teniKrivaya(x, t), n.sveta))
         }
         svet(c, n.svet)
-        multyashno(c, n.multyashno)
+        multyashno(c, n.multyashno * (1f - zash))
         return c
     }
 
@@ -305,6 +316,13 @@ object KartinkaCpu {
         if (m <= 1e-4f) return
         val k = (1f - (1f - m).pow(1f + 2f * s)) / m
         for (i in 0..2) c[i] = kl(c[i] * k)
+    }
+
+    /** 3.3.1: насколько точка «почти белое/серое» (0 — цвет, 1 — серое) на силу [belo], по насыщенности после контраста. */
+    fun zashchitaBelogo(c: FloatArray, belo: Float): Float {
+        if (belo <= 0f) return 0f
+        val mx = max(c[0], max(c[1], c[2])); val mn = min(c[0], min(c[1], c[2]))
+        return belo * (1f - smoothstep(BEL_A, BEL_B, (mx - mn) / max(mx, 1e-4f)))
     }
 
     /** 3.2.9: предел подъёма края растёт с резкостью выше 2 — иначе 4 упиралась бы в тот же потолок, что и 2. */

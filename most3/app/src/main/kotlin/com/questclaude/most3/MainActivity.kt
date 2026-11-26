@@ -223,6 +223,8 @@ class MainActivity : Activity() {
         Polzunok("chernyj", "Точка чёрного (минус — приподнять)", -0.2f, 0.3f) { it.chernyj },
         Polzunok("belyj", "Уровень белого", 0.7f, 1f) { it.belyj },
         Polzunok("zhivost", "Живость", -1f, 1f) { it.zhivost },
+        // 3.3.1 (Александр 26.11): почти белое и серое не раскрашиваются
+        Polzunok("belo", "Белое белым", 0f, 1f) { it.belo },
         // 3.2.7 (план К2): чистка кадра для эфира и клипа; в окне видно в «До|После» справа
         Polzunok("chistka", "Чистка для эфира", 0f, 1f) { it.chistka })
     // 3.2.6 (Александр 25.11: «ручки не должны занимать пол-окна, ещё и с затемнением»): две тонкие строки внизу, кадр
@@ -232,9 +234,9 @@ class MainActivity : Activity() {
         "nasyshch" to "Насыщ.", "gamma" to "Гамма", "teni" to "Тени", "rezkost" to "Резкость", "avtonoch" to "Авто-ночь",
         "temperatura" to "Темп.", "balr" to "Красный", "balg" to "Зелёный", "balb" to "Синий", "ton" to "Тон", "sveta" to "Света",
         "chernyj" to "Чёрный", "belyj" to "Белый", "zhivost" to "Живость", "chistka" to "Чистка эфира",
-        "svet" to "Свет цвета", "multyashno" to "Мульт")
+        "svet" to "Свет цвета", "multyashno" to "Мульт", "belo" to "Белое белым")
     /** 3.2.9: второй ряд фишек — цвет и уровни; первый — свет, резкость и остальное. */
-    private val GRUPPA_CVET = setOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost")
+    private val GRUPPA_CVET = setOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "belo")
     private var vybrana = "sila"                       // что крутим; "yachejki" — ряд ячеек вместо ползунка
     private val fishki = HashMap<String, Button>()
     private lateinit var ryadRuchki: LinearLayout
@@ -275,7 +277,7 @@ class MainActivity : Activity() {
                 addView(sr)
                 addView(fishka("↺ Цвет как было") {
                     var n = Most.nastrojki
-                    for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila", "svet", "multyashno"))
+                    for (im in listOf("temperatura", "balr", "balg", "balb", "ton", "sveta", "chernyj", "belyj", "zhivost", "vyderzhka", "sila", "svet", "multyashno", "belo"))
                         n = n.izmenit(im, "def") ?: n
                     Most.postavit(n); obnovitPolzunki()
                 })

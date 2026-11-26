@@ -502,4 +502,28 @@ class KartinkaTest {
         assertTrue(o4[(y * w + 7) * 3] < o2[(y * w + 7) * 3] - 0.05f)        // тёмная сторона края — темнее
         assertTrue(o4[(y * w + 8) * 3] > o2[(y * w + 8) * 3] + 0.05f)        // светлая — светлее
     }
+
+    @Test fun beloeBelym() {
+        // 3.3.1 (Александр 26.11): белый зонт с лёгким мятным оттенком не становится мятным, жёлтый зонт — такой же сочный
+        val sochno = Nastrojki(nasyshch = 1.75f, zhivost = 0.5f, multyashno = 0.5f, svet = 0.5f)
+        val zashch = sochno.copy(belo = 1f)
+        val beloe = floatArrayOf(0.86f, 0.9f, 0.87f)                         // почти белое, чуть мятное
+        val b0 = KartinkaCpu.obrabotat(beloe[0], beloe[1], beloe[2], sochno, 0f)
+        val b1 = KartinkaCpu.obrabotat(beloe[0], beloe[1], beloe[2], zashch, 0f)
+        val s0 = hsv(b0)[1]; val s1 = hsv(b1)[1]; val sIsh = hsv(beloe)[1]
+        assertTrue("без защиты оттенок раздут: $sIsh → $s0", s0 > 2f * sIsh)
+        assertTrue("с защитой почти как было: $sIsh → $s1", s1 < 1.3f * sIsh)
+        assertEquals(hsv(b0)[2], hsv(b1)[2], 0.02f)                          // яркость (свет) та же
+        val zhel = floatArrayOf(0.76f, 0.73f, 0.2f)                          // жёлтый зонт — цвет, не трогается
+        val z0 = KartinkaCpu.obrabotat(zhel[0], zhel[1], zhel[2], sochno, 0f)
+        val z1 = KartinkaCpu.obrabotat(zhel[0], zhel[1], zhel[2], zashch, 0f)
+        for (i in 0..2) assertEquals(z0[i], z1[i], 1e-6f)
+        // 0 — как было (старые ячейки не меняются); серое остаётся серым
+        val n0 = KartinkaCpu.obrabotat(0.4f, 0.5f, 0.3f, sochno, 0f)
+        val n1 = KartinkaCpu.obrabotat(0.4f, 0.5f, 0.3f, sochno.copy(belo = 0f), 0f)
+        for (i in 0..2) assertEquals(n0[i], n1[i], 0f)
+        assertEquals(0f, Nastrojki.izStroki("yarkost=0").belo, 0f)
+        assertEquals(zashch, Nastrojki.izStroki(zashch.vStroku()))
+        assertTrue("uBelo" in Shader.UNIFORMY)
+    }
 }
