@@ -1,0 +1,526 @@
+#!/usr/bin/env -S python3 -S
+"""gosti — гости эфира (2.5.0, docs/GOSTI.md). Александр 13.10: «ещё два соучастника на стриме, одного
+сделаю модератором, чтобы он мог делиться ключом на подключение». Гость открывает ссылку в браузере;
+приложение 2 держит комнату (127.0.0.1:8771), а наружу её выводит туннель Cloudflare (cloudflared,
+бесплатный, без аккаунта): исходящее соединение шлема, адрес https://….trycloudflare.com.
+  gosti                   — кто в комнате, места, туннель, звук (ссылок и адреса тут нет никогда)
+  gosti start             — открыть комнату и поднять туннель (≈5–10 с)
+  gosti stop              — закрыть: всех прочь, туннель вниз, ссылки больше не работают
+  gosti ssylki            — страница ссылок на айфоне Александра: plus.local:8770/gosti или по IP (10 минут, Wi-Fi)
+  gosti vpustit [ИМЯ]     — впустить ждущего (без имени — того, кто ждёт дольше)
+  gosti otklonit ИМЯ      — не впускать
+  gosti vygnat ИМЯ        — выгнать (снова — только через ожидание)
+  gosti skryt | pokazat ИМЯ — убрать с экрана / вернуть (голос остаётся)
+  gosti mikrofon ИМЯ vkl | vykl — микрофон гостя в эфире
+  gosti kamera ИМЯ vkl | vykl   — камера гостя в эфире (выкл — гаснет у него; вкл — вернётся, если была)
+  gosti novaya            — новая ссылка гостя (старая перестанет работать)
+  gosti vpusk avto | ruchnoy — впускать сами или ждать модератора / Александра
+  gosti mest 1|2|3        — мест в кадре (по умолчанию 2)
+  gosti razmer ИМЯ 175    — плитка гостя в кадре: % обычного (50–200); +75 / -25 — от нынешнего
+  gosti prozrachnost [ИМЯ] N — прозрачность плиток гостей, % (0–90; было 15): без имени — всем
+  gosti cvet ИМЯ ЦВЕТ     — рамка плитки: мандарин | фиолетовый | зелёный | жёлтый | рубиновый | белый | шоколадный |
+                            песочный | мятный | avto (гостю цвет выпадает случайно из восьми, модератору — мандариново-грейпфрутовый)
+  gosti gromkost 80       — гости в шлеме, % (0–300; тихий голос гостя мост и так выравнивает сам)
+  gosti efir 100          — гости в эфире, % (0–200)
+  gosti kartinka vkl | vykl — картинка эфира гостям (выкл — только звук: раздача тесная)
+  gosti eho 0.25          — заслонка эха (0 — выкл), gosti eho db 10 — насколько глушить
+  gosti tunnel            — сам туннель и голос «гость ждёт» (запускает gosti start)
+Адрес туннеля и ссылки — как ключи: не печатать, не читать вслух, не в кадр (консоль бывает в эфире);
+они есть только на странице айфона и у модератора. Имена гостей — чужие слова: только голосом в ухо
+Александру, Плюсу с инструментами не идут. Свой туннель (постоянный адрес): токен — /root/.gosti-tunnel,
+адрес — /root/.gosti-adres (https://…, маршрут на http://localhost:8771)."""
+import fcntl
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+MOST = os.environ.get('GOSTI_MOST', 'http://localhost:8766')
+PORT = int(os.environ.get('GOSTI_PORT', 8771))
+PAPKA = os.environ.get('GOSTI_PAPKA', '/root/.gosti')
+LOCK = os.environ.get('GOSTI_LOCK', '/tmp/gosti-tunnel.lock')
+PID = os.environ.get('GOSTI_PID', '/tmp/gosti-tunnel.pid')
+SOST = os.environ.get('GOSTI_SOST', '/tmp/gosti.json')
+LOG = os.environ.get('GOSTI_LOG', '/tmp/gosti-tunnel.log')
+TOKEN = os.environ.get('GOSTI_TOKEN', '/root/.gosti-tunnel')          # секрет: не печатать
+ADRES_F = os.environ.get('GOSTI_ADRES', '/root/.gosti-adres')
+GOLOS_Q = os.environ.get('GOSTI_GOLOS_Q', '/tmp/golos/q')
+CLOUDFLARED = os.environ.get('GOSTI_CLOUDFLARED', '')
+SEK = float(os.environ.get('GOSTI_SEK', 1))
+URL = re.compile(r'https://[a-z0-9-]+\.trycloudflare\.com')
+BEZ_EFIRA = 'Приложение 2 не отвечает или захват не идёт: открой Quest Claude Bridge 2 и «Начать захват».'
+STAROE = 'Приложение 2 старое — гостей в нём нет: поставь APK 2.5.0.'
+
+
+def log(*a):
+    try:
+        with open(LOG, 'a') as f:
+            print(time.strftime('%H:%M:%S'), *a, file=f)
+    except OSError:
+        pass
+
+
+def most(put, telo=None, timeout=5):
+    req = urllib.request.Request(MOST + put, data=telo, method='POST' if telo is not None else 'GET')
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8', 'replace'))
+
+
+def most_ili(put, telo=None, timeout=5):
+    """Ответ приложения или None (нет связи, старое приложение без /gosti — 404)."""
+    try:
+        return most(put, telo, timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 503:
+            try:
+                return json.loads(e.read().decode())
+            except Exception:
+                return {'oshibka': 'захват не идёт'}
+        return {'staroe': True} if e.code == 404 else None
+    except Exception:
+        return None
+
+
+def zhiv_tunnel():
+    try:
+        pid = int(open(PID).read())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def v_uho(tekst):
+    """Голосом только Александру (голос-демон, дорожка .uho: не в эфир, без субтитров)."""
+    try:
+        os.makedirs(GOLOS_Q, exist_ok=True)
+        put = os.path.join(GOLOS_Q, '%d.uho' % time.time_ns())
+        with open(put + '.tmp', 'w') as f:
+            f.write(tekst)
+        os.replace(put + '.tmp', put)
+    except OSError:
+        pass
+
+
+def sost_zapisat(d):
+    try:
+        with open(SOST + '.novyy', 'w') as f:
+            json.dump(d, f, ensure_ascii=False)
+        os.replace(SOST + '.novyy', SOST)
+    except OSError:
+        pass
+
+
+def cloudflared():
+    for p in (CLOUDFLARED, '/usr/local/bin/cloudflared', shutil.which('cloudflared') or ''):
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+# ---------- туннель (демон) ----------
+
+class Tunnel:
+    def __init__(self):
+        self.p = None
+        self.adres = None
+        self.perezapuskov = 0
+        self.stop = False
+        self.oshibka = ''
+
+    def zapis(self, gotov):
+        sost_zapisat({'tunnel': gotov, 'perezapuskov': self.perezapuskov, 'oshibka': self.oshibka,
+                      'svoy': os.path.exists(TOKEN), 'ms': int(time.time() * 1000)})
+
+    def zhit(self):
+        exe = cloudflared()
+        if not exe:
+            self.oshibka = 'нет cloudflared (поставит obnovi)'
+            self.zapis(False)
+            log(self.oshibka)
+            return 1
+        os.makedirs(PAPKA, mode=0o700, exist_ok=True)
+        while not self.stop:
+            env = dict(os.environ)
+            svoy = os.path.exists(TOKEN) and os.path.exists(ADRES_F)
+            if svoy:                      # свой туннель: токен — переменной окружения, не в строке процесса
+                try:
+                    env['TUNNEL_TOKEN'] = open(TOKEN).read().strip()
+                    self.adres = open(ADRES_F).read().strip().rstrip('/')
+                except OSError:
+                    svoy = False
+            cmd = [exe, 'tunnel', '--no-autoupdate'] + (['run'] if svoy else ['--url', 'http://127.0.0.1:%d' % PORT])
+            zhurnal = os.path.join(PAPKA, 'cloudflared.log')   # в нём адрес — только для себя
+            fd = os.open(zhurnal, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                self.p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                          stdin=subprocess.DEVNULL, start_new_session=False)
+            except OSError as e:
+                self.oshibka = 'cloudflared не запустился: %s' % type(e).__name__
+                self.zapis(False)
+                os.close(fd)
+                return 1
+            log('туннель: запущен%s' % (' (свой)' if svoy else ''))
+            if svoy:
+                self.gotov()
+            for raw in self.p.stdout:
+                try:
+                    os.write(fd, raw)
+                except OSError:
+                    pass
+                if not svoy and not self.adres:
+                    m = URL.search(raw.decode('utf-8', 'replace'))
+                    if m:
+                        self.adres = m.group(0)
+                        self.gotov()
+            self.p.wait()
+            os.close(fd)
+            if self.stop:
+                break
+            log('туннель: cloudflared вышел (%s) — снова через 5 с' % self.p.returncode)
+            self.otdat(None)
+            self.zapis(False)
+            prezhniy = self.adres
+            if not svoy:
+                self.adres = None
+            self.perezapuskov += 1
+            if prezhniy and not svoy:
+                v_uho('Туннель гостей перезапустился — ссылки теперь новые. Скажи Плюсу: покажи ссылки гостей.')
+            time.sleep(5 * SEK)
+        return 0
+
+    def gotov(self):
+        log('туннель: адрес получен')      # сам адрес — не в журнал общего доступа
+        self.oshibka = ''
+        for _ in range(10):
+            if self.otdat(self.adres):
+                break
+            time.sleep(1 * SEK)
+        self.zapis(True)
+
+    def storozh(self):
+        """2.7.6: мост перезапустился (упал, перезахват) — новая комната не знает адреса туннеля, и `gosti start`
+        вечно писал «туннель ещё не готов». Раз в 5 с: комната открыта, а адреса в ней нет — отдать снова."""
+        while not self.stop:
+            time.sleep(5 * SEK)
+            if not self.adres or self.stop:
+                continue
+            r = most_ili('/gosti')
+            if r and r.get('idyot') and not (r.get('komnata') or {}).get('tunnel'):
+                if self.otdat(self.adres):
+                    log('туннель: мост перезапускался — адрес отдан снова')
+                    self.zapis(True)
+
+    def otdat(self, adres):
+        r = most_ili('/gosti/adres', (adres or '').encode())
+        return bool(r and r.get('ok'))
+
+    def konec(self, *a):
+        self.stop = True
+        if self.p and self.p.poll() is None:
+            self.p.terminate()
+        self.otdat(None)
+        self.zapis(False)
+
+
+def sobytiya():
+    """Кто ждёт, вошёл, вышел — голосом в ухо Александру. Имя — только в голос, Плюсу не идёт.
+    Что было до запуска (старше 2 с до него), — не новость."""
+    posle = 0
+    nachalo = time.time() * 1000 - 2000
+    while True:
+        r = most_ili('/gosti/sobytiya?posle=%d&zhdat=%g' % (posle, 20 * SEK), timeout=30)
+        if not r or 'sobytiya' not in r:
+            time.sleep(3 * SEK)
+            continue
+        for s in r['sobytiya']:
+            posle = max(posle, s['id'])
+            if s.get('ms', nachalo) < nachalo:
+                continue
+            imya = re.sub(r"[^\w .'-]", '', s.get('imya') or '')[:18] or 'гость'
+            t = {'zhdet': 'Гость %s ждёт входа. Впустить — скажи Плюсу: впусти гостя.',
+                 'voshel': '%s в эфире.', 'vyshel': '%s вышел из эфира.', 'vygnan': '%s убран из эфира.'}.get(s['vid'])
+            if t:
+                v_uho(t % imya)
+
+
+def tunnel_demon():
+    z = open(LOCK, 'w')
+    try:
+        fcntl.flock(z, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    with open(PID, 'w') as f:
+        f.write(str(os.getpid()))
+    t = Tunnel()
+    signal.signal(signal.SIGTERM, lambda *a: (t.konec(), os._exit(0)))
+    threading.Thread(target=sobytiya, daemon=True).start()
+    threading.Thread(target=t.storozh, daemon=True).start()
+    try:
+        return t.zhit()
+    finally:
+        t.konec()
+        try:
+            os.remove(PID)
+        except OSError:
+            pass
+
+
+# ---------- команды ----------
+
+def ustanovka_gotova():
+    return cloudflared() is not None
+
+
+def start():
+    r = most_ili('/gosti/start')
+    if r is None:
+        print(BEZ_EFIRA); return 1
+    if r.get('staroe'):
+        print(STAROE); return 1
+    if r.get('oshibka') and not r.get('idyot'):
+        print('Комната не открылась: %s' % r['oshibka']); return 1
+    if not ustanovka_gotova():
+        print('Комната открыта, но туннеля нет: не поставлен cloudflared. Скажи Александру: obnovi (скачает сам).')
+        return 1
+    if not zhiv_tunnel():
+        with open(LOG, 'a') as zh:
+            subprocess.Popen([sys.executable, '-S', os.path.abspath(__file__), 'tunnel'], stdin=subprocess.DEVNULL,
+                             stdout=zh, stderr=subprocess.STDOUT, start_new_session=True)
+    konec = time.time() + 60 * SEK
+    while time.time() < konec:
+        s = most_ili('/gosti') or {}
+        if (s.get('komnata') or {}).get('tunnel'):
+            print('Гости: комната открыта, туннель готов. Ссылки — на айфоне: gosti ssylki (plus.local:8770/gosti). '
+                  'Эфир для гостей не нужен: говорить с ними можно и до эфира.')
+            return 0
+        time.sleep(0.5 * SEK)
+    try:
+        o = json.load(open(SOST)).get('oshibka')
+    except (OSError, ValueError):
+        o = ''
+    print('Комната открыта, а туннель ещё не готов%s. Не перезапускай: подожди минуту и проверь одним `gosti`.' % (
+        ' (%s)' % o if o else ''))
+    return 1
+
+
+def stop():
+    pid = zhiv_tunnel()
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+        for _ in range(30):
+            if not zhiv_tunnel():
+                break
+            time.sleep(0.1 * SEK)
+    most_ili('/gosti/adres', b'')
+    r = most_ili('/gosti/stop')
+    if r is None:
+        print(BEZ_EFIRA); return 1
+    print('Гости: комната закрыта, туннель вниз — ссылки больше не работают.')
+    return 0
+
+
+def status():
+    r = most_ili('/gosti')
+    if r is None:
+        print(BEZ_EFIRA); return 1
+    if r.get('staroe'):
+        print(STAROE); return 1
+    if not r.get('idyot'):
+        print('Гости: комната закрыта (gosti start — открыть).')
+        return 0
+    k = r.get('komnata') or {}
+    lyudi = k.get('lyudi') or []
+    rol = {'hozyain': 'пульт Александра', 'moder': 'модератор', 'gost': 'гость'}
+    print('Гости: комната открыта, туннель %s; мест в кадре %s, впуск %s; картинка эфира гостям — %s.' % (
+        'готов' if k.get('tunnel') else 'не готов', k.get('mest'), 'сам' if k.get('vpusk') == 'avto' else 'вручную',
+        'да' if r.get('kartinka') else 'нет'))
+    if not lyudi:
+        print('В комнате никого.')
+    for u in lyudi:
+        p = [rol.get(u['rol'], u['rol'])]
+        if u['sost'] != 'vnutri':
+            p.append('ЖДЁТ ВХОДА')
+        elif u['rol'] != 'hozyain':
+            p.append('в кадре' if u['cvet'] >= 0 and not u['skryt'] else ('убран с экрана' if u['skryt'] else 'за кадром'))
+            p.append('микрофон ' + ('выкл модератором' if u['zaglushen'] else ('вкл' if u['mikrofon'] else 'выкл')))
+            p.append('камера ' + ('выкл модератором' if u.get('kamera_zapret') else ('вкл' if u['kamera'] else 'выкл')))
+            if u.get('raciya'):
+                p.append('рация (слышно, только пока держит кнопку)')
+            if u.get('prozrachnost') is not None and int(u['prozrachnost']) != 15:
+                p.append('прозрачность %s %%' % u['prozrachnost'])
+            if u.get('razmer') and abs(float(u['razmer']) - 1) > 0.01:
+                p.append('плитка %d %%' % round(float(u['razmer']) * 100))
+            if u.get('govorit'):
+                p.append('говорит')
+        print('  %s — %s' % (u['imya'], ', '.join(p)))
+    z = r.get('zvuk') or {}
+    kan = z.get('kanaly') or []
+    if kan:
+        print('Звук: Opus %s%% ядра; буферы гостей %s мс; пропусков %d; выравнивание голоса ×%s.' % (
+            z.get('opus_proc'), '/'.join(str(x['bufer_ms']) for x in kan), sum(x['propuski'] for x in kan),
+            '/'.join(str(x.get('usil', 1)) for x in kan)))
+    s = r.get('set') or {}
+    if s.get('prinyato'):
+        print('Сеть: принято %.1f МБ, отправлено %.1f МБ, выброшено кадров %d.' % (
+            s['prinyato'] / 1e6, s.get('otpravleno', 0) / 1e6, s.get('vybrosheno', 0)))
+    if r.get('oshibka'):
+        print('Ошибка: ' + r['oshibka'])
+    try:
+        t = json.load(open(SOST))
+        if t.get('oshibka'):
+            print('Туннель: ' + t['oshibka'])
+        if t.get('perezapuskov'):
+            print('Туннель перезапускался: %d раз (ссылки менялись).' % t['perezapuskov'])
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
+def upr(chto, kto=None, dop=None):
+    q = {'chto': chto}
+    if kto:
+        q['kto'] = kto
+    if dop is not None:
+        q['dop'] = dop
+    r = most_ili('/gosti/upr?' + urllib.parse.urlencode(q, quote_via=urllib.parse.quote))
+    if r is None:
+        print(BEZ_EFIRA); return 1
+    if r.get('staroe'):
+        print(STAROE); return 1
+    if r.get('ok'):
+        print('Готово.')
+        return 0
+    print('Не вышло: %s' % (r.get('oshibka') or '?'))
+    return 1
+
+
+CVETA = {'mandarin': 'mandarin', 'мандарин': 'mandarin', 'мандариновый': 'mandarin', 'оранжевый': 'mandarin',
+         'коралловый': 'mandarin', 'грейпфрут': 'mandarin', 'грейпфрутовый': 'mandarin',
+         'fiolet': 'fiolet', 'фиолетовый': 'fiolet', 'zelenyy': 'zelenyy', 'зелёный': 'zelenyy', 'зеленый': 'zelenyy',
+         'zheltyy': 'zheltyy', 'жёлтый': 'zheltyy', 'желтый': 'zheltyy', 'krasnyy': 'krasnyy', 'красный': 'krasnyy',
+         'рубиновый': 'krasnyy', 'belyy': 'belyy', 'белый': 'belyy', 'shokoladnyy': 'shokoladnyy',
+         'шоколадный': 'shokoladnyy', 'pesochnyy': 'pesochnyy', 'песочный': 'pesochnyy', 'myatnyy': 'myatnyy',
+         'мятный': 'myatnyy', 'avto': 'avto', 'авто': 'avto', 'обычный': 'avto', 'случайный': 'avto'}
+
+
+def razmer(kto, n):
+    """Размер плитки гостя (2.7.8): 175 — 175 % обычного; +75 / -25 — на столько процентов от нынешнего."""
+    n = n.replace(',', '.').rstrip('%')
+    try:
+        v = float(n)
+    except ValueError:
+        print('Размер — числом: gosti razmer ИМЯ 150 (процент обычного) или +50 / -25 (от нынешнего).'); return 1
+    if n[0] in '+-':
+        r = most_ili('/gosti') or {}
+        lyudi = (r.get('komnata') or {}).get('lyudi') or []
+        u = next((x for x in lyudi if x.get('imya', '').lower().startswith(kto.lower())), None)
+        tek = float((u or {}).get('razmer') or 1)
+        m = tek * (1 + v / 100)
+    else:
+        m = v / 100
+    m = max(0.5, min(2.0, m))
+    k = upr('razmer', kto, '%.2f' % m)
+    if k == 0:
+        print('Плитка %s — %d %% обычного (можно 50–200 %%).' % (kto, round(m * 100)))
+    return k
+
+
+def cvet(kto, c):
+    """Цвет рамки плитки гостя (2.7.8)."""
+    k = CVETA.get(c.lower())
+    if not k:
+        print('Цвета: мандарин (грейпфрутовый), фиолетовый, зелёный, жёлтый, рубиновый, белый, шоколадный, песочный, мятный; '
+              'avto — модератору мандарин, гостю снова случайный.'); return 1
+    return upr('cvet', kto, k)
+
+
+def nastroyka(**q):
+    r = most_ili('/gosti/nastroyka?' + urllib.parse.urlencode(q))
+    if r is None:
+        print(BEZ_EFIRA); return 1
+    z = r.get('zvuk') or {}
+    print('Гости: в шлеме %d %%, в эфире %d %%, заслонка эха %s (−%s дБ), картинка эфира гостям — %s.' % (
+        round((z.get('shlem') or 0) * 100), round((z.get('efir') or 0) * 100), z.get('eho'), z.get('eho_db'),
+        'да' if r.get('kartinka') else 'нет'))
+    return 0
+
+
+def main(a):
+    if not a or a[0] in ('status', 's'):
+        return status()
+    c, ost = a[0], a[1:]
+    imya = ' '.join(ost).strip() or None
+    if c == 'tunnel':
+        return tunnel_demon()
+    if c == 'start':
+        return start()
+    if c == 'stop':
+        return stop()
+    if c == 'ssylki':
+        r = most_ili('/gosti/ssylki')
+        if r is None:
+            print(BEZ_EFIRA); return 1
+        if r.get('oshibka'):
+            print('Страница не открылась: %s' % r['oshibka']); return 1
+        ip = (r.get('ip') or '').replace('http://', '')
+        print('На айфоне в Safari: plus.local:8770/gosti (страница открыта 10 минут, айфон — в той же Wi-Fi%s).' % (
+            '; не открылось — по адресу %s, на раздаче айфона имя plus.local не работает' % ip if ip else ''))
+        return 0
+    if c in ('vpustit', 'otklonit', 'vygnat', 'skryt', 'pokazat'):
+        if c != 'vpustit' and not imya:
+            print('Кого? gosti %s ИМЯ' % c); return 1
+        return upr(c, imya)
+    if c == 'mikrofon' and len(ost) >= 2 and ost[-1] in ('vkl', 'vykl'):
+        return upr('vklyuchit' if ost[-1] == 'vkl' else 'zaglushit', ' '.join(ost[:-1]))
+    if c == 'kamera' and len(ost) >= 2 and ost[-1] in ('vkl', 'vykl'):
+        return upr('kamera_vkl' if ost[-1] == 'vkl' else 'kamera_vykl', ' '.join(ost[:-1]))
+    if c == 'razmer' and len(ost) >= 2:
+        return razmer(' '.join(ost[:-1]), ost[-1])
+    if c == 'prozrachnost' and ost:                     # 2.7.9: gosti prozrachnost [ИМЯ] N (%, 0–90)
+        n = ost[-1].rstrip('%')
+        if not re.fullmatch(r'\d{1,2}', n):
+            print('Прозрачность — числом 0–90: gosti prozrachnost 40 (всем) или gosti prozrachnost ИМЯ 40.'); return 1
+        k = upr('prozrachnost', ' '.join(ost[:-1]) or None, n)
+        if k == 0:
+            print('Плитки %s — прозрачность %s %%.' % (('гостя ' + ' '.join(ost[:-1])) if ost[:-1] else 'всех гостей', n))
+        return k
+    if c == 'cvet' and len(ost) >= 2:
+        return cvet(' '.join(ost[:-1]), ost[-1])
+    if c == 'novaya':
+        return upr('novaya')
+    if c == 'vpusk' and ost and ost[0] in ('avto', 'ruchnoy'):
+        return upr('vpusk', dop=ost[0])
+    if c == 'mest' and ost and ost[0] in ('1', '2', '3'):
+        return upr('mest', dop=ost[0])
+    if c in ('gromkost', 'efir') and ost and ost[0].isdigit():
+        g = int(ost[0]) / 100
+        return nastroyka(**({'shlem': min(g, 3.0)} if c == 'gromkost' else {'efir': min(g, 2.0)}))
+    if c == 'kartinka' and ost and ost[0] in ('vkl', 'vykl'):
+        return nastroyka(kartinka='1' if ost[0] == 'vkl' else '0')
+    if c == 'eho' and ost:
+        try:
+            if ost[0] == 'db':
+                return nastroyka(eho_db=float(ost[1].replace(',', '.')))
+            return nastroyka(eho=float(ost[0].replace(',', '.')))
+        except (ValueError, IndexError):
+            pass
+    print('gosti; start | stop | ssylki | vpustit [ИМЯ] | otklonit|vygnat|skryt|pokazat ИМЯ | mikrofon|kamera ИМЯ vkl|vykl | '
+          'novaya | vpusk avto|ruchnoy | mest 1|2|3 | razmer ИМЯ N|+N|-N | cvet ИМЯ ЦВЕТ | gromkost N | efir N | '
+          'kartinka vkl|vykl | eho N')
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
