@@ -434,12 +434,15 @@ class FrameServerTest {
     @Test fun earKlipSlovoISlyshal() {             // 2.8.17
         KlipSlovo.zanovo()
         try {
-            assertEquals("{\"slovo\":\"sks\",\"fraza\":\"скскс скскс скскс\",\"izmeneno\":false}",
+            assertEquals("{\"slovo\":\"sks\",\"fraza\":\"кс-кс-кс\",\"primanki\":true,\"izmeneno\":false}",
                 String(get("/ear/klip").body, Charsets.UTF_8))
-            assertEquals("{\"slovo\":\"klip\",\"fraza\":\"клип клип клип\",\"izmeneno\":true}",
+            assertEquals("{\"slovo\":\"klip\",\"fraza\":\"клип клип клип\",\"primanki\":true,\"izmeneno\":true}",
                 String(get("/ear/klip?slovo=klip").body, Charsets.UTF_8))
+            assertEquals("{\"slovo\":\"klip\",\"fraza\":\"клип клип клип\",\"primanki\":false,\"izmeneno\":true}",
+                String(get("/ear/klip?primanki=0").body, Charsets.UTF_8))
+            get("/ear/klip?primanki=1")
             ear.zapomnit("скс скс", listOf(1.0, 0.5), ms = 7)
-            assertEquals("{\"klip\":{\"slovo\":\"klip\",\"fraza\":\"клип клип клип\"},\"itogi\":[{\"ms\":7,\"t\":\"скс скс\",\"c\":[1.00,0.50]}]}",
+            assertEquals("{\"klip\":{\"slovo\":\"klip\",\"fraza\":\"клип клип клип\",\"primanki\":true},\"itogi\":[{\"ms\":7,\"t\":\"скс скс\",\"c\":[1.00,0.50]}]}",
                 String(get("/ear/slyshal").body, Charsets.UTF_8))
         } finally { KlipSlovo.zanovo() }
     }

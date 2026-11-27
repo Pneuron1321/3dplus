@@ -95,7 +95,7 @@ class EarService : Service() {
         startForeground(2, notification("Уши: «плюс плюс», «зум зум»"), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         Pamyat.start(this)
         Pamyat.zapis("уши: включены")
-        KlipSlovo.zagruzit(filesDir)                      // 2.8.17: слово клипа — «скскс» ×3 или «клип клип клип»
+        KlipSlovo.zagruzit(filesDir)                      // 2.8.17: слово клипа — «кс-кс-кс» или «клип клип клип»
         try {
             if (Hub.say == null) Hub.say = Golos(cacheDir)
             if (Hub.fon == null) Hub.fon = Fon(cacheDir, java.io.File(filesDir, "fon-nastroyki"))
@@ -129,7 +129,8 @@ class EarService : Service() {
     }
 
     private fun grammarRecognizer(m: Model, triggers: Triggers, lang: String) =
-        Recognizer(m, RATE.toFloat(), triggers.grammar(lang)).also { it.setWords(true); it.setPartialWords(true) }
+        Recognizer(m, RATE.toFloat(), triggers.grammar(lang, KlipSlovo.slovo == KlipSlovo.SKS, KlipSlovo.primanki))
+            .also { it.setWords(true); it.setPartialWords(true) }
 
     private fun listen() {
         status = "Уши: загружаю модели…"
@@ -166,7 +167,6 @@ class EarService : Service() {
         val chooser = Triggers.Chooser()
         val stopWord = Triggers.StopWord(triggers.stop, one = triggers.stopOne)   // свободный текст: варианты
         val early = Triggers.EarlyWake(triggers, triggers.earlyChunks)
-        val seriya = Triggers.SeriyaSlov(triggers)     // 2.8.17: «скскс» ×3 — клип
         val kolco = Kolco(30, RATE)                    // последние 30 с: фраза с конца слов вызова
         var pending: Triggers.Hit? = null              // голый «плюс плюс»: ждём, не скажет ли другая
         var pendingAt = 0L                             // модель точную команду («… вслух»)
@@ -185,6 +185,7 @@ class EarService : Service() {
         var chekMs = 0L                                // «чек чек плюс»: фраза — столько мс, без пауз
         var dosluhFraza = false                        // фраза без вызова — в секунду после ответа Плюса
         val buf = ShortArray(RATE / 10)              // 0,1 с
+        var gramVersiya = KlipSlovo.versiya            // 2.8.18: слово клипа / приманки поменяли — грамматика заново
         // 2.6.1: вставили карту захвата — Android делает её микрофоном по умолчанию для всех, и уши слушали бы
         // PS4 вместо Александра. Держимся за встроенный микрофон шлема.
         try {
@@ -287,6 +288,11 @@ class EarService : Service() {
                 val dosluh = Hub.ear.dosluh
                 if (Hub.say?.govorit == true) dosluh.zakryt()      // Ава снова говорит — секунда кончилась
                 val p = phrase
+                if (p == null && KlipSlovo.versiya != gramVersiya) {
+                    gramVersiya = KlipSlovo.versiya
+                    early.reset()
+                    ears.forEach { fresh(it, triggers, kolco.total - n) }
+                }
                 if (p == null) {
                     // Секунда после ответа Плюса (2.3.1): заговорил громко — фраза без «плюс плюс».
                     // Слова вызова в ней ловятся как обычно: «плюс плюс» сильнее (ниже).
@@ -306,12 +312,12 @@ class EarService : Service() {
                             val heard = heardOf(e.lang, json)
                             val words = wordsOf(json, "result")
                             Hub.ear.zapomnit(heard.text, heard.confs)
-                            val sks = seriya.check(e.lang, words, e.base.toDouble() / RATE)   // счёт серии — по каждому итогу
-                            val h0 = triggers.match(e.lang, heard.text, heard.confs) ?: sks
+                            val h0 = triggers.match(e.lang, heard.text, heard.confs)
+                                ?: triggers.seriya(e.lang, words)?.takeIf { KlipSlovo.slovo == KlipSlovo.SKS }   // 2.8.18: «кс-кс-кс»
                             // «плюс плюс в ухо» — вызов, а «в ухо» — уже фраза после него (для Whisper)
                             val uho = h0?.action == UHO
                             val h = if (uho) Triggers.Hit("wake", e.lang, h0!!.conf) else h0
-                            // 2.8.17: клип зовут одним словом — «скскс» ×3 или «клип клип клип» (KlipSlovo); другое молчит
+                            // 2.8.17: клип зовут одним словом — «кс-кс-кс» или «клип клип клип» (KlipSlovo); другое молчит
                             if (h != null && !KlipSlovo.beret(h.action)) {
                                 status = "Уши: слышу «${KlipSlovo.fraza(if (h.action == "klip") KlipSlovo.KLIP else KlipSlovo.SKS)}», " +
                                     "а клип сейчас — «${KlipSlovo.fraza()}» (кнопка в «🎬 КЛИПЫ»)."
@@ -434,7 +440,7 @@ class EarService : Service() {
                             Hub.ear.post("plenka", h.action.removePrefix("plenka:"))
                             status = "Уши: плёнка ${h.action.removePrefix("plenka:")} кадров."
                         }
-                        h.action == "klip" || h.action == Triggers.SKS -> {   // 2.7.8: «клип клип клип», 2.8.17: «скскс» ×3
+                        h.action == "klip" || h.action == Triggers.SKS -> {   // 2.7.8: «клип клип клип», 2.8.18: «кс-кс-кс»
                             beep(Signal.Kind.KLIP)
                             status = "Уши: клип — сохраняю (${"%.1f".format(CaptureService.KLIP_SEK / 60.0)} мин)…"
                             val fraza = KlipSlovo.fraza()
@@ -641,10 +647,10 @@ class EarService : Service() {
             stopOne[lang] = (0 until (so?.length() ?: 0)).map { so!!.getString(it) }.toSet()
             val cm = m.optJSONObject("commands")
             commands[lang] = cm?.keys()?.asSequence()?.associateWith { cm.getString(it) } ?: emptyMap()
-            m.optJSONObject("seriya")?.let { sr ->                 // 2.8.17: «скскс» ×3 — серия слов, не фраза
-                val sl = sr.optJSONArray("slova")
-                seriya[lang] = Triggers.Seriya((0 until (sl?.length() ?: 0)).map { sl!!.getString(it) }.toSet(),
-                    sr.optInt("skolko", 3), sr.optDouble("pauza", 1.5), sr.optString("action", Triggers.SKS))
+            m.optJSONObject("seriya")?.let { sr ->                 // 2.8.18: «кс-кс-кс» — правило, не фраза
+                fun spisok(k: String) = sr.optJSONArray(k).let { a -> (0 until (a?.length() ?: 0)).map { a!!.getString(it) } }
+                seriya[lang] = Triggers.Seriya(spisok("slova").toSet(), spisok("glavnoe").toSet(), spisok("primanki"),
+                    sr.optString("action", Triggers.SKS))
             }
             val asset = m.getString("asset")
             if (asset in present) assetsByLang[lang] = asset

@@ -115,7 +115,7 @@ def hits(pcm):
 
 def grammar_rec(lang):
     m = T['models'][lang]
-    words = list(dict.fromkeys(list(m['phrases']) + list(m.get('commands', {})) + m.get('seriya', {}).get('slova', [])
+    words = list(dict.fromkeys(list(m['phrases']) + list(m.get('commands', {})) + m.get('seriya', {}).get('slova', []) + m.get('seriya', {}).get('primanki', [])
                                + m.get('decoys', []) + ['[unk]']))
     r = KaldiRecognizer(MODELS[lang], 16000, json.dumps(words, ensure_ascii=False))
     r.SetWords(True)
@@ -289,7 +289,7 @@ def grammar_stop(lang, model, pcm):
     Промежуточный текст грамматики не берём: обрывал на полуслове."""
     m = T['models'][lang]
     stops = [p for p, a in m['phrases'].items() if a == 'stop']
-    words = list(dict.fromkeys(list(m['phrases']) + m.get('seriya', {}).get('slova', []) + m.get('decoys', []) + ['[unk]']))
+    words = list(dict.fromkeys(list(m['phrases']) + m.get('seriya', {}).get('slova', []) + m.get('seriya', {}).get('primanki', []) + m.get('decoys', []) + ['[unk]']))
     r = KaldiRecognizer(model, 16000, json.dumps(words, ensure_ascii=False))
     r.SetWords(True)
     for i in range(0, len(pcm), 3200):

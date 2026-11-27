@@ -373,10 +373,14 @@ def efir(a):
             k, out = 0, [('Качество эфира: SSIM %s (худший кадр %s), PSNR %s дБ — %s. Замер %s с, %s пар кадров, '
                          '%s, поток %s кбит/с, кусок %s.' % (d.get('ssim'), d.get('ssim_min'), d.get('psnr'), slovo,
                                                             d.get('sek'), d.get('par'), d.get('razmer'), d.get('kbps'), d.get('kusok')))]
-    elif c == 'klip' and len(a) > 1 and a[1] in ('slovo', 'slyshal'):
-        # 2.8.17: слово клипа — «кс-кс-кс» (sks, по умолчанию) | «клип клип клип» (klip); slyshal — что слышат уши
+    elif c == 'klip' and len(a) > 1 and a[1] in ('slovo', 'slyshal', 'primanki'):
+        # 2.8.17: слово клипа — «кс-кс-кс» (sks, по умолчанию) | «клип клип клип» (klip); slyshal — что слышат уши;
+        # 2.8.18: primanki vkl|vykl — приманки правила «кс-кс-кс» («скажи», «скорее»…)
         if a[1] == 'slovo':
             q = '?slovo=' + a[2] if len(a) > 2 and a[2] in ('sks', 'klip') else ''
+            r = zapros(U, '/ear/klip' + q, 5)
+        elif a[1] == 'primanki':
+            q = '?primanki=' + ('1' if a[2] == 'vkl' else '0') if len(a) > 2 and a[2] in ('vkl', 'vykl') else ''
             r = zapros(U, '/ear/klip' + q, 5)
         else:
             r = zapros(U, '/ear/slyshal', 5)
@@ -387,15 +391,16 @@ def efir(a):
             k, out = 1, ['Слово клипа: нужен мост 2.8.17 (обнови приложение). Сейчас клип — «клип клип клип».']
         elif not d:
             k, out = 1, ['Слово клипа: непонятный ответ приложения.']
-        elif a[1] == 'slovo':
-            k, out = 0, ['Клип сейчас — «%s»%s. Переключить: efir klip slovo sks|klip (кнопка — в «🎬 КЛИПЫ»).'
-                         % (d.get('fraza'), ' (только что)' if d.get('izmeneno') else '')]
+        elif a[1] in ('slovo', 'primanki'):
+            pr = '' if 'primanki' not in d else (' Приманки «кс-кс-кс» %s.' % ('включены' if d.get('primanki') else 'выключены'))
+            k, out = 0, ['Клип сейчас — «%s»%s.%s Переключить: efir klip slovo sks|klip (кнопка — в «🎬 КЛИПЫ»).'
+                         % (d.get('fraza'), ' (только что)' if d.get('izmeneno') else '', pr)]
         else:
             itogi = d.get('itogi') or []
             sl = ['%s %s (%s)' % (time.strftime('%H:%M:%S', time.localtime(i.get('ms', 0) / 1000)), i.get('t'),
                                   ' '.join('%.2f' % x for x in i.get('c', []))) for i in itogi[-12:]]
-            k, out = 0, ['Клип — «%s». Уши слышали (слова грамматики и уверенность; клип «кс-кс-кс» — три кс/скс подряд, '
-                         'каждое от 0,75, между ними до 1,5 с):' % (d.get('klip') or {}).get('fraza')] + (sl or ['— пока ничего.'])
+            k, out = 0, ['Клип — «%s». Уши слышали (слова грамматики и уверенность; клип «кс-кс-кс» — фраза только '
+                         'из скс/кс, в ней «скс» от 0,75, средняя от 0,75):' % (d.get('klip') or {}).get('fraza')] + (sl or ['— пока ничего.'])
     elif c == 'klip':                                   # 2.7.9: клип шлема — otdelno (без окна камеры) | efir | vykl
         r = a[1] if len(a) > 1 and a[1] in ('otdelno', 'efir', 'vykl') else None
         q = '?rezhim=' + r if r else ''

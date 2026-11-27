@@ -382,8 +382,8 @@ class FrameServer(
                     reply(out, 200, "application/json", e.nastroyki().toByteArray())
                 }
             }
-            "/ear/klip" -> {                       // 2.8.17: слово клипа — ?slovo=sks («скскс» ×3) | klip («клип клип клип»)
-                val izm = KlipSlovo.postavit(query["slovo"])
+            "/ear/klip" -> {                       // 2.8.17: слово клипа — ?slovo=sks («кс-кс-кс») | klip; 2.8.18: &primanki=1|0
+                val izm = KlipSlovo.postavit(query["slovo"]) or KlipSlovo.postavitPrimanki(query["primanki"])
                 reply(out, 200, "application/json; charset=utf-8",
                     (KlipSlovo.json().dropLast(1) + ",\"izmeneno\":$izm}").toByteArray(Charsets.UTF_8))
             }

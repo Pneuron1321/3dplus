@@ -27,7 +27,7 @@ else:
     slova = Est()
 t = json.load(open(sys.argv[2], encoding='utf-8'))['models']['ru']
 nuzhny = set()
-for f in list(t['phrases']) + list(t.get('commands', {})) + list(t.get('decoys', [])) + t.get('seriya', {}).get('slova', []):
+for f in list(t['phrases']) + list(t.get('commands', {})) + list(t.get('decoys', [])) + t.get('seriya', {}).get('slova', []) + t.get('seriya', {}).get('primanki', []):
     nuzhny.update(f.split())
 net = sorted(w for w in nuzhny if w not in slova)
 print('Словарь модели (%s): слов вызова %d; нет в словаре: %s' % (put.rsplit('/', 1)[-1], len(nuzhny), ', '.join(net) or 'все есть'))

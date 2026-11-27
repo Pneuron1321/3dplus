@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
 
-/** 2.8.17: слово клипа — «скскс» ×3 по умолчанию, кнопкой — «клип клип клип»; серия скс/кс в ушах; журнал ушей. */
+/** 2.8.17–2.8.18: слово клипа — «кс-кс-кс» по умолчанию, кнопкой — «клип клип клип»; правило ушей; журнал ушей. */
 class KlipSlovoTest {
     @After fun posle() = KlipSlovo.zanovo()
 
@@ -16,7 +16,7 @@ class KlipSlovoTest {
         val d = Files.createTempDirectory("slovo").toFile()
         KlipSlovo.zanovo(); KlipSlovo.zagruzit(d)
         assertEquals(KlipSlovo.SKS, KlipSlovo.slovo)
-        assertEquals("скскс скскс скскс", KlipSlovo.fraza())
+        assertEquals("кс-кс-кс", KlipSlovo.fraza())
         assertTrue(KlipSlovo.beret(Triggers.SKS)); assertFalse(KlipSlovo.beret("klip"))
         assertTrue(KlipSlovo.beret("wake")); assertTrue(KlipSlovo.beret("zoom:x2"))     // другое не трогаем
         assertTrue(KlipSlovo.pereklyuchit())                                           // кнопка
@@ -26,7 +26,7 @@ class KlipSlovoTest {
         assertEquals(KlipSlovo.KLIP, KlipSlovo.slovo)                                 // после перезапуска — то же
         assertFalse(KlipSlovo.postavit("klip")); assertFalse(KlipSlovo.postavit("chush")); assertFalse(KlipSlovo.postavit(null))
         assertTrue(KlipSlovo.postavit("скскс"))
-        assertEquals("{\"slovo\":\"sks\",\"fraza\":\"скскс скскс скскс\"}", KlipSlovo.json())
+        assertEquals("{\"slovo\":\"sks\",\"fraza\":\"кс-кс-кс\",\"primanki\":true}", KlipSlovo.json())
         java.io.File(d, KlipSlovo.FAJL).writeText("musor")
         KlipSlovo.zanovo(); KlipSlovo.zagruzit(d)
         assertEquals(KlipSlovo.SKS, KlipSlovo.slovo)                                  // мусор в файле — по умолчанию
@@ -34,37 +34,51 @@ class KlipSlovoTest {
     }
 
     private val t = Triggers(0.75, mapOf("ru" to mapOf("клип клип клип" to "klip")),
-        seriya = mapOf("ru" to Triggers.Seriya(setOf("скс", "кс"), 3, 1.5, Triggers.SKS)))
-    private fun w(s: String, a: Double, b: Double, c: Double = 1.0) = Triggers.Word(s, a, b, c)
+        seriya = mapOf("ru" to Triggers.Seriya(setOf("скс", "кс"), setOf("скс"), listOf("скажи", "скорее"), Triggers.SKS)))
+    private fun w(s: String, c: Double = 1.0) = Triggers.Word(s, 0.0, 0.1, c)
 
-    @Test fun grammatikaZnaetSlovaSerii() =
-        assertEquals("[\"клип клип клип\",\"скс\",\"кс\",\"[unk]\"]", t.grammar("ru"))
-
-    @Test fun seriyaOdnimItogomIRaznymi() {
-        val s = Triggers.SeriyaSlov(t)
-        val h = s.check("ru", listOf(w("скс", 0.1, 0.4), w("скс", 0.6, 0.9, 0.8), w("кс", 1.1, 1.3)), 0.0)
-        assertEquals(Triggers.SKS, h?.action); assertEquals(0.8, h!!.conf, 1e-9)       // худшее слово серии
-        assertNull(s.check("ru", listOf(w("скс", 2.0, 2.3)), 0.0))                   // счёт заново: одно — не клип
-        // пауза между словами — конец итога: «скс | скс кс» — одна серия
-        val s2 = Triggers.SeriyaSlov(t)
-        assertNull(s2.check("ru", listOf(w("скс", 0.1, 0.4)), 10.0))
-        assertEquals(Triggers.SKS, s2.check("ru", listOf(w("скс", 1.2, 1.5), w("кс", 1.7, 2.0)), 10.0)?.action)
-        // время слов — от создания распознавателя (base): после «fresh» серия продолжается по общим часам
-        val s3 = Triggers.SeriyaSlov(t)
-        assertNull(s3.check("ru", listOf(w("скс", 4.0, 4.3), w("кс", 4.5, 4.8)), 0.0))
-        assertEquals(Triggers.SKS, s3.check("ru", listOf(w("кс", 0.2, 0.5)), 5.0)?.action)
+    @Test fun grammatika() {
+        assertEquals("[\"клип клип клип\",\"скс\",\"кс\",\"скажи\",\"скорее\",\"[unk]\"]", t.grammar("ru"))
+        assertEquals("[\"клип клип клип\",\"скс\",\"кс\",\"[unk]\"]", t.grammar("ru", sPrimankami = false))
+        assertEquals("[\"клип клип клип\",\"[unk]\"]", t.grammar("ru", sSeriej = false))   // слово клипа — «клип»
     }
 
-    @Test fun seriyuRvutDrugoeSlovoPauzaINeuverennost() {
-        val s = Triggers.SeriyaSlov(t)
-        assertNull(s.check("ru", listOf(w("скс", 0.1, 0.4), w("кс", 0.6, 0.9), w("клип", 1.0, 1.2), w("скс", 1.3, 1.5)), 0.0))
-        assertNull(s.check("ru", listOf(w("скс", 3.1, 3.3), w("кс", 3.4, 3.6)), 0.0))     // 1,6 с после «скс» — заново
-        assertNull(s.check("ru", listOf(w("скс", 5.2, 5.5)), 0.0))                     // 1,6 с тишины — заново
-        assertNull(s.check("ru", listOf(w("кс", 5.7, 5.9, 0.6)), 0.0))                 // неуверенное — рвёт
-        assertNull(s.check("ru", listOf(w("скс", 6.0, 6.2), w("[unk]", 6.3, 6.4), w("кс", 6.5, 6.7)), 0.0))
-        assertEquals(Triggers.SKS, s.check("ru", listOf(w("скс", 6.9, 7.1)), 0.0)?.action)   // [unk] не рвёт
-        assertNull(Triggers.SeriyaSlov(t).check("en", listOf(w("скс", 0.0, 0.1), w("скс", 0.2, 0.3), w("скс", 0.4, 0.5)), 0.0))
-        assertNull(Triggers.SeriyaSlov(Triggers(0.75, emptyMap())).check("ru", listOf(w("скс", 0.0, 0.1)), 0.0))
+    @Test fun egoKsKsKs() {                          // его живые итоги 26.11 (2.8.17 их не брал: ждал три слова)
+        assertEquals(Triggers.SKS, t.seriya("ru", listOf(w("скс", 0.79)))?.action)
+        assertEquals(0.835, t.seriya("ru", listOf(w("скс", 1.0), w("кс", 0.67)))!!.conf, 1e-9)
+        assertEquals(Triggers.SKS, t.seriya("ru", listOf(w("скс", 1.0))) ?.action)
+        assertEquals(Triggers.SKS, t.seriya("ru", listOf(w("[unk]", 0.4), w("скс", 0.9), w("кс", 0.9), w("кс", 0.8)))?.action)
+    }
+
+    @Test fun neKlip() {
+        assertNull(t.seriya("ru", listOf(w("кс"))))                     // одно «кс» — английские six, sucks, next
+        assertNull(t.seriya("ru", listOf(w("кс"), w("кс"))))
+        assertNull(t.seriya("ru", listOf(w("скс", 0.7))))               // неуверенно
+        assertNull(t.seriya("ru", listOf(w("скс", 0.9), w("кс", 0.5))))  // средняя 0,7
+        assertNull(t.seriya("ru", listOf(w("скс"), w("скажи"))))         // в фразе другое слово
+        assertNull(t.seriya("ru", listOf(w("скорее"))))
+        assertNull(t.seriya("ru", listOf(w("[unk]"))))
+        assertNull(t.seriya("ru", emptyList()))
+        assertNull(t.seriya("en", listOf(w("скс"))))
+        assertNull(Triggers(0.75, emptyMap()).seriya("ru", listOf(w("скс"))))
+    }
+
+    @Test fun primankiIVersiya() {
+        val d = Files.createTempDirectory("prim").toFile()
+        KlipSlovo.zanovo(); KlipSlovo.zagruzit(d)
+        assertTrue(KlipSlovo.primanki)
+        val v = KlipSlovo.versiya
+        assertTrue(KlipSlovo.postavitPrimanki("vykl"))
+        assertTrue(KlipSlovo.versiya > v)                                // уши пересоберут грамматику
+        assertFalse(KlipSlovo.postavitPrimanki("0")); assertFalse(KlipSlovo.postavitPrimanki("chush"))
+        assertEquals("sks 0", java.io.File(d, KlipSlovo.FAJL).readText())
+        assertTrue(KlipSlovo.postavit("klip"))
+        assertEquals("klip 0", java.io.File(d, KlipSlovo.FAJL).readText())
+        KlipSlovo.zanovo(); KlipSlovo.zagruzit(d)
+        assertEquals(KlipSlovo.KLIP, KlipSlovo.slovo); assertFalse(KlipSlovo.primanki)
+        assertTrue(KlipSlovo.postavitPrimanki("1"))
+        assertEquals("klip", java.io.File(d, KlipSlovo.FAJL).readText())
+        d.deleteRecursively()
     }
 
     @Test fun zhurnalUshej() {

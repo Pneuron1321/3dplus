@@ -18,7 +18,7 @@ package com.questclaude.bridge
  *   wake:chek    «чек чек плюс» — плёнка 7 кадров и 1,5 с речи после команды (CHEK_MS)
  *   wake:joy     «плюс джой» — как «плюс плюс», но фраза — Джою (2.8.14)
  *   klip         «клип клип клип» — клип (если слово клипа — «клип», KlipSlovo)
- *   klip:sks     «скскс скскс скскс» — клип (2.8.17, слово по умолчанию): серия, не фраза (Seriya)
+ *   klip:sks     «кс-кс-кс» — клип (2.8.17/2.8.18, слово по умолчанию): правило, не фраза (Seriya)
  *
  * commands — короткие команды в начале фразы после вызова («в ухо», «компакт»): ранний вызов
  * будит на «плюс плюс» + следующее слово, и команда уже часть фразы — исполняем её сразу,
@@ -39,42 +39,25 @@ class Triggers(
 ) {
 
     /**
-     * 2.8.17 (Александр 26.11: клип — словом «скскс»). Слова «скскс» нет в словаре модели ушей (Vosk small-ru):
-     * она слышит его как «скс» или «кс», а три раза подряд — то «скс скс скс» одним итогом, то «скс | скс кс»
-     * разными итогами (пауза между словами — конец итога). Поэтому не фраза, а серия: [skolko] уверенных слов из
-     * [slova] подряд (другие слова рвут серию, [unk] не считается), от конца одного до начала следующего — не
-     * больше [pauzaSek]. Пробы голосами (piper ru ×4, en, 26.11): «скскс» ×3 — 18 из 36; одно «скскс» — ни разу
-     * без ложных: «скажи», «скорее», «кис-кис», «six six» тоже дают «скс»/«кс кс»; при трёх — 3 ложных из 252
-     * («next next next», «sixty six sixty six» и одна длинная русская фраза).
+     * Клип одной фразой «кс-кс-кс» (2.8.18; 2.8.17 ждал три «скскс» подряд — Александр 26.11: «заморочено, сделай
+     * одно кс-кс-кс»). Таких слов нет в словаре модели ушей (Vosk small-ru): его живое «кс-кс-кс» 26.11 она услышала
+     * как «скс» (0,79), «скс кс» (1,00 0,67), «скс» (1,00) — одно-два слова, всегда со «скс». Правило [check]: итог
+     * грамматики целиком из [slova] ([unk] не считается), в нём есть уверенное слово из [glavnoe], средняя
+     * уверенность — от minConf. Отдельное «кс» — нет: так модель слышит английские «six», «sucks», «next», «fix».
+     * [primanki] — слова-приманки только для этого правила: без них одно «скс» давали «скажи», «скорее», «сколько»
+     * (пробы голосами piper ×4 + en, 26.11: ложных 27 из 252; с приманками — 3: «кис-кис-кис», «kiss kiss»).
+     * Приманки можно выключить без сборки (KlipSlovo.primanki), если начнут перебивать его «кс-кс-кс».
      */
-    class Seriya(val slova: Set<String>, val skolko: Int, val pauzaSek: Double, val action: String)
+    class Seriya(val slova: Set<String>, val glavnoe: Set<String>, val primanki: List<String>, val action: String)
 
-    /** Счёт серии по итогам грамматики, свой у каждого языка. */
-    class SeriyaSlov(private val t: Triggers) {
-        private val podryad = HashMap<String, Int>()
-        private val konec = HashMap<String, Double>()
-        private val hudshaya = HashMap<String, Double>()
-
-        fun reset() { podryad.clear(); konec.clear(); hudshaya.clear() }
-
-        /** Слова одного итога; [base] — секунды от начала прослушки до создания распознавателя (время слов
-         *  Vosk — от него). Серия набралась — Hit (уверенность — худшего слова серии), счёт заново. */
-        fun check(lang: String, words: List<Word>, base: Double): Hit? {
-            val s = t.seriya[lang] ?: return null
-            var hit: Hit? = null
-            for (w in words) {
-                if (w.word == "[unk]") continue
-                if (w.word !in s.slova || w.conf < t.minConf) { podryad[lang] = 0; continue }
-                val n0 = podryad[lang] ?: 0
-                val dalshe = n0 > 0 && base + w.start - (konec[lang] ?: Double.NEGATIVE_INFINITY) <= s.pauzaSek
-                val n = if (dalshe) n0 + 1 else 1
-                hudshaya[lang] = if (dalshe) minOf(hudshaya[lang] ?: 1.0, w.conf) else w.conf
-                konec[lang] = base + w.end
-                podryad[lang] = n
-                if (n >= s.skolko) { hit = Hit(s.action, lang, hudshaya[lang] ?: w.conf); podryad[lang] = 0 }
-            }
-            return hit
-        }
+    /** Итог грамматики [words] — «кс-кс-кс»? Hit со средней уверенностью; иначе null. */
+    fun seriya(lang: String, words: List<Word>): Hit? {
+        val s = seriya[lang] ?: return null
+        val w = words.filter { it.word != "[unk]" }
+        if (w.isEmpty() || w.any { it.word !in s.slova }) return null
+        if (w.none { it.word in s.glavnoe && it.conf >= minConf }) return null
+        val sr = w.sumOf { it.conf } / w.size
+        return if (sr >= minConf) Hit(s.action, lang, sr) else null
     }
 
     class Hit(val action: String, val lang: String, val conf: Double)
@@ -84,7 +67,7 @@ class Triggers(
         const val CHEK = "wake:chek"
         /** 2.8.14 (Александр 25.11): «плюс джой» — вызов Джоя, творческого режима Плюса: фраза уходит ему (how "joy"). */
         const val JOY = "wake:joy"
-        /** 2.8.17: «скскс» ×3 — клип (KlipSlovo решает, какое слово клипа сейчас). */
+        /** 2.8.17: «кс-кс-кс» — клип (KlipSlovo решает, какое слово клипа сейчас). */
         const val SKS = "klip:sks"
         const val CHEK_MS = 1500L
     }
@@ -134,8 +117,11 @@ class Triggers(
      * слов в любом порядке, поэтому без приманок «плюс минус» становилось «плюс плюс»,
      * а «please stop» — «plus stop» (проверка голосами на GitHub, 04.10).
      */
-    fun grammar(lang: String): String =
-        (phrases[lang].orEmpty().keys + commands[lang].orEmpty().keys + seriya[lang]?.slova.orEmpty() +
+    /** [sSeriej] — слова «кс-кс-кс» в грамматике (слово клипа sks), [sPrimankami] — и их приманки. */
+    fun grammar(lang: String, sSeriej: Boolean = true, sPrimankami: Boolean = true): String =
+        (phrases[lang].orEmpty().keys + commands[lang].orEmpty().keys +
+            (if (sSeriej) seriya[lang]?.slova.orEmpty() else emptySet()) +
+            (if (sSeriej && sPrimankami) seriya[lang]?.primanki.orEmpty() else emptyList()) +
             decoys[lang].orEmpty() + "[unk]").distinct()
             .joinToString(",", "[", "]") { FrameServer.json(it) }
 
